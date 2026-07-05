@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  pending_payment
+  queued
+  notified
+  otp_verified
+  printing
+  ready_for_pickup
+  completed
+  no_show
+  requeued
+  expired
+  cancelled
+}
+
+enum PrinterStatus {
+  online
+  offline
+  jammed
+}
+
+enum AgentStatus {
+  online
+  offline
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+  failed
+}
+
+enum JobMode {
+  instant
+  scheduled
+}
+
+enum ShopUserRole {
+  owner
+  staff
+}
+
+enum FileStatus {
+  uploaded
+  converting
+  ready
+  failed
+  deleted
+}
+
+model Shop {
+  id                String   @id @default(uuid())
+  slug              String   @unique
+  name              String
+  address           String
+  campusName        String?
+  autoAssignEnabled Boolean  @default(true)
+  /// RateCard JSON — paise-integer prices, validated by rateCardSchema
+  rateCard          Json
+  otpWindowMinutes  Int      @default(10)
+  createdAt         DateTime @default(now())
+
+  users    ShopUser[]
+  printers Printer[]
+  agents   Agent[]
+  jobs     Job[]
+  files    UploadedFile[]
+}
+
+model ShopUser {
+  id           String       @id @default(uuid())
+  shopId       String
+  shop         Shop         @relation(fields: [shopId], references: [id])
+  email        String       @unique
+  /// argon2id
+  passwordHash String
+  name         String
+  role         ShopUserRole @default(staff)
+  createdAt    DateTime     @default(now())
+}
+
+model Student {
+  id        String   @id @default(uuid())
+  /// E.164, e.g. +919876543210
+  phone     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  jobs  Job[]
+  files UploadedFile[]
+}
+
+/// Phone-login OTPs. Hashed (argon2 + pepper); plaintext never stored.
+model LoginOtp {
+  id         String    @id @default(uuid())
+  phone      String
+  otpHash    String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model Printer {
+  id                   String        @id @default(uuid())
+  shopId               String
+  shop                 Shop          @relation(fields: [shopId], references: [id])
+  label                String
+  paperSizesLoaded     String[]
+  colorSupport         Boolean       @default(false)
+  currentlyLoadedPaper String?
+  finishingOptions     String[]      @default([])
+  avgPagesPerMinute    Int           @default(15)
+  status               PrinterStatus @default(online)
+  createdAt            DateTime      @default(now())
+
+  jobs Job[]
+
+  @@index([shopId])
+}
+
+/// A shop PC running the print-agent software. Reaches >=1 printers.
+model Agent {
+  id                  String      @id @default(uuid())
+  shopId              String
+  shop                Shop        @relation(fields: [shopId], references: [id])
+  machineLabel        String
+  /// sha256 of the agent token; the token itself is shown once at creation
+  tokenHash           String      @unique
+  connectedPrinterIds String[]    @default([])
+  lastHeartbeatAt     DateTime?
+  status              AgentStatus @default(offline)
+  createdAt           DateTime    @default(now())
+
+  @@index([shopId])
+}
+
+model UploadedFile {
+  id           String     @id @default(uuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id])
+  shopId       String
+  shop         Shop       @relation(fields: [shopId], references: [id])
+  originalName String
+  /// storage keys are random UUIDs — never the user-supplied filename
+  originalKey  String
+  convertedKey String?
+  previewKey   String?
+  mimeType     String
+  sizeBytes    Int
+  /// page count of the converted, print-ready PDF
+  pages        Int?
+  status       FileStatus @default(uploaded)
+  error        String?
+  /// files auto-deleted after this time (privacy, printQ.md §14)
+  deleteAfter  DateTime?
+  createdAt    DateTime   @default(now())
+
+  jobs Job[]
+
+  @@index([studentId, createdAt])
+  @@index([status, deleteAfter])
+}
+
+model Job {
+  id                String        @id @default(uuid())
+  shopId            String
+  shop              Shop          @relation(fields: [shopId], references: [id])
+  studentId         String
+  student           Student       @relation(fields: [studentId], references: [id])
+  fileId            String
+  file              UploadedFile  @relation(fields: [fileId], references: [id])
+  assignedPrinterId String?
+  assignedPrinter   Printer?      @relation(fields: [assignedPrinterId], references: [id])
+
+  /// JobSpecs JSON (copies, paperSize, color, duplex, binding, pageRange)
+  specs          Json
+  /// pages per copy after page-range selection
+  pagesPerCopy   Int
+  /// PriceBreakdown JSON — computed server-side only
+  priceBreakdown Json
+  totalPaise     Int
+
+  paymentStatus   PaymentStatus @default(pending)
+  paymentProvider String?
+  /// provider order id (e.g. razorpay order_xxx)
+  paymentOrderId  String?       @unique
+  paymentId       String?
+
+  mode          JobMode   @default(instant)
+  scheduledTime DateTime?
+
+  status JobStatus @default(pending_payment)
+
+  /// release OTP — hashed, single-use, job-bound (printQ.md §11)
+  otpHash        String?
+  otpGeneratedAt DateTime?
+  otpExpiresAt   DateTime?
+  otpAttempts    Int       @default(0)
+
+  noShowCount Int       @default(0)
+  noShowAt    DateTime?
+
+  /// payment-confirmation time; queue order is (queuedAt asc)
+  queuedAt         DateTime?
+  claimedByAgentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events JobEvent[]
+
+  @@index([shopId, status])
+  @@index([assignedPrinterId, status, queuedAt])
+  @@index([studentId, createdAt])
+  @@index([status, otpExpiresAt])
+}
+
+/// Append-only audit log of every state transition.
+model JobEvent {
+  id         String   @id @default(uuid())
+  jobId      String
+  job        Job      @relation(fields: [jobId], references: [id])
+  fromStatus String
+  toStatus   String
+  event      String
+  /// student | shop | agent | system
+  actorType  String
+  actorId    String?
+  createdAt  DateTime @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+/// Webhook idempotency — one row per provider event, unique on provider event id.
+model PaymentEvent {
+  id              String   @id @default(uuid())
+  provider        String
+  providerEventId String   @unique
+  jobId           String?
+  payload         Json
+  createdAt       DateTime @default(now())
+}

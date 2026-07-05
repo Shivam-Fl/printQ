@@ -1,0 +1,133 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { PDFDocument } from 'pdf-lib';
+import sharp from 'sharp';
+import { prisma } from '../lib/prisma.js';
+import { logger } from '../lib/logger.js';
+import { env } from '../config/env.js';
+import { storage } from '../providers/storage/index.js';
+import { publishEvent } from '../realtime/events.js';
+
+const execFileAsync = promisify(execFile);
+
+/** A4 in PDF points (72 dpi): 210mm × 297mm. */
+const A4 = { width: 595.28, height: 841.89 } as const;
+
+async function pdfToNormalized(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
+  // load + re-save normalizes structure and rejects corrupt/encrypted files early
+  const doc = await PDFDocument.load(buffer, { ignoreEncryption: false });
+  const bytes = await doc.save();
+  return { pdf: Buffer.from(bytes), pages: doc.getPageCount() };
+}
+
+async function imageToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
+  // respect EXIF orientation, flatten to JPEG for predictable embedding
+  const jpeg = await sharp(buffer).rotate().jpeg({ quality: 90 }).toBuffer();
+  const doc = await PDFDocument.create();
+  const image = await doc.embedJpg(jpeg);
+
+  const page = doc.addPage([A4.width, A4.height]);
+  const margin = 24;
+  const maxW = A4.width - margin * 2;
+  const maxH = A4.height - margin * 2;
+  const scale = Math.min(maxW / image.width, maxH / image.height, 1);
+  const w = image.width * scale;
+  const h = image.height * scale;
+  page.drawImage(image, {
+    x: (A4.width - w) / 2,
+    y: (A4.height - h) / 2,
+    width: w,
+    height: h,
+  });
+  const bytes = await doc.save();
+  return { pdf: Buffer.from(bytes), pages: 1 };
+}
+
+async function docxToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
+  if (!env.SOFFICE_PATH) {
+    throw new Error(
+      'DOCX conversion is not available on this server (SOFFICE_PATH not configured)',
+    );
+  }
+  const dir = await mkdtemp(path.join(tmpdir(), 'printq-conv-'));
+  try {
+    const inputPath = path.join(dir, `${randomUUID()}.docx`);
+    await writeFile(inputPath, buffer);
+    await execFileAsync(
+      env.SOFFICE_PATH,
+      ['--headless', '--norestore', '--convert-to', 'pdf', '--outdir', dir, inputPath],
+      { timeout: 120_000 },
+    );
+    const outPath = inputPath.replace(/\.docx$/, '.pdf');
+    const pdfBuffer = await readFile(outPath);
+    return pdfToNormalized(pdfBuffer);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** BullMQ 'convert' handler: original upload → normalized print-ready PDF. */
+export async function convertFile(fileId: string): Promise<void> {
+  const file = await prisma.uploadedFile.findUnique({ where: { id: fileId } });
+  if (!file || file.status === 'deleted') return;
+
+  await prisma.uploadedFile.update({ where: { id: fileId }, data: { status: 'converting' } });
+  try {
+    const original = await storage.get(file.originalKey);
+
+    let result: { pdf: Buffer; pages: number };
+    if (file.mimeType === 'application/pdf') {
+      result = await pdfToNormalized(original);
+    } else if (file.mimeType === 'image/jpeg' || file.mimeType === 'image/png') {
+      result = await imageToPdf(original);
+    } else {
+      result = await docxToPdf(original);
+    }
+    if (result.pages < 1) throw new Error('Converted document has no pages');
+
+    const convertedKey = `conv/${randomUUID()}.pdf`;
+    await storage.put(convertedKey, result.pdf, 'application/pdf');
+
+    await prisma.uploadedFile.update({
+      where: { id: fileId },
+      data: { convertedKey, previewKey: convertedKey, pages: result.pages, status: 'ready', error: null },
+    });
+    publishEvent(`student:${file.studentId}`, 'file:ready', { fileId, pages: result.pages });
+    logger.info({ fileId, pages: result.pages }, 'file_converted');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Conversion failed';
+    await prisma.uploadedFile.update({
+      where: { id: fileId },
+      // sanitized, human-readable reason only — no stack traces to the client
+      data: { status: 'failed', error: message.slice(0, 300) },
+    });
+    publishEvent(`student:${file.studentId}`, 'file:failed', { fileId, error: message.slice(0, 300) });
+    logger.error({ err, fileId }, 'file_conversion_failed');
+    throw err; // let BullMQ retry transient failures
+  }
+}
+
+/** Hourly maintenance: delete stored files past their retention window (privacy, §14). */
+export async function cleanupExpiredFiles(): Promise<void> {
+  const expired = await prisma.uploadedFile.findMany({
+    where: { status: { not: 'deleted' }, deleteAfter: { lt: new Date() } },
+    take: 200,
+  });
+  for (const file of expired) {
+    try {
+      await storage.delete(file.originalKey);
+      if (file.convertedKey) await storage.delete(file.convertedKey);
+      await prisma.uploadedFile.update({
+        where: { id: file.id },
+        data: { status: 'deleted', convertedKey: null, previewKey: null },
+      });
+    } catch (err) {
+      logger.error({ err, fileId: file.id }, 'file_cleanup_failed');
+    }
+  }
+  if (expired.length > 0) logger.info({ count: expired.length }, 'files_cleaned');
+}

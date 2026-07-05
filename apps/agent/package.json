@@ -1,0 +1,22 @@
+{
+  "name": "@printq/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PrintQ shop print agent — receives dispatches and prints via the OS spooler",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pdf-to-printer": "^5.6.0",
+    "socket.io-client": "^4.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

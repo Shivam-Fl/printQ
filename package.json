@@ -1,0 +1,24 @@
+{
+  "name": "printq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PrintQ — campus print queue platform (student PWA, shop dashboard, API, print agent)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:worker": "npm run dev:worker -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:agent": "npm run dev -w apps/agent",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web && npm run build -w apps/agent",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

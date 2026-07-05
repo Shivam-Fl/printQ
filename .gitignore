@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment — never commit real secrets
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Prisma generated client lives in node_modules; keep migrations tracked
+apps/api/prisma/dev.db
+
+# Local file storage (dev driver) & uploads
+apps/api/storage/
+uploads/
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+
+# Test coverage
+coverage/

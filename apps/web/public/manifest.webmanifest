@@ -1,0 +1,10 @@
+{
+  "name": "PrintQ",
+  "short_name": "PrintQ",
+  "description": "Skip the print shop crowd — queue from your phone.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "icons": []
+}
