@@ -43,6 +43,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [printers, setPrinters] = useState<Printer[]>([]);
+  const [shopName, setShopName] = useState('');
   const [otp, setOtp] = useState('');
   const [manual, setManual] = useState<ManualAssign | null>(null);
   const [manualPrinter, setManualPrinter] = useState('');
@@ -51,12 +52,14 @@ export default function Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [queueRes, printersRes] = await Promise.all([
+      const [queueRes, printersRes, meRes] = await Promise.all([
         api<{ jobs: QueueJob[] }>('/api/shop/queue', { role: 'shop' }),
         api<{ printers: Printer[] }>('/api/shop/printers', { role: 'shop' }),
+        api<{ shop: { name: string } }>('/api/shop/me', { role: 'shop' }),
       ]);
       setJobs(queueRes.jobs);
       setPrinters(printersRes.printers);
+      setShopName(meRes.shop.name);
     } catch (err) {
       if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
       else setError(err instanceof Error ? err.message : 'Failed to load');
@@ -158,7 +161,7 @@ export default function Dashboard() {
   return (
     <div className="page wide">
       <Topbar
-        tag="counter"
+        tag={shopName || 'counter'}
         right={
           <>
             <Link to="/dashboard/printers">Printers</Link>

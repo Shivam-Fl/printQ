@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, getToken, rupees } from '../../api.js';
+import { api, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
@@ -27,7 +27,10 @@ export default function ShopLanding() {
 
   useEffect(() => {
     api<{ shop: PublicShop }>(`/api/public/shops/${slug}`)
-      .then((r) => setShop(r.shop))
+      .then((r) => {
+        setShop(r.shop);
+        if (getToken('student')) rememberShop(slug);
+      })
       .catch(() => setError('This shop link is not valid.'));
   }, [slug]);
 
@@ -109,7 +112,7 @@ export default function ShopLanding() {
 
   return (
     <div className="page">
-      <Topbar right={loggedIn ? <Link to="/jobs">My jobs</Link> : undefined} />
+      <Topbar right={loggedIn ? <Link to="/home">Home</Link> : undefined} />
       <h1>{shop.name}</h1>
       <p className="dim">
         {shop.address}

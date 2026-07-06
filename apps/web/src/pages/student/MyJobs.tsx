@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { api, getToken, rupees } from '../../api.js';
+import { Link, useNavigate } from 'react-router-dom';
+import { ago, api, getToken, rupees } from '../../api.js';
+import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 
 interface JobRow {
@@ -9,75 +11,87 @@ interface JobRow {
   mode: 'instant' | 'scheduled';
   scheduledTime: string | null;
   totalPaise: number;
+  pagesPerCopy: number;
   createdAt: string;
+  specs: SpecsLite;
   shop: { name: string; slug: string };
   file: { originalName: string };
 }
 
-const TONE: Record<string, string> = {
-  queued: 'blue',
-  notified: 'yellow',
-  printing: 'blue',
-  otp_verified: 'blue',
-  ready_for_pickup: 'green',
-  completed: 'green',
-  no_show: 'red',
-  expired: 'red',
-  cancelled: 'red',
-  pending_payment: 'yellow',
-};
+function JobCard({ job }: { job: JobRow }) {
+  const m = statusMeta(job.status);
+  return (
+    <Link to={`/jobs/${job.id}`} className="card" style={{ display: 'block', color: 'inherit', padding: 14 }}>
+      <div className="row between" style={{ alignItems: 'flex-start' }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {job.file.originalName}
+          </div>
+          <div className="dim" style={{ marginTop: 2 }}>{specsText(job.specs, job.pagesPerCopy)}</div>
+          <div className="dim" style={{ marginTop: 2 }}>
+            {job.shop.name}
+            {job.mode === 'scheduled' && job.scheduledTime
+              ? ` · slot ${new Date(job.scheduledTime).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+              : ` · ${ago(job.createdAt)}`}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <span className={`stamp ${m.tone}`}>{m.label}</span>
+          <div className="dim mono" style={{ marginTop: 6 }}>{rupees(job.totalPaise)}</div>
+        </div>
+      </div>
+    </Link>
+  );
+}
 
 export default function MyJobs() {
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobRow[] | null>(null);
   const [error, setError] = useState('');
-  const loggedIn = Boolean(getToken('student'));
 
   useEffect(() => {
-    if (!loggedIn) return;
+    if (!getToken('student')) {
+      navigate('/login', { replace: true });
+      return;
+    }
     api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student' })
       .then((r) => setJobs(r.jobs))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
-  }, [loggedIn]);
+  }, [navigate]);
+
+  const active = jobs?.filter((j) => statusMeta(j.status).active) ?? [];
+  const history = jobs?.filter((j) => !statusMeta(j.status).active) ?? [];
 
   return (
-    <div className="page">
-      <Topbar tag="skip the line" />
-      <h1>My jobs</h1>
-      {!loggedIn && (
-        <div className="card">
-          <p style={{ marginTop: 0 }}>Scan your shop's QR code (or open its link) to send a print.</p>
-          <p className="dim" style={{ marginBottom: 0 }}>
-            Trying it out? <Link to="/s/demo">Open the demo shop →</Link>
-          </p>
-        </div>
-      )}
-      {error && <p className="error">{error}</p>}
-      {jobs?.length === 0 && (
-        <div className="card">
-          <p style={{ margin: 0 }}>Nothing here yet — open your shop's link to send your first print.</p>
-        </div>
-      )}
-      {jobs?.map((job) => (
-        <Link key={job.id} to={`/jobs/${job.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-          <div className="card row between" style={{ padding: 14 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {job.file.originalName}
-              </div>
-              <div className="dim">
-                {job.shop.name}
-                {job.mode === 'scheduled' && job.scheduledTime
-                  ? ` · slot ${new Date(job.scheduledTime).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
-                  : ` · ${new Date(job.createdAt).toLocaleDateString()}`}
-              </div>
-            </div>
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <span className={`stamp ${TONE[job.status] ?? 'blue'}`}>{job.status.replace(/_/g, ' ')}</span>
-              <div className="dim mono">{rupees(job.totalPaise)}</div>
-            </div>
+    <StudentShell>
+      <div className="page">
+        <Topbar right={<Link to="/profile">Profile</Link>} />
+        <h1>My jobs</h1>
+        {error && <p className="error">{error}</p>}
+
+        {jobs && jobs.length === 0 && (
+          <div className="card">
+            <p style={{ margin: 0 }}>No prints yet.</p>
+            <p className="dim" style={{ marginBottom: 0 }}>
+              Tap <strong>Print</strong> below, or <Link to="/s/demo">try the demo shop</Link>.
+            </p>
           </div>
-        </Link>
-      ))}
-    </div>
+        )}
+
+        {active.length > 0 && (
+          <>
+            <div className="section-head"><h2>Active</h2></div>
+            <div className="stack">{active.map((j) => <JobCard key={j.id} job={j} />)}</div>
+          </>
+        )}
+
+        {history.length > 0 && (
+          <>
+            <div className="section-head"><h2>History</h2></div>
+            <div className="stack">{history.map((j) => <JobCard key={j.id} job={j} />)}</div>
+          </>
+        )}
+      </div>
+    </StudentShell>
   );
 }

@@ -55,3 +55,21 @@ export async function api<T>(
 }
 
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
+
+/** Remember the last shop the student ordered from, so "New print" has a target. */
+export function rememberShop(slug: string): void {
+  localStorage.setItem('printq:lastShop', slug);
+}
+export function lastShopSlug(): string | null {
+  return localStorage.getItem('printq:lastShop');
+}
+
+/** Relative time like "2h ago", "just now". */
+export function ago(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  const d = Math.floor(s / 86400);
+  return d < 7 ? `${d}d ago` : new Date(iso).toLocaleDateString();
+}

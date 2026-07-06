@@ -1,5 +1,9 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import Toasts from './components/Toasts.js';
+import Welcome from './pages/student/Welcome.js';
+import Login from './pages/student/Login.js';
+import Home from './pages/student/Home.js';
+import Profile from './pages/student/Profile.js';
 import ShopLanding from './pages/student/ShopLanding.js';
 import NewJob from './pages/student/NewJob.js';
 import JobStatus from './pages/student/JobStatus.js';
@@ -14,11 +18,16 @@ export default function App() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<Navigate to="/jobs" replace />} />
-        <Route path="/s/:slug" element={<ShopLanding />} />
-        <Route path="/s/:slug/file/:fileId" element={<NewJob />} />
+        {/* student */}
+        <Route path="/" element={<Welcome />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/home" element={<Home />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/jobs" element={<MyJobs />} />
         <Route path="/jobs/:id" element={<JobStatus />} />
+        <Route path="/s/:slug" element={<ShopLanding />} />
+        <Route path="/s/:slug/file/:fileId" element={<NewJob />} />
+        {/* shop */}
         <Route path="/dashboard/login" element={<ShopLogin />} />
         <Route path="/dashboard/register" element={<ShopRegister />} />
         <Route path="/dashboard" element={<Dashboard />} />
