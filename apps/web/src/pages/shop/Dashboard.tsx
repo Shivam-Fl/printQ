@@ -2,11 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, clearToken, getToken, rupees } from '../../api.js';
 import { getShopSocket, resetSockets } from '../../socket.js';
+import Topbar from '../../components/Topbar.js';
 
 interface QueueJob {
   id: string;
   status: string;
-  specs: { copies: number; paperSize: string; color: boolean; duplex: boolean; binding: string | null; pageRange: string | null };
+  mode: 'instant' | 'scheduled';
+  scheduledTime: string | null;
+  specs: {
+    copies: number;
+    paperSize: string;
+    color: boolean;
+    duplex: boolean;
+    binding: string | null;
+    pageRange: string | null;
+  };
   pagesPerCopy: number;
   totalPaise: number;
   assignedPrinterId: string | null;
@@ -25,6 +35,9 @@ interface ManualAssign {
   jobId?: string;
   eligiblePrinters: { printerId: string; estimatedWaitMinutes: number }[];
 }
+
+const slotLabel = (iso: string) =>
+  new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -62,28 +75,28 @@ export default function Dashboard() {
     const socket = getShopSocket();
     if (!socket) return;
     const onAny = () => void refresh();
+    const onPrintFailed = (p: { jobId: string; reason: string }) => {
+      setError(`Print failed (${p.reason}). Check the printer, then enter the OTP again.`);
+      void refresh();
+    };
+    const onNoAgent = () => {
+      setError('No print agent is running for that printer — start the agent on the shop PC.');
+    };
     socket.on('queue:update', onAny);
     socket.on('queue:job_printing', onAny);
     socket.on('queue:job_ready', onAny);
     socket.on('queue:manual_assign_needed', onAny);
-    const onPrintFailed = (p: { jobId: string; reason: string }) => {
-      setError(`Print failed for job ${p.jobId.slice(0, 8)}: ${p.reason}. Enter the OTP again or check the printer.`);
-      void refresh();
-    };
-    const onNoAgent = (p: { printerId: string }) => {
-      setError(`No print agent is running for printer ${p.printerId.slice(0, 8)} — start the agent PC.`);
-    };
+    socket.on('agent:offline', onAny);
     socket.on('queue:print_failed', onPrintFailed);
     socket.on('queue:no_agent', onNoAgent);
-    socket.on('agent:offline', onAny);
     return () => {
       socket.off('queue:update', onAny);
       socket.off('queue:job_printing', onAny);
       socket.off('queue:job_ready', onAny);
       socket.off('queue:manual_assign_needed', onAny);
+      socket.off('agent:offline', onAny);
       socket.off('queue:print_failed', onPrintFailed);
       socket.off('queue:no_agent', onNoAgent);
-      socket.off('agent:offline', onAny);
     };
   }, [refresh]);
 
@@ -106,7 +119,7 @@ export default function Dashboard() {
         setManualPrinter(res.eligiblePrinters?.[0]?.printerId ?? '');
         return;
       }
-      setMessage('Print released ✓');
+      setMessage('Sent to printer ✓');
       setOtp('');
       setManual(null);
       await refresh();
@@ -128,51 +141,76 @@ export default function Dashboard() {
   const printerLabel = (id: string | null) =>
     id ? (printers.find((p) => p.id === id)?.label ?? id.slice(0, 8)) : '—';
 
-  const waiting = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
+  const specsText = (j: QueueJob) =>
+    `${j.specs.copies}× ${j.specs.paperSize} ${j.specs.color ? 'colour' : 'B/W'}` +
+    `${j.specs.duplex ? ' · 2-side' : ''}` +
+    `${j.specs.binding ? ` · ${j.specs.binding.replace('_', ' ')}` : ''}` +
+    `${j.specs.pageRange ? ` · p${j.specs.pageRange}` : ''} · ${j.pagesPerCopy}pp`;
+
+  const now = Date.now();
+  const isPendingSlot = (j: QueueJob) =>
+    j.mode === 'scheduled' && j.scheduledTime && new Date(j.scheduledTime).getTime() - 10 * 60_000 > now;
+
+  const waiting = jobs.filter((j) => (j.status === 'queued' && !isPendingSlot(j)) || j.status === 'notified');
+  const slots = jobs.filter((j) => j.status === 'queued' && isPendingSlot(j));
   const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'ready_for_pickup'].includes(j.status));
 
   return (
     <div className="page wide">
-      <div className="topbar">
-        <span className="brand">PrintQ · Dashboard</span>
-        <div className="row">
-          <Link to="/dashboard/printers">Printers</Link>
-          <Link to="/dashboard/agents">Agents</Link>
-          <button
-            className="ghost small"
-            onClick={() => {
-              clearToken('shop');
-              resetSockets();
-              navigate('/dashboard/login');
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
+      <Topbar
+        tag="counter"
+        right={
+          <>
+            <Link to="/dashboard/printers">Printers</Link>
+            <Link to="/dashboard/agents">Agents</Link>
+            <button
+              className="ghost small"
+              onClick={() => {
+                clearToken('shop');
+                resetSockets();
+                navigate('/dashboard/login');
+              }}
+            >
+              Sign out
+            </button>
+          </>
+        }
+      />
 
       <div className="card stack">
-        <h2 style={{ margin: 0 }}>Release a print</h2>
+        <div>
+          <h2 style={{ margin: '0 0 2px' }}>Release a print</h2>
+          <p className="dim" style={{ margin: 0 }}>
+            Type the student's code — the job prints itself.
+          </p>
+        </div>
         <div className="row">
           <input
+            className="big-otp-input"
             type="text"
             inputMode="numeric"
             maxLength={6}
-            placeholder="Student's OTP"
+            placeholder="······"
+            aria-label="Student's OTP"
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
             onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && void release()}
-            style={{ maxWidth: 220, fontSize: '1.3rem', letterSpacing: '0.2em' }}
+            style={{ maxWidth: 240 }}
           />
           <button disabled={otp.length !== 6} onClick={() => release()}>
             Verify &amp; print
           </button>
+          {message && <span className="stamp green">{message}</span>}
         </div>
         {manual && (
-          <div className="stack" style={{ borderTop: '1px solid #2a333d', paddingTop: 10 }}>
-            <span className="badge warn">Pick a printer for this job</span>
+          <div className="stack" style={{ borderTop: '2px dashed var(--rule)', paddingTop: 12 }}>
+            <span className="stamp yellow">pick a printer for this job</span>
             <div className="row">
-              <select value={manualPrinter} onChange={(e) => setManualPrinter(e.target.value)} style={{ maxWidth: 320 }}>
+              <select
+                value={manualPrinter}
+                onChange={(e) => setManualPrinter(e.target.value)}
+                style={{ maxWidth: 340 }}
+              >
                 {manual.eligiblePrinters.length === 0 && <option value="">No eligible printer online!</option>}
                 {manual.eligiblePrinters.map((p, i) => (
                   <option key={p.printerId} value={p.printerId}>
@@ -180,17 +218,20 @@ export default function Dashboard() {
                   </option>
                 ))}
               </select>
-              <button disabled={!manualPrinter} onClick={() => release(manualPrinter)}>Confirm &amp; print</button>
-              <button className="ghost" onClick={() => setManual(null)}>Cancel</button>
+              <button disabled={!manualPrinter} onClick={() => release(manualPrinter)}>
+                Confirm &amp; print
+              </button>
+              <button className="ghost" onClick={() => setManual(null)}>
+                Cancel
+              </button>
             </div>
           </div>
         )}
-        {message && <span className="badge ok">{message}</span>}
         {error && <div className="error">{error}</div>}
       </div>
 
       <h2>Waiting ({waiting.length})</h2>
-      <div className="card" style={{ overflowX: 'auto', padding: 8 }}>
+      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
         <table>
           <thead>
             <tr>
@@ -204,25 +245,31 @@ export default function Dashboard() {
             {waiting.map((j) => (
               <tr key={j.id}>
                 <td>{j.student.name ?? j.student.phoneMasked}</td>
-                <td>{j.file.originalName}</td>
-                <td>
-                  {j.specs.copies}× {j.specs.paperSize} {j.specs.color ? 'colour' : 'B/W'}
-                  {j.specs.duplex ? ' · duplex' : ''}
-                  {j.specs.binding ? ` · ${j.specs.binding.replace('_', ' ')}` : ''}
-                  {j.specs.pageRange ? ` · p${j.specs.pageRange}` : ''} · {j.pagesPerCopy}pp
+                <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {j.file.originalName}
                 </td>
-                <td>{printerLabel(j.assignedPrinterId)}{!j.assignedPrinterId && <span className="badge warn">assign!</span>}</td>
+                <td>{specsText(j)}</td>
                 <td>
-                  <span className={`badge ${j.status === 'notified' ? 'ok' : 'accent'}`}>
-                    {j.status === 'notified' ? 'OTP sent' : 'queued'}
+                  {printerLabel(j.assignedPrinterId)}{' '}
+                  {!j.assignedPrinterId && <span className="stamp yellow">assign</span>}
+                </td>
+                <td>
+                  <span className={`stamp ${j.status === 'notified' ? 'yellow' : 'blue'}`}>
+                    {j.status === 'notified' ? 'otp sent' : j.mode === 'scheduled' ? 'slot due' : 'queued'}
                   </span>
                 </td>
-                <td>{rupees(j.totalPaise)}</td>
+                <td className="mono">{rupees(j.totalPaise)}</td>
                 <td>
-                  {j.status === 'notified' && (
-                    <button className="ghost small" onClick={() => jobAction(j.id, 'no-show')}>No-show</button>
-                  )}
-                  {!j.assignedPrinterId && <AssignButton jobId={j.id} printers={printers} onDone={refresh} />}
+                  <span className="row" style={{ flexWrap: 'nowrap' }}>
+                    {j.status === 'notified' && (
+                      <button className="ghost small" onClick={() => jobAction(j.id, 'no-show')}>
+                        No-show
+                      </button>
+                    )}
+                    {!j.assignedPrinterId && (
+                      <AssignButton jobId={j.id} printers={printers} onDone={refresh} />
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -230,8 +277,37 @@ export default function Dashboard() {
         </table>
       </div>
 
+      {slots.length > 0 && (
+        <>
+          <h2>Booked slots ({slots.length})</h2>
+          <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
+            <table>
+              <thead>
+                <tr><th>Slot</th><th>Student</th><th>File</th><th>Specs</th><th>Printer</th></tr>
+              </thead>
+              <tbody>
+                {slots
+                  .slice()
+                  .sort((a, b) => new Date(a.scheduledTime!).getTime() - new Date(b.scheduledTime!).getTime())
+                  .map((j) => (
+                    <tr key={j.id}>
+                      <td className="slot">{slotLabel(j.scheduledTime!)}</td>
+                      <td>{j.student.name ?? j.student.phoneMasked}</td>
+                      <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {j.file.originalName}
+                      </td>
+                      <td>{specsText(j)}</td>
+                      <td>{printerLabel(j.assignedPrinterId)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       <h2>Printing &amp; pickup ({inFlight.length})</h2>
-      <div className="card" style={{ overflowX: 'auto', padding: 8 }}>
+      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
         <table>
           <thead>
             <tr><th>Student</th><th>File</th><th>Printer</th><th>Status</th><th></th></tr>
@@ -243,12 +319,20 @@ export default function Dashboard() {
             {inFlight.map((j) => (
               <tr key={j.id}>
                 <td>{j.student.name ?? j.student.phoneMasked}</td>
-                <td>{j.file.originalName}</td>
+                <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {j.file.originalName}
+                </td>
                 <td>{printerLabel(j.assignedPrinterId)}</td>
-                <td><span className="badge accent">{j.status.replace(/_/g, ' ')}</span></td>
+                <td>
+                  <span className={`stamp ${j.status === 'ready_for_pickup' ? 'green' : 'blue'}`}>
+                    {j.status.replace(/_/g, ' ')}
+                  </span>
+                </td>
                 <td>
                   {j.status === 'ready_for_pickup' && (
-                    <button className="small" onClick={() => jobAction(j.id, 'handover')}>Handed over</button>
+                    <button className="small" onClick={() => jobAction(j.id, 'handover')}>
+                      Handed over
+                    </button>
                   )}
                 </td>
               </tr>
@@ -260,7 +344,15 @@ export default function Dashboard() {
   );
 }
 
-function AssignButton({ jobId, printers, onDone }: { jobId: string; printers: Printer[]; onDone: () => void }) {
+function AssignButton({
+  jobId,
+  printers,
+  onDone,
+}: {
+  jobId: string;
+  printers: Printer[];
+  onDone: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState('');
 
@@ -275,17 +367,27 @@ function AssignButton({ jobId, printers, onDone }: { jobId: string; printers: Pr
   }
 
   if (!open) {
-    return <button className="small" onClick={() => setOpen(true)}>Assign</button>;
+    return (
+      <button className="small" onClick={() => setOpen(true)}>
+        Assign
+      </button>
+    );
   }
   return (
-    <span className="row">
+    <span className="row" style={{ flexWrap: 'nowrap' }}>
       <select value={choice} onChange={(e) => setChoice(e.target.value)}>
         <option value="">Pick…</option>
-        {printers.filter((p) => p.status === 'online').map((p) => (
-          <option key={p.id} value={p.id}>{p.label}</option>
-        ))}
+        {printers
+          .filter((p) => p.status === 'online')
+          .map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
       </select>
-      <button className="small" disabled={!choice} onClick={assign}>OK</button>
+      <button className="small" disabled={!choice} onClick={assign}>
+        OK
+      </button>
     </span>
   );
 }

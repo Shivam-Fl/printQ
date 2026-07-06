@@ -18,13 +18,15 @@ This file records the decisions so future sessions (human or AI) don't undo them
 
 ## OTPs
 
-- 6 digits from `crypto.randomInt`, argon2id-hashed with a server-side pepper
-  (`OTP_PEPPER`) — plaintext is never persisted.
-- Release OTPs: single-use, bound to one job, ~10 min expiry
-  (`OTP_WINDOW_MINUTES`), invalidated on no-show. Login OTPs: 5 min expiry,
-  5 attempts, single-use.
-- OTP delivery: WhatsApp (prod) and the student's own authenticated socket room —
-  same trust boundary.
+- 6 digits from `crypto.randomInt`. Login OTPs are argon2id-hashed with a server-side
+  pepper (`OTP_PEPPER`), 5 min expiry, 5 attempts, single-use.
+- Release OTPs: single-use, bound to one job, ~10 min expiry (`OTP_WINDOW_MINUTES`),
+  invalidated on no-show. Verification runs against the argon2 hash; the plaintext is
+  additionally kept **only while the job is `notified`** so the owning student's app
+  can display it (their own authenticated channel — deliberate product decision), and
+  is nulled on release/no-show/expiry.
+- Delivery is in-app: the student's authenticated socket room + Web Push to their own
+  subscribed devices. No third-party messaging vendor sees OTPs.
 
 ## Payments
 

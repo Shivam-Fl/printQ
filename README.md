@@ -32,10 +32,30 @@ npm run dev:web                         # web on :5173
 
 Seeded logins:
 - Student page: `http://localhost:5173/s/demo` (any Indian mobile number; the login
-  OTP prints in the **API console** while `NOTIFICATION_PROVIDER=console`)
+  code prints in the **API console** — look for `loginCode`)
 - Dashboard: `http://localhost:5173/dashboard` → `owner@demo.printq.local` / `demo-owner-pass-1`
+  (or register a new shop at `/dashboard/register`)
 - Payments default to `PAYMENT_PROVIDER=mock` — the "Pay & join queue" button simulates
   a captured payment via a dev-only endpoint that is hard-disabled when Razorpay is configured.
+
+### Notifications (no WhatsApp needed)
+
+Everything is in-app first:
+- The **release OTP shows inside the app** on the job page (and via socket the moment
+  it's your turn) — the student just shows their phone at the counter.
+- An **"almost your turn" alert** fires when ≤ `NEAR_FRONT_THRESHOLD` (default 5)
+  people are ahead.
+- **Web Push** reaches the installed PWA even when closed. Enabled out of the box in
+  dev (VAPID keys in `.env`); for a fresh setup run `npx web-push generate-vapid-keys`.
+- Login codes print to the API console in dev; wire an SMS provider into
+  `sendLoginOtp()` (one function) for launch.
+
+### Scheduled slots (Phase 2)
+
+Students can pick **"Print now"** or **"Pick a slot"** (15 min – 72 h ahead). A booked
+slot job waits invisibly, becomes *due* `SCHEDULE_LEAD_MINUTES` (default 10) before its
+time, and then alternates fairly with walk-in jobs (~50/50) so neither group is starved.
+The dashboard shows booked slots in their own section.
 
 ### Print agent (on the shop PC)
 
@@ -73,15 +93,17 @@ webhook (or the mock endpoint in dev) — never from the client redirect.
 External accounts you must set up (see PLAN.md §9 for details):
 
 1. **Hosting** — any Node host + managed Postgres + Redis (Railway / Fly.io / VPS).
-   Build: `npm run build`, run `node apps/api/dist/server.js` (workers run in-process;
-   set `RUN_WORKERS=false` and run `dist/worker.js` separately to scale out).
-   Apply migrations with `npm run db:deploy -w apps/api`.
+   Build: `npm run build`, run `node apps/api/dist/server.js` — in production it also
+   **serves the built web app** from the same origin (PWA + push + API on one domain).
+   Workers run in-process; set `RUN_WORKERS=false` and run `dist/worker.js` separately
+   to scale out. Apply migrations with `npm run db:deploy -w apps/api`.
 2. **Razorpay** — set `PAYMENT_PROVIDER=razorpay` + keys + webhook secret; point the
    webhook at `POST /api/payments/webhook/razorpay` (event: `payment.captured`).
-3. **WhatsApp** — Meta Cloud API number + access token; `NOTIFICATION_PROVIDER=whatsapp`.
+3. **SMS for login codes** — any provider (MSG91 etc.) wired into `sendLoginOtp()`.
+   All other notifications are in-app + Web Push, no messaging vendor needed.
 4. **Object storage** — `STORAGE_DRIVER=s3` + any S3-compatible bucket (R2/S3/MinIO).
-5. **TLS + CORS** — terminate TLS at your proxy; set `CORS_ORIGINS` to your web origin(s)
-   and `PUBLIC_WEB_URL` to the deployed web URL.
+5. **TLS + CORS** — HTTPS is required for PWA install + push; set `CORS_ORIGINS` and
+   `PUBLIC_WEB_URL` to the deployed URL.
 
 ## Tests
 
@@ -90,10 +112,11 @@ npm test          # state machine, pricing, page ranges, printer assignment, OTP
 npm run typecheck # all four workspaces
 ```
 
-## Known Phase 1 limitations (deliberate, per spec §13)
+## Remaining known limitations
 
-- Instant queue only — scheduled slots + reserved capacity are Phase 2.
-- CAD/DWG conversion not included (Phase 2, likely via a conversion API).
+- CAD/DWG conversion not included (needs a third-party conversion API — pick one when
+  a pilot shop actually asks for it).
 - Converted-PDF paper-size vs. selected-size mismatch is not blocked at checkout;
-  printers scale-to-fit. Strict validation is a Phase 2 nicety.
-- Shop onboarding is via seed script / DB — a self-serve signup UI is Phase 2+.
+  printers scale-to-fit.
+- iOS web push requires the PWA to be installed (Add to Home Screen) — an Android-first
+  pilot is unaffected.

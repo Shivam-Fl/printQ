@@ -2,46 +2,56 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
+import { enablePush, pushPermission } from '../../push.js';
+import Topbar from '../../components/Topbar.js';
 
 interface JobDetail {
   id: string;
   status: string;
+  mode: 'instant' | 'scheduled';
+  scheduledTime: string | null;
   totalPaise: number;
+  otpCode: string | null;
   otpExpiresAt: string | null;
   noShowCount: number;
   shop: { name: string; address: string; slug: string };
   file: { originalName: string };
 }
 
-const STATUS_LABEL: Record<string, { text: string; tone: string }> = {
-  pending_payment: { text: 'Awaiting payment', tone: 'warn' },
-  queued: { text: 'In queue', tone: 'accent' },
-  notified: { text: 'Your turn — go to the counter!', tone: 'ok' },
-  otp_verified: { text: 'Releasing to printer…', tone: 'accent' },
-  printing: { text: 'Printing…', tone: 'accent' },
-  ready_for_pickup: { text: 'Ready — collect your print', tone: 'ok' },
-  completed: { text: 'Completed', tone: 'ok' },
-  no_show: { text: 'Missed your turn', tone: 'danger' },
-  expired: { text: 'Expired', tone: 'danger' },
-  cancelled: { text: 'Cancelled', tone: 'danger' },
+const STAMP: Record<string, { text: string; tone: string }> = {
+  pending_payment: { text: 'awaiting payment', tone: 'yellow' },
+  queued: { text: 'in queue', tone: 'blue' },
+  notified: { text: 'your turn', tone: 'yellow' },
+  otp_verified: { text: 'sending to printer', tone: 'blue' },
+  printing: { text: 'printing', tone: 'blue' },
+  ready_for_pickup: { text: 'ready', tone: 'green' },
+  completed: { text: 'completed', tone: 'green' },
+  no_show: { text: 'missed turn', tone: 'red' },
+  expired: { text: 'expired', tone: 'red' },
+  cancelled: { text: 'cancelled', tone: 'red' },
 };
+
+const slotLabel = (iso: string) =>
+  new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 export default function JobStatus() {
   const { id = '' } = useParams();
   const [job, setJob] = useState<JobDetail | null>(null);
   const [position, setPosition] = useState<number | null>(null);
   const [eta, setEta] = useState<number | null>(null);
-  const [otp, setOtp] = useState<string | null>(() => localStorage.getItem(`printq:otp:${id}`));
+  const [otp, setOtp] = useState<string | null>(null);
   const [canRequeue, setCanRequeue] = useState(false);
+  const [pushOffered, setPushOffered] = useState(pushPermission() !== 'default');
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
       const res = await api<{ job: JobDetail }>(`/api/jobs/${id}`, { role: 'student' });
       setJob(res.job);
+      if (res.job.otpCode) setOtp(res.job.otpCode);
       setCanRequeue(res.job.status === 'no_show' && res.job.noShowCount <= 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load job');
+      setError(err instanceof Error ? err.message : 'Could not load this job');
     }
   }, [id]);
 
@@ -52,7 +62,13 @@ export default function JobStatus() {
   useEffect(() => {
     const socket = getStudentSocket();
     if (!socket) return;
-    const onUpdate = (p: { jobId: string; status?: string; position?: number | null; etaMinutes?: number | null; canRequeue?: boolean }) => {
+    const onUpdate = (p: {
+      jobId: string;
+      status?: string;
+      position?: number | null;
+      etaMinutes?: number | null;
+      canRequeue?: boolean;
+    }) => {
       if (p.jobId !== id) return;
       if (p.position !== undefined) setPosition(p.position);
       if (p.etaMinutes !== undefined) setEta(p.etaMinutes);
@@ -62,7 +78,6 @@ export default function JobStatus() {
     const onYourTurn = (p: { jobId: string; otp: string }) => {
       if (p.jobId !== id) return;
       setOtp(p.otp);
-      localStorage.setItem(`printq:otp:${id}`, p.otp);
       void refresh();
     };
     socket.on('job:update', onUpdate);
@@ -72,13 +87,6 @@ export default function JobStatus() {
       socket.off('job:your_turn', onYourTurn);
     };
   }, [id, refresh]);
-
-  // OTP is single-use and job-bound; drop it once the job moves past release
-  useEffect(() => {
-    if (job && ['otp_verified', 'printing', 'ready_for_pickup', 'completed', 'expired', 'cancelled'].includes(job.status)) {
-      localStorage.removeItem(`printq:otp:${id}`);
-    }
-  }, [job, id]);
 
   async function requeue() {
     try {
@@ -102,70 +110,108 @@ export default function JobStatus() {
   if (!job) {
     return (
       <div className="page">
+        <Topbar />
         <p className="dim">Loading…</p>
         {error && <p className="error">{error}</p>}
       </div>
     );
   }
 
-  const label = STATUS_LABEL[job.status] ?? { text: job.status, tone: 'accent' };
+  const stamp = STAMP[job.status] ?? { text: job.status, tone: 'blue' };
+  const pendingSlot =
+    job.mode === 'scheduled' &&
+    job.status === 'queued' &&
+    job.scheduledTime &&
+    position === null;
 
   return (
     <div className="page">
-      <div className="topbar">
-        <span className="brand">PrintQ</span>
-        <Link to="/jobs">My jobs</Link>
+      <Topbar right={<Link to="/jobs">My jobs</Link>} />
+      <h1 style={{ wordBreak: 'break-word' }}>{job.file.originalName}</h1>
+      <div className="row">
+        <span className={`stamp ${stamp.tone}`}>{stamp.text}</span>
+        <span className="dim">
+          {job.shop.name} · <span className="mono">{rupees(job.totalPaise)}</span>
+        </span>
       </div>
-      <h1>{job.file.originalName}</h1>
-      <p className="dim">{job.shop.name} · {rupees(job.totalPaise)}</p>
-      <span className={`badge ${label.tone}`}>{label.text}</span>
 
-      {job.status === 'queued' && (
-        <div className="card">
-          <div className="dim" style={{ textAlign: 'center' }}>Your place in line</div>
-          <div className="queue-pos">{position ?? '…'}</div>
-          {eta !== null && <p className="dim" style={{ textAlign: 'center' }}>~{eta} min wait</p>}
-          <p className="dim" style={{ textAlign: 'center' }}>
-            We'll send your OTP on WhatsApp when it's your turn — keep this page open for live updates.
-          </p>
+      {job.status === 'queued' && pendingSlot && (
+        <div className="ticket">
+          <div className="eyebrow">slot reserved</div>
+          <div className="ticket-num" style={{ fontSize: '2.2rem' }}>
+            {slotLabel(job.scheduledTime!)}
+          </div>
+          <div className="sub">We'll alert you when your slot opens. Nothing else to do now.</div>
+        </div>
+      )}
+
+      {job.status === 'queued' && !pendingSlot && (
+        <div className="ticket">
+          <div className="eyebrow">token · your place in line</div>
+          <div className="ticket-num">{position ?? '·'}</div>
+          <div className="sub">{eta !== null ? `about ${eta} min` : 'calculating wait…'}</div>
         </div>
       )}
 
       {job.status === 'notified' && (
-        <div className="card">
-          <p style={{ textAlign: 'center', margin: '4px 0' }}>Tell this code at the counter:</p>
+        <div className="ticket turn">
+          <div className="eyebrow">show this at the counter</div>
           {otp ? (
-            <div className="big-otp">{otp}</div>
+            <div className="otp-band">{otp}</div>
           ) : (
-            <p className="dim" style={{ textAlign: 'center' }}>Check WhatsApp for your OTP.</p>
+            <div className="sub">Fetching your code…</div>
           )}
           {job.otpExpiresAt && (
-            <p className="dim" style={{ textAlign: 'center' }}>
-              Valid until {new Date(job.otpExpiresAt).toLocaleTimeString()}
-            </p>
+            <div className="sub">
+              valid till {new Date(job.otpExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </div>
           )}
         </div>
       )}
 
       {job.status === 'no_show' && (
         <div className="card stack">
-          <p>You missed your window.</p>
+          <p style={{ margin: 0 }}>You missed your window.</p>
           {canRequeue ? (
             <button onClick={requeue}>Requeue for free</button>
           ) : (
-            <p className="dim">This job can no longer be requeued.</p>
+            <p className="dim" style={{ margin: 0 }}>
+              This job can't be requeued — submit a new one.
+            </p>
           )}
         </div>
       )}
 
       {job.status === 'ready_for_pickup' && (
-        <div className="card">
-          <p>Your print is done — collect it at the counter. 🎉</p>
+        <div className="ticket turn">
+          <div className="eyebrow">done</div>
+          <div className="ticket-num" style={{ fontSize: '2rem' }}>
+            Collect at counter
+          </div>
+        </div>
+      )}
+
+      {(job.status === 'queued' || job.status === 'notified') && !pushOffered && (
+        <div className="card row between">
+          <span className="dim" style={{ flex: 1 }}>
+            Get an alert even if you close the app?
+          </span>
+          <button
+            className="ghost small"
+            onClick={async () => {
+              await enablePush();
+              setPushOffered(true);
+            }}
+          >
+            Turn on alerts
+          </button>
         </div>
       )}
 
       {(job.status === 'queued' || job.status === 'notified') && (
-        <button className="ghost" onClick={cancel}>Cancel job</button>
+        <button className="ghost" onClick={cancel}>
+          Cancel job
+        </button>
       )}
       {error && <p className="error">{error}</p>}
     </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
+import Topbar from '../../components/Topbar.js';
 
 interface Printer {
   id: string;
@@ -15,6 +16,7 @@ interface Printer {
 interface ShopSettings {
   autoAssignEnabled: boolean;
   name: string;
+  slug?: string;
 }
 
 const EMPTY_FORM = {
@@ -98,17 +100,15 @@ export default function Printers() {
 
   return (
     <div className="page wide">
-      <div className="topbar">
-        <span className="brand">PrintQ · Printers</span>
-        <Link to="/dashboard">← Dashboard</Link>
-      </div>
+      <Topbar tag="printers" right={<Link to="/dashboard">← Dashboard</Link>} />
 
       {shop && (
         <div className="card row between">
-          <div>
+          <div style={{ flex: 1, minWidth: 220 }}>
             <strong>Auto-assign printers</strong>
             <p className="dim" style={{ margin: '4px 0 0' }}>
-              On: OTP goes straight to the best printer. Off: you confirm from a dropdown every time.
+              On: the OTP sends the job straight to the best printer. Off: you confirm from a dropdown
+              every time.
             </p>
           </div>
           <button className={shop.autoAssignEnabled ? '' : 'ghost'} onClick={toggleAutoAssign}>
@@ -127,43 +127,48 @@ export default function Printers() {
       {showForm && (
         <div className="card stack">
           <div>
-            <label>Label</label>
+            <label htmlFor="plabel">Label</label>
             <input
+              id="plabel"
               type="text"
               placeholder='e.g. "Printer 1 — near entrance"'
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
           </div>
-          <div className="row">
-            {['A4', 'A3'].map((size) => (
+          <div>
+            <label>Loads paper / can do</label>
+            <div className="row">
+              {['A4', 'A3'].map((size) => (
+                <button
+                  key={size}
+                  className={`chip ${form.paperSizesLoaded.includes(size) ? 'on' : ''}`}
+                  onClick={() => toggleInList('paperSizesLoaded', size)}
+                >
+                  {size}
+                </button>
+              ))}
               <button
-                key={size}
-                className={form.paperSizesLoaded.includes(size) ? 'small' : 'ghost small'}
-                onClick={() => toggleInList('paperSizesLoaded', size)}
+                className={`chip ${form.colorSupport ? 'on' : ''}`}
+                onClick={() => setForm({ ...form, colorSupport: !form.colorSupport })}
               >
-                {size}
+                Colour
               </button>
-            ))}
-            <button
-              className={form.colorSupport ? 'small' : 'ghost small'}
-              onClick={() => setForm({ ...form, colorSupport: !form.colorSupport })}
-            >
-              Colour
-            </button>
-            {['stapling', 'spiral_binding'].map((f) => (
-              <button
-                key={f}
-                className={form.finishingOptions.includes(f) ? 'small' : 'ghost small'}
-                onClick={() => toggleInList('finishingOptions', f)}
-              >
-                {f.replace('_', ' ')}
-              </button>
-            ))}
+              {['stapling', 'spiral_binding'].map((f) => (
+                <button
+                  key={f}
+                  className={`chip ${form.finishingOptions.includes(f) ? 'on' : ''}`}
+                  onClick={() => toggleInList('finishingOptions', f)}
+                >
+                  {f.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{ maxWidth: 200 }}>
-            <label>Pages per minute</label>
+            <label htmlFor="ppm">Pages per minute</label>
             <input
+              id="ppm"
               type="number"
               min={1}
               max={200}
@@ -177,7 +182,7 @@ export default function Printers() {
         </div>
       )}
 
-      <div className="card" style={{ overflowX: 'auto', padding: 8 }}>
+      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
         <table>
           <thead>
             <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Status</th></tr>
@@ -186,12 +191,12 @@ export default function Printers() {
             {printers.map((p) => (
               <tr key={p.id}>
                 <td>{p.label}</td>
-                <td>{p.paperSizesLoaded.join(', ')}</td>
-                <td>{p.colorSupport ? 'Yes' : 'B/W only'}</td>
+                <td className="mono">{p.paperSizesLoaded.join(', ')}</td>
+                <td>{p.colorSupport ? 'Yes' : 'B/W'}</td>
                 <td>{p.finishingOptions.map((f) => f.replace('_', ' ')).join(', ') || '—'}</td>
-                <td>{p.avgPagesPerMinute} ppm</td>
+                <td className="mono">{p.avgPagesPerMinute} ppm</td>
                 <td>
-                  <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)}>
+                  <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
                     <option value="online">online</option>
                     <option value="offline">offline</option>
                     <option value="jammed">jammed</option>

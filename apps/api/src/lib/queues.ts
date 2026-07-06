@@ -19,7 +19,7 @@ export function bullConnection() {
   };
 }
 
-export type TimerJobName = 'noShowCheck' | 'graceExpiry';
+export type TimerJobName = 'noShowCheck' | 'graceExpiry' | 'scheduledDue';
 
 /** File conversion (upload → print-ready PDF). */
 export const convertQueue = new Queue<{ fileId: string }>('convert', {

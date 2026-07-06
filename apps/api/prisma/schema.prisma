@@ -95,8 +95,22 @@ model Student {
   name      String?
   createdAt DateTime @default(now())
 
-  jobs  Job[]
-  files UploadedFile[]
+  jobs              Job[]
+  files             UploadedFile[]
+  pushSubscriptions PushSubscription[]
+}
+
+/// Web Push subscription for the installed PWA.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([studentId])
 }
 
 /// Phone-login OTPs. Hashed (argon2 + pepper); plaintext never stored.
@@ -123,6 +137,8 @@ model Printer {
   finishingOptions     String[]      @default([])
   avgPagesPerMinute    Int           @default(15)
   status               PrinterStatus @default(online)
+  /// what the queue last promoted (instant/scheduled) — drives fair alternation
+  lastPromotedMode     JobMode?
   createdAt            DateTime      @default(now())
 
   jobs Job[]
@@ -203,11 +219,16 @@ model Job {
 
   status JobStatus @default(pending_payment)
 
-  /// release OTP — hashed, single-use, job-bound (printQ.md §11)
+  /// release OTP — hash used for verification; plaintext kept only while the
+  /// job is `notified` so the student's own app can display it
   otpHash        String?
+  otpCode        String?
   otpGeneratedAt DateTime?
   otpExpiresAt   DateTime?
   otpAttempts    Int       @default(0)
+
+  /// set once when the "almost your turn" alert has been sent
+  nearFrontNotifiedAt DateTime?
 
   noShowCount Int       @default(0)
   noShowAt    DateTime?

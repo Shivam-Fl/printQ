@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
+import Topbar from '../../components/Topbar.js';
 
 interface AgentRow {
   id: string;
@@ -67,32 +68,42 @@ export default function Agents() {
 
   return (
     <div className="page wide">
-      <div className="topbar">
-        <span className="brand">PrintQ · Agents</span>
-        <Link to="/dashboard">← Dashboard</Link>
-      </div>
+      <Topbar tag="agents" right={<Link to="/dashboard">← Dashboard</Link>} />
       <p className="dim">
-        An agent is the small PrintQ program running on a shop PC that actually sends jobs to your printers.
+        An agent is the small PrintQ program on a shop PC that actually sends jobs to your printers.
       </p>
 
       {newToken && (
         <div className="card stack">
-          <span className="badge warn">Copy this token now — it is shown only once</span>
-          <code style={{ wordBreak: 'break-all', background: 'var(--surface-2)', padding: 10, borderRadius: 8 }}>
+          <span className="stamp yellow">copy this token now — shown only once</span>
+          <code
+            className="mono"
+            style={{
+              wordBreak: 'break-all',
+              background: 'var(--paper-bg)',
+              padding: 12,
+              borderRadius: 10,
+              border: '1px solid var(--rule)',
+            }}
+          >
             {newToken}
           </code>
-          <p className="dim">
-            On the shop PC: set PRINTQ_AGENT_TOKEN to this value, map printers via PRINTER_MAP, then start the agent.
+          <p className="dim" style={{ margin: 0 }}>
+            On the shop PC: set PRINTQ_AGENT_TOKEN to this value, map printers via PRINTER_MAP, then
+            start the agent.
           </p>
-          <button className="ghost small" onClick={() => setNewToken(null)}>Done, I copied it</button>
+          <button className="ghost small" onClick={() => setNewToken(null)}>
+            Done, I copied it
+          </button>
         </div>
       )}
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Register this PC</h2>
         <div>
-          <label>Machine label</label>
+          <label htmlFor="mlabel">Machine label</label>
           <input
+            id="mlabel"
             type="text"
             placeholder='e.g. "Counter PC"'
             value={label}
@@ -105,7 +116,7 @@ export default function Agents() {
             {printers.map((p) => (
               <button
                 key={p.id}
-                className={selected.includes(p.id) ? 'small' : 'ghost small'}
+                className={`chip ${selected.includes(p.id) ? 'on' : ''}`}
                 onClick={() =>
                   setSelected((s) => (s.includes(p.id) ? s.filter((x) => x !== p.id) : [...s, p.id]))
                 }
@@ -113,29 +124,38 @@ export default function Agents() {
                 {p.label}
               </button>
             ))}
+            {printers.length === 0 && (
+              <span className="dim">
+                Add printers first — <Link to="/dashboard/printers">Printers page</Link>
+              </span>
+            )}
           </div>
         </div>
-        <button disabled={!label} onClick={register}>Register &amp; get token</button>
+        <button disabled={!label} onClick={register}>
+          Register &amp; get token
+        </button>
         {error && <div className="error">{error}</div>}
       </div>
 
       <h2>Registered agents</h2>
-      <div className="card" style={{ overflowX: 'auto', padding: 8 }}>
+      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
         <table>
           <thead>
             <tr><th>Machine</th><th>Printers</th><th>Last heartbeat</th><th>Status</th></tr>
           </thead>
           <tbody>
-            {agents.length === 0 && <tr><td colSpan={4} className="dim">No agents yet</td></tr>}
+            {agents.length === 0 && (
+              <tr><td colSpan={4} className="dim">No agents yet</td></tr>
+            )}
             {agents.map((a) => (
               <tr key={a.id}>
                 <td>{a.machineLabel}</td>
                 <td>{a.connectedPrinterIds.map(printerLabel).join(', ') || '—'}</td>
-                <td className="dim">
+                <td className="dim mono">
                   {a.lastHeartbeatAt ? new Date(a.lastHeartbeatAt).toLocaleTimeString() : 'never'}
                 </td>
                 <td>
-                  <span className={`badge ${a.status === 'online' ? 'ok' : 'danger'}`}>{a.status}</span>
+                  <span className={`stamp ${a.status === 'online' ? 'green' : 'red'}`}>{a.status}</span>
                 </td>
               </tr>
             ))}

@@ -41,13 +41,18 @@ const envSchema = z.object({
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
-  NOTIFICATION_PROVIDER: z.enum(['console', 'whatsapp']).default('console'),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
-  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  // Web Push (PWA notifications). Generate once: npx web-push generate-vapid-keys
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default('mailto:admin@printq.local'),
 
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
   FILE_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  /// "almost your turn" alert when this many people (or fewer) are ahead
+  NEAR_FRONT_THRESHOLD: z.coerce.number().int().min(1).max(20).default(5),
+  /// scheduled jobs become eligible this many minutes before their slot
+  SCHEDULE_LEAD_MINUTES: z.coerce.number().int().min(0).max(60).default(10),
 
   SOFFICE_PATH: z.string().optional(),
   SENTRY_DSN: z.string().optional(),
@@ -75,12 +80,10 @@ if (env.PAYMENT_PROVIDER === 'razorpay') {
     process.exit(1);
   }
 }
-if (env.NOTIFICATION_PROVIDER === 'whatsapp') {
-  if (!env.WHATSAPP_PHONE_NUMBER_ID || !env.WHATSAPP_ACCESS_TOKEN) {
-    // eslint-disable-next-line no-console
-    console.error('NOTIFICATION_PROVIDER=whatsapp requires WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN');
-    process.exit(1);
-  }
+if ((env.VAPID_PUBLIC_KEY && !env.VAPID_PRIVATE_KEY) || (!env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY)) {
+  // eslint-disable-next-line no-console
+  console.error('VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be set together');
+  process.exit(1);
 }
 if (env.STORAGE_DRIVER === 's3') {
   if (!env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {

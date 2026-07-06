@@ -16,7 +16,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       await api('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
       setStage('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setError(err instanceof Error ? err.message : 'Could not send the code');
     } finally {
       setBusy(false);
     }
@@ -33,7 +33,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       setToken('student', res.token);
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setError(err instanceof Error ? err.message : 'Wrong code');
     } finally {
       setBusy(false);
     }
@@ -41,13 +41,18 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="card stack">
-      <h2 style={{ margin: 0 }}>Login with your phone</h2>
+      <div>
+        <h2 style={{ margin: '0 0 2px' }}>Login with your phone</h2>
+        <p className="dim" style={{ margin: 0 }}>One code, no password.</p>
+      </div>
       {stage === 'phone' ? (
         <>
           <div>
-            <label>Mobile number</label>
+            <label htmlFor="phone">Mobile number</label>
             <input
+              id="phone"
               type="tel"
+              inputMode="numeric"
               placeholder="98765 43210"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -55,26 +60,31 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
             />
           </div>
           <button disabled={busy || phone.replace(/\D/g, '').length < 10} onClick={requestOtp}>
-            {busy ? 'Sending…' : 'Send OTP'}
+            {busy ? 'Sending…' : 'Send code'}
           </button>
         </>
       ) : (
         <>
           <div>
-            <label>6-digit code sent to {phone}</label>
+            <label htmlFor="otp">6-digit code sent to {phone}</label>
             <input
+              id="otp"
+              className="big-otp-input"
               type="text"
               inputMode="numeric"
               maxLength={6}
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && void verify()}
               autoFocus
             />
           </div>
           <button disabled={busy || otp.length !== 6} onClick={verify}>
             {busy ? 'Checking…' : 'Verify'}
           </button>
-          <button className="ghost" onClick={() => setStage('phone')}>Change number</button>
+          <button className="ghost" onClick={() => setStage('phone')}>
+            Change number
+          </button>
         </>
       )}
       {error && <div className="error">{error}</div>}

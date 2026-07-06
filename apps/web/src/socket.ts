@@ -4,21 +4,20 @@ import { API_URL, getToken } from './api.js';
 let studentSocket: Socket | null = null;
 let shopSocket: Socket | null = null;
 
+// empty API_URL = same origin (Vite proxy in dev, API-served app in prod)
+const target = API_URL || '/';
+
 export function getStudentSocket(): Socket | null {
   const token = getToken('student');
   if (!token) return null;
-  if (!studentSocket) {
-    studentSocket = io(API_URL, { auth: { token } });
-  }
+  studentSocket ??= io(target, { auth: { token } });
   return studentSocket;
 }
 
 export function getShopSocket(): Socket | null {
   const token = getToken('shop');
   if (!token) return null;
-  if (!shopSocket) {
-    shopSocket = io(API_URL, { auth: { token } });
-  }
+  shopSocket ??= io(target, { auth: { token } });
   return shopSocket;
 }
 

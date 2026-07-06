@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -13,6 +16,7 @@ import { paymentsRouter, webhookRouter } from './modules/payments/routes.js';
 import { shopRouter } from './modules/shops/routes.js';
 import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
+import { pushRouter } from './modules/push/routes.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -44,8 +48,18 @@ export function createApp(): express.Express {
   app.use('/api/files', filesRouter);
   app.use('/api/jobs', jobsRouter);
   app.use('/api/payments', paymentsRouter);
+  app.use('/api/push', pushRouter);
   app.use('/api/shop', shopRouter);
   app.use('/api/agent', agentRouter);
+
+  // Single-domain production deploy: serve the built web app from the API so
+  // the PWA, push notifications and API share one origin. Dev uses Vite.
+  const webDist = path.resolve(fileURLToPath(import.meta.url), '../../../web/dist');
+  if (env.NODE_ENV === 'production' && existsSync(webDist)) {
+    app.use(express.static(webDist));
+    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+    logger.info({ webDist }, 'serving_web_app');
+  }
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(errorHandler);

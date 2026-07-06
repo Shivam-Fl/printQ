@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, setToken } from '../../api.js';
+import Topbar from '../../components/Topbar.js';
 
 export default function ShopLogin() {
   const navigate = useNavigate();
@@ -28,16 +29,17 @@ export default function ShopLogin() {
 
   return (
     <div className="page">
-      <div className="topbar"><span className="brand">PrintQ · Shop</span></div>
+      <Topbar tag="shop counter" />
       <h1>Staff login</h1>
       <div className="card stack">
         <div>
-          <label>Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+          <label htmlFor="email">Email</label>
+          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
         </div>
         <div>
-          <label>Password</label>
+          <label htmlFor="password">Password</label>
           <input
+            id="password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -49,6 +51,9 @@ export default function ShopLogin() {
         </button>
         {error && <div className="error">{error}</div>}
       </div>
+      <p className="dim">
+        New shop? <Link to="/dashboard/register">Register in 2 minutes →</Link>
+      </p>
     </div>
   );
 }

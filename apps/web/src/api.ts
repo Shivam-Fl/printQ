@@ -1,4 +1,8 @@
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
+/**
+ * Same-origin by default: dev uses the Vite proxy, production serves the web
+ * app from the API. Set VITE_API_URL only for a split-domain deploy.
+ */
+export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 
 type Role = 'student' | 'shop';
 

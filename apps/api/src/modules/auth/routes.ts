@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import argon2 from 'argon2';
-import { requestLoginOtpSchema, shopLoginSchema, verifyLoginOtpSchema } from '@printq/shared';
+import { z } from 'zod';
+import {
+  DEFAULT_RATE_CARD,
+  requestLoginOtpSchema,
+  shopLoginSchema,
+  verifyLoginOtpSchema,
+} from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, unauthorized } from '../../lib/errors.js';
 import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
@@ -8,7 +14,7 @@ import { signShopToken, signStudentToken } from '../../lib/tokens.js';
 import { validateBody } from '../../middleware/validate.js';
 import { loginLimiter, otpRequestLimiter, otpVerifyLimiter } from '../../middleware/rateLimit.js';
 import { requireStudent } from '../../middleware/auth.js';
-import { notify } from '../../providers/notification/index.js';
+import { sendLoginOtp } from '../../providers/notification/index.js';
 import { env } from '../../config/env.js';
 
 export const authRouter = Router();
@@ -32,8 +38,8 @@ authRouter.post(
         expiresAt: new Date(Date.now() + LOGIN_OTP_TTL_MS),
       },
     });
-    // in dev (console provider) the OTP appears in the API logs
-    await notify(phone, `PrintQ login code: ${otp}. Valid for 5 minutes.`);
+    // dev: the code appears in the API console; launch: wire SMS in sendLoginOtp
+    await sendLoginOtp(phone, otp);
     res.json({ ok: true });
   }),
 );
@@ -105,6 +111,64 @@ authRouter.patch(
       select: { id: true, phone: true, name: true },
     });
     res.json({ student });
+  }),
+);
+
+const shopRegisterSchema = z.object({
+  shopName: z.string().trim().min(2).max(120),
+  address: z.string().trim().min(3).max(300),
+  campusName: z.string().trim().max(120).optional(),
+  ownerName: z.string().trim().min(1).max(80),
+  email: z.string().trim().toLowerCase().email().max(254),
+  password: z.string().min(8).max(128),
+});
+
+/** Phase 2: self-serve shop onboarding — creates the shop + its owner login. */
+authRouter.post(
+  '/shop/register',
+  loginLimiter,
+  validateBody(shopRegisterSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof shopRegisterSchema>;
+
+    const existing = await prisma.shopUser.findUnique({ where: { email: body.email } });
+    if (existing) throw badRequest('An account with this email already exists');
+
+    const baseSlug = body.shopName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'shop';
+    let slug = baseSlug;
+    for (let i = 2; await prisma.shop.findUnique({ where: { slug } }); i++) {
+      slug = `${baseSlug}-${i}`;
+    }
+
+    const shop = await prisma.shop.create({
+      data: {
+        slug,
+        name: body.shopName,
+        address: body.address,
+        campusName: body.campusName ?? null,
+        autoAssignEnabled: true,
+        rateCard: DEFAULT_RATE_CARD as unknown as object,
+      },
+    });
+    const user = await prisma.shopUser.create({
+      data: {
+        shopId: shop.id,
+        email: body.email,
+        passwordHash: await argon2.hash(body.password, { type: argon2.argon2id }),
+        name: body.ownerName,
+        role: 'owner',
+      },
+    });
+
+    res.status(201).json({
+      token: signShopToken(user.id, shop.id, 'owner'),
+      user: { id: user.id, name: user.name, role: user.role, shopId: shop.id },
+      shop: { slug: shop.slug, name: shop.name },
+    });
   }),
 );
 

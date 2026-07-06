@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, getToken, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
+import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
 
 interface PublicShop {
@@ -11,6 +12,7 @@ interface PublicShop {
   campusName: string | null;
   open: boolean;
   rateCard: { pagePrices: Record<string, number> };
+  capabilities: { color: boolean; paperSizes: string[] };
 }
 
 export default function ShopLanding() {
@@ -26,26 +28,24 @@ export default function ShopLanding() {
   useEffect(() => {
     api<{ shop: PublicShop }>(`/api/public/shops/${slug}`)
       .then((r) => setShop(r.shop))
-      .catch(() => setError('Shop not found'));
+      .catch(() => setError('This shop link is not valid.'));
   }, [slug]);
 
-  // conversion completion arrives on the student socket
+  // conversion completion arrives on the student socket; poll as fallback
   useEffect(() => {
     if (!loggedIn || !converting) return;
     const socket = getStudentSocket();
-    if (!socket) return;
     const onReady = (p: { fileId: string }) => {
       if (p.fileId === converting) navigate(`/s/${slug}/file/${p.fileId}`);
     };
     const onFailed = (p: { fileId: string; error: string }) => {
       if (p.fileId === converting) {
         setConverting(null);
-        setError(`Could not process that file: ${p.error}`);
+        setError(`That file didn't work: ${p.error}`);
       }
     };
-    socket.on('file:ready', onReady);
-    socket.on('file:failed', onFailed);
-    // fallback poll in case the socket missed the event
+    socket?.on('file:ready', onReady);
+    socket?.on('file:failed', onFailed);
     const poll = setInterval(async () => {
       try {
         const { file } = await api<{ file: { status: string; error?: string } }>(
@@ -55,15 +55,15 @@ export default function ShopLanding() {
         if (file.status === 'ready') navigate(`/s/${slug}/file/${converting}`);
         if (file.status === 'failed') {
           setConverting(null);
-          setError(`Could not process that file: ${file.error ?? ''}`);
+          setError(`That file didn't work: ${file.error ?? ''}`);
         }
       } catch {
         /* keep polling */
       }
     }, 2500);
     return () => {
-      socket.off('file:ready', onReady);
-      socket.off('file:failed', onFailed);
+      socket?.off('file:ready', onReady);
+      socket?.off('file:failed', onFailed);
       clearInterval(poll);
     };
   }, [loggedIn, converting, navigate, slug]);
@@ -82,44 +82,67 @@ export default function ShopLanding() {
       });
       setConverting(res.file.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : 'Upload failed — try again.');
     } finally {
       setUploading(false);
     }
   }
 
-  if (error && !shop) return <div className="page"><p className="error">{error}</p></div>;
-  if (!shop) return <div className="page"><p className="dim">Loading…</p></div>;
+  if (error && !shop) {
+    return (
+      <div className="page">
+        <Topbar />
+        <p className="error">{error}</p>
+      </div>
+    );
+  }
+  if (!shop) {
+    return (
+      <div className="page">
+        <Topbar />
+        <p className="dim">Loading…</p>
+      </div>
+    );
+  }
 
   const a4bw = shop.rateCard.pagePrices['A4_bw'];
 
   return (
     <div className="page">
-      <div className="topbar">
-        <span className="brand">PrintQ</span>
-        {loggedIn && <Link to="/jobs">My jobs</Link>}
-      </div>
+      <Topbar right={loggedIn ? <Link to="/jobs">My jobs</Link> : undefined} />
       <h1>{shop.name}</h1>
       <p className="dim">
         {shop.address}
         {shop.campusName ? ` · ${shop.campusName}` : ''}
       </p>
-      <span className={`badge ${shop.open ? 'ok' : 'danger'}`}>
-        {shop.open ? 'Accepting jobs' : 'Currently closed'}
-      </span>
-      {a4bw !== undefined && <p className="dim">A4 B/W from {rupees(a4bw)} per page</p>}
+      <div className="row">
+        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>
+          {shop.open ? 'taking jobs' : 'closed'}
+        </span>
+        {a4bw !== undefined && (
+          <span className="dim mono">A4 B/W {rupees(a4bw)}/page</span>
+        )}
+        {shop.capabilities.color && <span className="stamp blue">colour</span>}
+      </div>
 
       {!loggedIn ? (
         <PhoneLogin onDone={() => setLoggedIn(true)} />
       ) : converting ? (
-        <div className="card stack">
-          <p>Preparing your print-ready preview…</p>
-          <p className="dim">PDF, Word and photos are converted so what you see is exactly what prints.</p>
+        <div className="ticket">
+          <div className="eyebrow">preparing preview</div>
+          <div className="ticket-num" aria-hidden>
+            …
+          </div>
+          <div className="sub">Converting your file to a print-ready PDF. What you'll see is exactly what prints.</div>
         </div>
       ) : (
         <div className="card stack">
-          <h2 style={{ margin: 0 }}>Send a file to print</h2>
-          <p className="dim">PDF, Word (.docx), JPG or PNG · max 25 MB</p>
+          <div>
+            <h2 style={{ margin: '0 0 2px' }}>Send a file to print</h2>
+            <p className="dim" style={{ margin: 0 }}>
+              PDF, Word (.docx), JPG or PNG · up to 25 MB
+            </p>
+          </div>
           <input
             ref={fileInput}
             type="file"
@@ -133,6 +156,7 @@ export default function ShopLanding() {
           <button disabled={uploading || !shop.open} onClick={() => fileInput.current?.click()}>
             {uploading ? 'Uploading…' : 'Choose file'}
           </button>
+          {!shop.open && <p className="dim">The shop has no printer online right now.</p>}
           {error && <div className="error">{error}</div>}
         </div>
       )}

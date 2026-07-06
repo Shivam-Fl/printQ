@@ -39,7 +39,12 @@ jobsRouter.post(
   requireStudent,
   validateBody(createJobSchema),
   asyncHandler(async (req, res) => {
-    const { fileId, specs } = req.body as { fileId: string; specs: JobSpecs };
+    const { fileId, specs, mode, scheduledTime } = req.body as {
+      fileId: string;
+      specs: JobSpecs;
+      mode: 'instant' | 'scheduled';
+      scheduledTime?: Date;
+    };
     const file = await prisma.uploadedFile.findFirst({
       where: { id: fileId, studentId: req.student!.id, status: 'ready' },
       include: { shop: true },
@@ -58,7 +63,8 @@ jobsRouter.post(
         pagesPerCopy: breakdown.pagesPerCopy,
         priceBreakdown: breakdown as unknown as object,
         totalPaise: breakdown.totalPaise,
-        mode: 'instant',
+        mode,
+        scheduledTime: mode === 'scheduled' ? scheduledTime : null,
       },
     });
 
@@ -90,6 +96,8 @@ jobsRouter.get(
         totalPaise: true,
         pagesPerCopy: true,
         specs: true,
+        mode: true,
+        scheduledTime: true,
         createdAt: true,
         otpExpiresAt: true,
         noShowCount: true,
@@ -113,7 +121,11 @@ jobsRouter.get(
         totalPaise: true,
         priceBreakdown: true,
         specs: true,
+        mode: true,
+        scheduledTime: true,
         createdAt: true,
+        // the release OTP belongs to this student — shown in-app while active
+        otpCode: true,
         otpExpiresAt: true,
         noShowCount: true,
         assignedPrinterId: true,
@@ -122,7 +134,7 @@ jobsRouter.get(
       },
     });
     if (!job) throw notFound();
-    res.json({ job });
+    res.json({ job: { ...job, otpCode: job.status === 'notified' ? job.otpCode : null } });
   }),
 );
 

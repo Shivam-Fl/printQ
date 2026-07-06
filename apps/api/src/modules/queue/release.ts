@@ -80,7 +80,7 @@ export async function releaseByOtp(
     'notified',
     'OTP_VERIFIED',
     { type: 'shop', id: shopUserId },
-    { assignedPrinterId: printerId, otpHash: null, claimedByAgentId: null },
+    { assignedPrinterId: printerId, otpHash: null, otpCode: null, claimedByAgentId: null },
   );
   if (!updated) throw conflict('Job state changed, try again');
 

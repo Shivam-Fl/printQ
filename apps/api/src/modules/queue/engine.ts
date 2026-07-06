@@ -1,6 +1,8 @@
 import type { Job, Printer } from '@prisma/client';
 import {
   ACTIVE_QUEUE_STATUSES,
+  isPendingScheduled,
+  pickNextJob,
   rankPrinters,
   type JobSpecs,
   type JobStatus,
@@ -12,9 +14,11 @@ import { env } from '../../config/env.js';
 import { generateOtp, hashOtp } from '../../lib/otp.js';
 import { timersQueue } from '../../lib/queues.js';
 import { publishEvent } from '../../realtime/events.js';
-import { notify } from '../../providers/notification/index.js';
+import { notifyStudent } from '../../providers/notification/index.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { applyTransition, type ActorType } from '../jobs/transitions.js';
+
+const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
 
 function toProfile(p: Printer): PrinterProfile {
   return {
@@ -28,18 +32,14 @@ function toProfile(p: Printer): PrinterProfile {
   };
 }
 
-async function activeJobsLite(shopId: string) {
-  const jobs = await prisma.job.findMany({
-    where: { shopId, status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] } },
-    orderBy: { queuedAt: 'asc' },
-  });
-  return jobs;
-}
-
 /** Rank the shop's printers for a job. Used at queue entry, release and manual assign. */
 export async function recommendPrinter(shopId: string, specs: JobSpecs, pagesPerCopy: number) {
-  const printers = await prisma.printer.findMany({ where: { shopId } });
-  const active = await activeJobsLite(shopId);
+  const [printers, active] = await Promise.all([
+    prisma.printer.findMany({ where: { shopId } }),
+    prisma.job.findMany({
+      where: { shopId, status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] } },
+    }),
+  ]);
   return rankPrinters(
     printers.map(toProfile),
     specs,
@@ -54,10 +54,12 @@ export async function recommendPrinter(shopId: string, specs: JobSpecs, pagesPer
 }
 
 /**
- * Recompute live queue positions + ETAs for a shop and push them to the shop
- * dashboard room and each affected student's room.
+ * Recompute live queue positions + ETAs for a shop, push them to the shop
+ * dashboard and each student, and fire the "almost your turn" alert when a
+ * job crosses the near-front threshold.
  */
 export async function emitQueueUpdate(shopId: string): Promise<void> {
+  const now = new Date();
   const [jobs, printers] = await Promise.all([
     prisma.job.findMany({
       where: { shopId, status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] } },
@@ -74,6 +76,8 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
 
   for (const job of jobs) {
     if (!job.assignedPrinterId) continue;
+    // a scheduled job outside its lead window holds no live position yet
+    if (isPendingScheduled({ mode: job.mode, scheduledTime: job.scheduledTime }, now, leadMs())) continue;
     const pid = job.assignedPrinterId;
     const pos = (perPrinterCount.get(pid) ?? 0) + 1;
     const pagesAhead = perPrinterPages.get(pid) ?? 0;
@@ -89,6 +93,8 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
   const snapshot = jobs.map((job) => ({
     jobId: job.id,
     status: job.status,
+    mode: job.mode,
+    scheduledTime: job.scheduledTime,
     printerId: job.assignedPrinterId,
     studentName: job.student.name,
     position: positionByJob.get(job.id)?.position ?? null,
@@ -97,23 +103,43 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
   }));
 
   publishEvent(`shop:${shopId}`, 'queue:update', { jobs: snapshot });
+
   for (const job of jobs) {
+    const live = positionByJob.get(job.id);
     publishEvent(`student:${job.studentId}`, 'job:update', {
       jobId: job.id,
       status: job.status,
-      position: positionByJob.get(job.id)?.position ?? null,
-      etaMinutes: positionByJob.get(job.id)?.etaMinutes ?? null,
+      position: live?.position ?? null,
+      etaMinutes: live?.etaMinutes ?? null,
     });
+
+    // "almost your turn" — once per job, only while still waiting in line
+    if (
+      job.status === 'queued' &&
+      !job.nearFrontNotifiedAt &&
+      live &&
+      live.position <= env.NEAR_FRONT_THRESHOLD
+    ) {
+      await prisma.job.updateMany({
+        where: { id: job.id, nearFrontNotifiedAt: null },
+        data: { nearFrontNotifiedAt: new Date() },
+      });
+      await notifyStudent(job.studentId, {
+        title: 'Almost your turn!',
+        body: `${live.position - 1 === 0 ? 'You are next' : `${live.position - 1} ahead of you`} — start walking to the shop.`,
+        url: `/jobs/${job.id}`,
+      });
+    }
   }
 }
 
 /**
  * Payment confirmed → job joins the queue. Provisional printer assignment
- * happens here so per-printer positions/ETAs exist; the final eligibility
- * check re-runs at OTP time (printers can go offline in between).
+ * happens here; the final eligibility check re-runs at OTP time.
+ * Scheduled jobs wait for their slot (a delayed timer wakes the queue).
  */
 export async function onPaymentConfirmed(jobId: string): Promise<void> {
-  const job = await prisma.job.findUnique({ where: { id: jobId }, include: { student: true } });
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job || job.status !== 'pending_payment') return;
 
   const specs = job.specs as unknown as JobSpecs;
@@ -131,11 +157,35 @@ export async function onPaymentConfirmed(jobId: string): Promise<void> {
     publishEvent(`shop:${job.shopId}`, 'queue:manual_assign_needed', { jobId });
   }
 
-  await notify(
-    job.student.phone,
-    `PrintQ: your print job is paid and in the queue. We'll message you when it's your turn.`,
-  );
+  if (job.mode === 'scheduled' && job.scheduledTime) {
+    const wakeAt = job.scheduledTime.getTime() - leadMs();
+    await timersQueue.add(
+      'scheduledDue',
+      { jobId },
+      { delay: Math.max(wakeAt - Date.now(), 0), jobId: `due-${jobId}` },
+    );
+    await notifyStudent(job.studentId, {
+      title: 'Slot booked ✓',
+      body: `Your print is scheduled for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. We'll ping you when it's time.`,
+      url: `/jobs/${jobId}`,
+    });
+  } else {
+    await notifyStudent(job.studentId, {
+      title: 'Paid & in queue ✓',
+      body: "You're in line. Watch your live position in the app.",
+      url: `/jobs/${jobId}`,
+    });
+  }
+
   await advanceShopQueues(job.shopId);
+  await emitQueueUpdate(job.shopId);
+}
+
+/** Timer handler: a scheduled job's lead window opened — wake its printer queue. */
+export async function handleScheduledDue(jobId: string): Promise<void> {
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job || job.status !== 'queued') return;
+  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
   await emitQueueUpdate(job.shopId);
 }
 
@@ -148,22 +198,34 @@ export async function advanceShopQueues(shopId: string): Promise<void> {
 }
 
 /**
- * If this printer has no job currently in the OTP window, promote its earliest
- * queued job to `notified`: generate the release OTP, message the student and
- * arm the no-show timer.
+ * If this printer has no job currently in the OTP window, promote the next
+ * eligible job (fair instant/scheduled alternation): generate the release
+ * OTP, tell the student in-app and arm the no-show timer.
  */
 export async function advancePrinterQueue(printerId: string, shopId: string): Promise<void> {
-  const alreadyNotified = await prisma.job.findFirst({
-    where: { assignedPrinterId: printerId, status: 'notified' },
-  });
-  if (alreadyNotified) return;
+  const [alreadyNotified, printer, waiting] = await Promise.all([
+    prisma.job.findFirst({ where: { assignedPrinterId: printerId, status: 'notified' } }),
+    prisma.printer.findUnique({ where: { id: printerId } }),
+    prisma.job.findMany({
+      where: { assignedPrinterId: printerId, status: 'queued' },
+      orderBy: { queuedAt: 'asc' },
+    }),
+  ]);
+  if (alreadyNotified || !printer || waiting.length === 0) return;
 
-  const front = await prisma.job.findFirst({
-    where: { assignedPrinterId: printerId, status: 'queued' },
-    orderBy: { queuedAt: 'asc' },
-    include: { student: true },
-  });
-  if (!front) return;
+  const pick = pickNextJob(
+    waiting.map((j) => ({
+      id: j.id,
+      mode: j.mode,
+      queuedAt: j.queuedAt ?? j.createdAt,
+      scheduledTime: j.scheduledTime,
+    })),
+    printer.lastPromotedMode,
+    new Date(),
+    leadMs(),
+  );
+  if (!pick) return;
+  const front = waiting.find((j) => j.id === pick.id)!;
 
   const otp = generateOtp();
   const otpHash = await hashOtp(otp);
@@ -172,69 +234,96 @@ export async function advancePrinterQueue(printerId: string, shopId: string): Pr
 
   const updated = await applyTransition(front.id, 'queued', 'FRONT_REACHED', { type: 'system' }, {
     otpHash,
+    otpCode: otp, // shown only to the owning student while `notified`
     otpGeneratedAt: now,
     otpExpiresAt: expiresAt,
     otpAttempts: 0,
   });
   if (!updated) return;
 
+  await prisma.printer.update({
+    where: { id: printerId },
+    data: { lastPromotedMode: front.mode },
+  });
+
   await timersQueue.add(
     'noShowCheck',
     { jobId: front.id },
-    { delay: expiresAt.getTime() - Date.now(), jobId: `noshow:${front.id}:${now.getTime()}` },
+    { delay: expiresAt.getTime() - Date.now(), jobId: `noshow-${front.id}-${now.getTime()}` },
   );
 
-  await notify(
-    front.student.phone,
-    `PrintQ: it's your turn! Give this OTP at the shop within ${env.OTP_WINDOW_MINUTES} minutes to print: ${otp}`,
-  );
-  // the OTP also goes to the student's own authenticated socket room — same
-  // trust boundary as their WhatsApp, and keeps the pilot usable before the
-  // WhatsApp Business account exists
+  await notifyStudent(front.studentId, {
+    title: "It's your turn! 🖨️",
+    body: `Show OTP ${otp} at the counter within ${env.OTP_WINDOW_MINUTES} minutes.`,
+    url: `/jobs/${front.id}`,
+  });
   publishEvent(`student:${front.studentId}`, 'job:your_turn', {
     jobId: front.id,
     otp,
     expiresAt: expiresAt.toISOString(),
   });
-  logger.info({ jobId: front.id, printerId, shopId }, 'job_notified');
+  logger.info({ jobId: front.id, printerId, shopId, mode: front.mode }, 'job_notified');
+}
+
+async function afterNoShow(job: Job, noShowCount: number): Promise<void> {
+  await timersQueue.add(
+    'graceExpiry',
+    { jobId: job.id },
+    { delay: env.NO_SHOW_GRACE_MINUTES * 60_000, jobId: `grace-${job.id}-${Date.now()}` },
+  );
+  const canRequeue = noShowCount <= 1;
+  if (!canRequeue) {
+    // second no-show: skip the grace period, expire immediately
+    await applyTransition(job.id, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
+  }
+  await notifyStudent(job.studentId, {
+    title: canRequeue ? 'You missed your turn' : 'Job expired',
+    body: canRequeue
+      ? `Requeue for free in the app within ${env.NO_SHOW_GRACE_MINUTES} minutes, or the job expires.`
+      : 'You missed your turn twice — please submit a new job.',
+    url: `/jobs/${job.id}`,
+  });
+  publishEvent(`student:${job.studentId}`, 'job:update', {
+    jobId: job.id,
+    status: canRequeue ? 'no_show' : 'expired',
+    canRequeue,
+  });
+  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
+  await emitQueueUpdate(job.shopId);
 }
 
 /** Timer handler: OTP window expired without verification → no-show. */
 export async function handleNoShowCheck(jobId: string): Promise<void> {
-  const job = await prisma.job.findUnique({ where: { id: jobId }, include: { student: true } });
-  if (!job || job.status !== 'notified') return; // OTP was given in time — nothing to do
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job || job.status !== 'notified') return; // OTP was given in time
   if (job.otpExpiresAt && job.otpExpiresAt.getTime() > Date.now()) return; // re-notified later
 
   const updated = await applyTransition(jobId, 'notified', 'WINDOW_EXPIRED', { type: 'system' }, {
     noShowAt: new Date(),
     noShowCount: { increment: 1 },
     otpHash: null,
+    otpCode: null,
     otpExpiresAt: null,
   });
   if (!updated) return;
+  await afterNoShow(job, updated.noShowCount);
+}
 
-  await timersQueue.add(
-    'graceExpiry',
-    { jobId },
-    { delay: env.NO_SHOW_GRACE_MINUTES * 60_000, jobId: `grace:${jobId}:${Date.now()}` },
-  );
+/** Shop marks a notified job as no-show before the timer fires (student clearly absent). */
+export async function markNoShow(jobId: string, shopId: string, actorId: string): Promise<void> {
+  const job = await prisma.job.findFirst({ where: { id: jobId, shopId } });
+  if (!job) throw notFound();
+  if (job.status !== 'notified') throw conflict('Job is not awaiting an OTP');
 
-  const canRequeue = updated.noShowCount <= 1;
-  await notify(
-    job.student.phone,
-    canRequeue
-      ? `PrintQ: you missed your turn. Open the app within ${env.NO_SHOW_GRACE_MINUTES} minutes to requeue for free, or the job expires.`
-      : `PrintQ: you missed your turn again. This job has expired — please submit a new one.`,
-  );
-  publishEvent(`student:${job.studentId}`, 'job:update', { jobId, status: 'no_show', canRequeue });
-
-  if (!canRequeue) {
-    // second no-show: skip the grace period, expire immediately
-    await applyTransition(jobId, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
-  }
-
-  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-  await emitQueueUpdate(job.shopId);
+  const updated = await applyTransition(jobId, 'notified', 'WINDOW_EXPIRED', { type: 'shop', id: actorId }, {
+    noShowAt: new Date(),
+    noShowCount: { increment: 1 },
+    otpHash: null,
+    otpCode: null,
+    otpExpiresAt: null,
+  });
+  if (!updated) return;
+  await afterNoShow(job, updated.noShowCount);
 }
 
 /** Timer handler: grace period passed with no requeue → expired. */
@@ -263,43 +352,6 @@ export async function requeueJob(jobId: string, studentId: string): Promise<Job>
   if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
   await emitQueueUpdate(job.shopId);
   return rejoined ?? job;
-}
-
-/** Shop marks a notified job as no-show before the timer fires (student clearly absent). */
-export async function markNoShow(jobId: string, shopId: string, actorId: string): Promise<void> {
-  const job = await prisma.job.findFirst({
-    where: { id: jobId, shopId },
-    include: { student: true },
-  });
-  if (!job) throw notFound();
-  if (job.status !== 'notified') throw conflict('Job is not awaiting an OTP');
-
-  const updated = await applyTransition(jobId, 'notified', 'WINDOW_EXPIRED', { type: 'shop', id: actorId }, {
-    noShowAt: new Date(),
-    noShowCount: { increment: 1 },
-    otpHash: null,
-    otpExpiresAt: null,
-  });
-  if (!updated) return;
-
-  await timersQueue.add(
-    'graceExpiry',
-    { jobId },
-    { delay: env.NO_SHOW_GRACE_MINUTES * 60_000, jobId: `grace:${jobId}:${Date.now()}` },
-  );
-  const canRequeue = updated.noShowCount <= 1;
-  if (!canRequeue) await applyTransition(jobId, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
-
-  await notify(
-    job.student.phone,
-    canRequeue
-      ? `PrintQ: the shop marked you as a no-show. Requeue for free in the app within ${env.NO_SHOW_GRACE_MINUTES} minutes.`
-      : `PrintQ: this job has expired after repeated no-shows. Please submit a new one.`,
-  );
-  publishEvent(`student:${job.studentId}`, 'job:update', { jobId, status: updated.status, canRequeue });
-
-  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-  await emitQueueUpdate(job.shopId);
 }
 
 /** After OTP verification: dispatch the print command to agents that can reach the printer. */

@@ -4,7 +4,7 @@ import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { publishEvent } from '../realtime/events.js';
 import { convertFile, cleanupExpiredFiles } from './conversion.js';
-import { handleGraceExpiry, handleNoShowCheck } from '../modules/queue/engine.js';
+import { handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
 
 const STALE_AGENT_MS = 2 * 60_000;
 
@@ -42,6 +42,7 @@ export async function startWorkers(): Promise<void> {
       const { jobId } = job.data as { jobId: string };
       if (job.name === 'noShowCheck') await handleNoShowCheck(jobId);
       else if (job.name === 'graceExpiry') await handleGraceExpiry(jobId);
+      else if (job.name === 'scheduledDue') await handleScheduledDue(jobId);
     },
     { connection: bullConnection(), concurrency: 5 },
   );

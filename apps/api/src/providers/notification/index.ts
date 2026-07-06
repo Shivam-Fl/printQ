@@ -1,55 +1,29 @@
-import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
-
-export interface NotificationProvider {
-  /** phone in E.164. Failures are logged, never thrown into the queue flow. */
-  send(phone: string, text: string): Promise<void>;
-}
-
-/** Dev provider: prints the message instead of sending it. */
-class ConsoleProvider implements NotificationProvider {
-  async send(phone: string, text: string): Promise<void> {
-    logger.info({ phone, text }, 'notification (console provider)');
-  }
-}
-
-/** Meta WhatsApp Cloud API. Requires an approved WABA + template in production. */
-class MetaWhatsAppProvider implements NotificationProvider {
-  async send(phone: string, text: string): Promise<void> {
-    const res = await fetch(
-      `https://graph.facebook.com/v21.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone.replace('+', ''),
-          type: 'text',
-          text: { body: text },
-        }),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`WhatsApp send failed (${res.status}): ${body}`);
-    }
-  }
-}
-
-const provider: NotificationProvider =
-  env.NOTIFICATION_PROVIDER === 'whatsapp' ? new MetaWhatsAppProvider() : new ConsoleProvider();
+import { publishEvent } from '../../realtime/events.js';
+import { sendPush, type PushMessage } from '../push/index.js';
 
 /**
- * Fire-and-log wrapper: a notification failure must never break a state
- * transition — the queue keeps moving, the failure is visible in logs.
+ * Student notifications are in-app first: a socket event for the open app and
+ * a Web Push for the installed PWA. No external messaging provider needed.
+ * Failures are logged, never thrown into a queue transition.
  */
-export async function notify(phone: string, text: string): Promise<void> {
+export async function notifyStudent(studentId: string, message: PushMessage): Promise<void> {
+  publishEvent(`student:${studentId}`, 'notify', message);
   try {
-    await provider.send(phone, text);
+    await sendPush(studentId, message);
   } catch (err) {
-    logger.error({ err, phone }, 'notification_failed');
+    logger.error({ err, studentId }, 'notify_failed');
   }
+  logger.info({ studentId, title: message.title }, 'student_notified');
+}
+
+/**
+ * Login OTPs happen before any session exists, so they can't be in-app.
+ * Dev/pilot: the code is logged to the API console. For launch, plug an SMS
+ * provider (e.g. MSG91) into this one function.
+ */
+export async function sendLoginOtp(phone: string, otp: string): Promise<void> {
+  // field name deliberately avoids the `*.otp` pino redaction — this console
+  // delivery IS the dev channel; swap in an SMS provider here for launch
+  logger.info({ phone, loginCode: otp }, 'login_otp (console — wire an SMS provider for launch)');
 }

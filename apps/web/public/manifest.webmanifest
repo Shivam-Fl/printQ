@@ -1,10 +1,17 @@
 {
-  "name": "PrintQ",
+  "name": "PrintQ — skip the print shop line",
   "short_name": "PrintQ",
-  "description": "Skip the print shop crowd — queue from your phone.",
-  "start_url": "/",
+  "description": "Send your print from anywhere, pay, and walk in when it's your turn.",
+  "id": "/",
+  "start_url": "/jobs",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#101418",
-  "theme_color": "#101418",
-  "icons": []
+  "orientation": "portrait",
+  "background_color": "#F6F6F3",
+  "theme_color": "#2242C8",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
 }

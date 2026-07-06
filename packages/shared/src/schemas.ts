@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FINISHING_OPTIONS, PAPER_SIZES, PRINTER_STATUSES } from './types.js';
+import { FINISHING_OPTIONS, JOB_MODES, PAPER_SIZES, PRINTER_STATUSES } from './types.js';
 
 /** Indian mobile normalized to E.164 (+91XXXXXXXXXX). Accepts 10-digit input. */
 export const phoneSchema = z
@@ -66,7 +66,27 @@ export const releaseOtpSchema = z.object({
   printerId: z.string().uuid().optional(),
 });
 
-export const createJobSchema = z.object({
-  fileId: z.string().uuid(),
-  specs: jobSpecsSchema,
-});
+export const createJobSchema = z
+  .object({
+    fileId: z.string().uuid(),
+    specs: jobSpecsSchema,
+    mode: z.enum(JOB_MODES).default('instant'),
+    /** required for scheduled mode: 15 min – 72 h ahead */
+    scheduledTime: z.coerce.date().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.mode === 'scheduled') {
+      if (!val.scheduledTime) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scheduledTime'], message: 'Pick a time slot' });
+        return;
+      }
+      const ahead = val.scheduledTime.getTime() - Date.now();
+      if (ahead < 15 * 60_000 || ahead > 72 * 3_600_000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scheduledTime'],
+          message: 'Slot must be between 15 minutes and 72 hours from now',
+        });
+      }
+    }
+  });

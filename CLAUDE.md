@@ -19,8 +19,12 @@ Read `printQ.md` (product spec), `PLAN.md` (engineering plan) and `SECURITY.md`
 - Prices are computed server-side (`computePrice` in `packages/shared`). Never trust a
   client-supplied amount.
 - No `$queryRawUnsafe`, no string-built SQL.
-- OTPs and passwords are hashed (argon2id + pepper for OTPs). Never log or persist
-  them in plaintext; pino redaction covers `*.otp`, `*.password`, `*.token`.
+- OTPs and passwords are hashed (argon2id + pepper). Exception (deliberate):
+  `Job.otpCode` keeps the release OTP in plaintext only while status is `notified`
+  so the student's own app can show it — always null it on release/no-show/expiry.
+  Pino redaction covers `*.otp`, `*.password`, `*.token`.
+- Notifications are in-app first: `notifyStudent()` (socket + Web Push). No WhatsApp.
+  BullMQ custom job ids must not contain `:` — use dashes.
 - Payment state changes only from verified webhooks (or the mock provider in dev).
 - Wrap async Express handlers in `asyncHandler`; let the global error handler shape
   responses (no `err.message` pass-through for unexpected errors).

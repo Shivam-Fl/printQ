@@ -6,7 +6,7 @@ import { requireAgent } from '../../middleware/auth.js';
 import { storage } from '../../providers/storage/index.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
-import { notify } from '../../providers/notification/index.js';
+import { notifyStudent } from '../../providers/notification/index.js';
 import { logger } from '../../lib/logger.js';
 
 export const agentRouter = Router();
@@ -108,7 +108,6 @@ agentRouter.post(
     const agent = req.agent!;
     const job = await prisma.job.findFirst({
       where: { id: param(req, 'id'), shopId: agent.shopId, claimedByAgentId: agent.id },
-      include: { student: true },
     });
     if (!job) throw notFound();
     if (job.status !== 'printing') throw conflict('Job is not printing');
@@ -119,7 +118,11 @@ agentRouter.post(
     });
     if (!updated) throw conflict('Job state changed');
 
-    await notify(job.student.phone, 'PrintQ: your print is ready — collect it at the counter.');
+    await notifyStudent(job.studentId, {
+      title: 'Print ready ✓',
+      body: 'Collect it at the counter.',
+      url: `/jobs/${job.id}`,
+    });
     publishEvent(`student:${job.studentId}`, 'job:update', {
       jobId: job.id,
       status: 'ready_for_pickup',
