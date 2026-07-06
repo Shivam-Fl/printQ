@@ -14,12 +14,6 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export const PAPER_SIZES = ['A4', 'A3'] as const;
-export type PaperSize = (typeof PAPER_SIZES)[number];
-
-export const FINISHING_OPTIONS = ['stapling', 'spiral_binding'] as const;
-export type FinishingOption = (typeof FINISHING_OPTIONS)[number];
-
 export const PRINTER_STATUSES = ['online', 'offline', 'jammed'] as const;
 export type PrinterStatus = (typeof PRINTER_STATUSES)[number];
 
@@ -29,29 +23,52 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const JOB_MODES = ['instant', 'scheduled'] as const;
 export type JobMode = (typeof JOB_MODES)[number];
 
+/**
+ * Print options are shop-defined (printQ.md — each shop sets its own paper
+ * types, incl. custom "college sheet", binding choices and prices). Paper and
+ * binding on a job are therefore free-form ids that must match one of the
+ * shop's configured options; the server validates + prices against them.
+ */
+export interface PaperOption {
+  /** stable id used in specs + printer capabilities, e.g. "A4", "college" */
+  id: string;
+  label: string;
+  bwPaise: number;
+  /** null = this paper is B/W only */
+  colorPaise: number | null;
+}
+
+export interface BindingOption {
+  id: string;
+  label: string;
+  paise: number;
+}
+
+export interface PrintOptions {
+  papers: PaperOption[];
+  bindings: BindingOption[];
+  duplexEnabled: boolean;
+}
+
 export interface JobSpecs {
   copies: number;
-  paperSize: PaperSize;
+  /** a PaperOption id offered by the shop */
+  paperSize: string;
   color: boolean;
   duplex: boolean;
-  binding: FinishingOption | null;
+  /** a BindingOption id, or null for none */
+  binding: string | null;
   /** e.g. "1-5,8,11-12"; null = all pages */
   pageRange: string | null;
 }
 
-/** All money values are integer paise (INR). */
-export interface RateCard {
-  /** paise per printed page, keyed by `${size}_${color ? 'color' : 'bw'}` */
-  pagePrices: Record<string, number>;
-  /** paise per job for a finishing option */
-  bindingPrices: Partial<Record<FinishingOption, number>>;
-}
-
 export interface PriceBreakdown {
+  paperLabel: string;
   pagesPerCopy: number;
   copies: number;
   perPagePaise: number;
   pagesTotalPaise: number;
+  bindingLabel: string | null;
   bindingPaise: number;
   totalPaise: number;
 }
@@ -59,9 +76,11 @@ export interface PriceBreakdown {
 export interface PrinterProfile {
   id: string;
   label: string;
-  paperSizesLoaded: PaperSize[];
+  /** PaperOption ids this printer currently has loaded */
+  paperSizesLoaded: string[];
   colorSupport: boolean;
-  finishingOptions: FinishingOption[];
+  /** BindingOption ids this printer can produce */
+  finishingOptions: string[];
   avgPagesPerMinute: number;
   status: PrinterStatus;
 }

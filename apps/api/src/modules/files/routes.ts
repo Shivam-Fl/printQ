@@ -13,9 +13,10 @@ import { convertQueue } from '../../lib/queues.js';
 export const filesRouter = Router();
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILES = 15;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
 });
 
 type AllowedKind = { ext: string; mime: string };
@@ -41,39 +42,56 @@ async function detectAllowedType(buffer: Buffer, originalName: string): Promise<
   return null;
 }
 
-/** Upload a document for a specific shop. Conversion runs async in the worker. */
+/**
+ * Upload one or more documents for a shop. Multiple files are merged, in the
+ * order sent, into a single print-ready PDF = one job (one preview, one price,
+ * one OTP). Conversion runs async in the worker. Accepts `files` (multi) and
+ * falls back to `file` (single) for older clients.
+ */
 filesRouter.post(
   '/',
   requireStudent,
   uploadLimiter,
-  upload.single('file'),
+  upload.fields([{ name: 'files', maxCount: MAX_FILES }, { name: 'file', maxCount: 1 }]),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw badRequest('No file uploaded');
+    const fields = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const files = [...(fields?.files ?? []), ...(fields?.file ?? [])];
+    if (files.length === 0) throw badRequest('No file uploaded');
+
     const shopSlug = typeof req.body?.shopSlug === 'string' ? req.body.shopSlug : '';
     const shop = await prisma.shop.findUnique({ where: { slug: shopSlug } });
     if (!shop) throw badRequest('Unknown shop');
 
-    const kind = await detectAllowedType(req.file.buffer, req.file.originalname);
-    if (!kind) throw badRequest('Only PDF, DOCX, JPG and PNG files are supported');
+    // validate + store each source; keep order for the merge
+    const sources: { key: string; mime: string; name: string }[] = [];
+    let totalBytes = 0;
+    for (const f of files) {
+      const kind = await detectAllowedType(f.buffer, f.originalname);
+      if (!kind) throw badRequest(`"${f.originalname}" isn't a PDF, DOCX, JPG or PNG`);
+      const key = `orig/${randomUUID()}.${kind.ext}`;
+      await storage.put(key, f.buffer, kind.mime);
+      sources.push({ key, mime: kind.mime, name: f.originalname.slice(0, 120) });
+      totalBytes += f.buffer.length;
+    }
 
-    // random storage key — user-supplied filename never touches the filesystem
-    const originalKey = `orig/${randomUUID()}.${kind.ext}`;
-    await storage.put(originalKey, req.file.buffer, kind.mime);
+    const first = files[0]!.originalname.slice(0, 120);
+    const displayName = files.length === 1 ? first : `${first} +${files.length - 1} more`;
 
     const record = await prisma.uploadedFile.create({
       data: {
         studentId: req.student!.id,
         shopId: shop.id,
-        originalName: req.file.originalname.slice(0, 200),
-        originalKey,
-        mimeType: kind.mime,
-        sizeBytes: req.file.buffer.length,
+        originalName: displayName,
+        originalKey: sources[0]!.key,
+        sources: files.length > 1 ? sources : undefined,
+        mimeType: sources[0]!.mime,
+        sizeBytes: totalBytes,
         status: 'uploaded',
       },
     });
     await convertQueue.add('convert', { fileId: record.id });
 
-    res.status(201).json({ file: { id: record.id, status: record.status } });
+    res.status(201).json({ file: { id: record.id, status: record.status, name: displayName } });
   }),
 );
 

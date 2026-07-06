@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
+import { shopOptions } from '../../lib/shopOptions.js';
 
 export const publicRouter = Router();
 
@@ -20,7 +21,7 @@ publicRouter.get(
         name: true,
         address: true,
         campusName: true,
-        rateCard: true,
+        printOptions: true,
         printers: {
           select: {
             paperSizesLoaded: true,
@@ -34,18 +35,26 @@ publicRouter.get(
     if (!shop) throw notFound();
 
     const online = shop.printers.filter((p) => p.status === 'online');
+    const options = shopOptions(shop);
+    // only surface options at least one online printer can actually produce
+    const loadedPapers = new Set(online.flatMap((p) => p.paperSizesLoaded));
+    const loadedBindings = new Set(online.flatMap((p) => p.finishingOptions));
+    const colorAvailable = online.some((p) => p.colorSupport);
+
     res.json({
       shop: {
         slug: shop.slug,
         name: shop.name,
         address: shop.address,
         campusName: shop.campusName,
-        rateCard: shop.rateCard,
         open: online.length > 0,
-        capabilities: {
-          paperSizes: [...new Set(online.flatMap((p) => p.paperSizesLoaded))],
-          color: online.some((p) => p.colorSupport),
-          finishingOptions: [...new Set(online.flatMap((p) => p.finishingOptions))],
+        colorAvailable,
+        options: {
+          papers: options.papers
+            .filter((p) => loadedPapers.size === 0 || loadedPapers.has(p.id))
+            .map((p) => ({ ...p, colorPaise: colorAvailable ? p.colorPaise : null })),
+          bindings: options.bindings.filter((b) => loadedBindings.size === 0 || loadedBindings.has(b.id)),
+          duplexEnabled: options.duplexEnabled,
         },
       },
     });

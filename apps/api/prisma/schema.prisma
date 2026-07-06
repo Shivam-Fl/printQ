@@ -64,8 +64,10 @@ model Shop {
   address           String
   campusName        String?
   autoAssignEnabled Boolean  @default(true)
-  /// RateCard JSON — paise-integer prices, validated by rateCardSchema
+  /// legacy RateCard JSON — superseded by printOptions
   rateCard          Json
+  /// PrintOptions JSON (papers[], bindings[], duplexEnabled); null = defaults
+  printOptions      Json?
   otpWindowMinutes  Int      @default(10)
   createdAt         DateTime @default(now())
 
@@ -168,9 +170,12 @@ model UploadedFile {
   student      Student    @relation(fields: [studentId], references: [id])
   shopId       String
   shop         Shop       @relation(fields: [shopId], references: [id])
+  /// display name — for a merged upload this is "first.pdf +2 more"
   originalName String
-  /// storage keys are random UUIDs — never the user-supplied filename
+  /// storage key of the first/primary source (kept for the single-file path)
   originalKey  String
+  /// multi-file uploads: [{ key, mime, name }] merged in order; null = single
+  sources      Json?
   convertedKey String?
   previewKey   String?
   mimeType     String

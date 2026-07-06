@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  printOptionsSchema,
   printerInputSchema,
-  rateCardSchema,
   releaseOtpSchema,
   type JobSpecs,
 } from '@printq/shared';
@@ -13,6 +13,7 @@ import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
 import { otpVerifyLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
+import { shopOptions } from '../../lib/shopOptions.js';
 import { releaseByOtp } from '../queue/release.js';
 import {
   advancePrinterQueue,
@@ -41,12 +42,13 @@ shopRouter.get(
         address: true,
         campusName: true,
         autoAssignEnabled: true,
-        rateCard: true,
+        printOptions: true,
         otpWindowMinutes: true,
       },
     });
     if (!shop) throw notFound();
-    res.json({ shop });
+    // always return a concrete menu (defaults when the shop hasn't customised)
+    res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
   }),
 );
 
@@ -54,10 +56,10 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   autoAssignEnabled: z.boolean().optional(),
-  rateCard: rateCardSchema.optional(),
+  printOptions: printOptionsSchema.optional(),
 });
 
-/** Owner-only settings updates (auto-assign toggle, rate card, details). */
+/** Owner-only settings updates (details, auto-assign, print menu + pricing). */
 shopRouter.patch(
   '/me',
   requireShopOwner,
@@ -66,9 +68,115 @@ shopRouter.patch(
     const shop = await prisma.shop.update({
       where: { id: req.shopUser!.shopId },
       data: req.body as object,
-      select: { id: true, name: true, address: true, autoAssignEnabled: true, rateCard: true },
+      select: { id: true, name: true, address: true, autoAssignEnabled: true, printOptions: true },
     });
-    res.json({ shop });
+    res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+  }),
+);
+
+/** Analytics: revenue, prints and pages for the owner dashboard. */
+shopRouter.get(
+  '/stats',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const since = new Date(Date.now() - 30 * 86_400_000);
+
+    const [allTime, completedCount, printers, recentCompleted] = await Promise.all([
+      prisma.job.aggregate({ where: { shopId, paymentStatus: 'paid' }, _sum: { totalPaise: true }, _count: true }),
+      prisma.job.count({ where: { shopId, status: 'completed' } }),
+      prisma.printer.findMany({ where: { shopId }, select: { id: true, label: true } }),
+      prisma.job.findMany({
+        where: { shopId, status: 'completed', updatedAt: { gte: since } },
+        select: { pagesPerCopy: true, specs: true, totalPaise: true, assignedPrinterId: true, updatedAt: true },
+      }),
+    ]);
+
+    const label = new Map(printers.map((p) => [p.id, p.label]));
+    let pagesPrinted = 0;
+    let todayRevenue = 0;
+    let todayJobs = 0;
+    const byPrinter = new Map<string, { label: string; jobs: number; pages: number }>();
+    const byDay = new Map<string, number>();
+
+    for (const j of recentCompleted) {
+      const copies = (j.specs as unknown as JobSpecs).copies ?? 1;
+      const sheets = j.pagesPerCopy * copies;
+      pagesPrinted += sheets;
+      if (j.updatedAt >= startOfToday) {
+        todayRevenue += j.totalPaise;
+        todayJobs += 1;
+      }
+      const pid = j.assignedPrinterId ?? 'unassigned';
+      const row = byPrinter.get(pid) ?? { label: label.get(pid) ?? '—', jobs: 0, pages: 0 };
+      row.jobs += 1;
+      row.pages += sheets;
+      byPrinter.set(pid, row);
+      const day = j.updatedAt.toISOString().slice(0, 10);
+      byDay.set(day, (byDay.get(day) ?? 0) + j.totalPaise);
+    }
+
+    const days = [...Array(7)].map((_, i) => {
+      const d = new Date(Date.now() - (6 - i) * 86_400_000).toISOString().slice(0, 10);
+      return { day: d, revenuePaise: byDay.get(d) ?? 0 };
+    });
+
+    res.json({
+      stats: {
+        totalRevenuePaise: allTime._sum.totalPaise ?? 0,
+        totalPaidJobs: allTime._count,
+        completedJobs: completedCount,
+        pagesPrinted30d: pagesPrinted,
+        todayRevenuePaise: todayRevenue,
+        todayJobs,
+        perPrinter: [...byPrinter.values()].sort((a, b) => b.jobs - a.jobs),
+        last7Days: days,
+      },
+    });
+  }),
+);
+
+/** Past jobs with which printer they went to (owner record). */
+shopRouter.get(
+  '/history',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const jobs = await prisma.job.findMany({
+      where: {
+        shopId: req.shopUser!.shopId,
+        status: { in: ['completed', 'expired', 'cancelled'] },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        status: true,
+        specs: true,
+        pagesPerCopy: true,
+        totalPaise: true,
+        mode: true,
+        updatedAt: true,
+        assignedPrinter: { select: { label: true } },
+        student: { select: { name: true, phone: true } },
+        file: { select: { originalName: true } },
+      },
+    });
+    res.json({
+      jobs: jobs.map((j) => ({
+        id: j.id,
+        status: j.status,
+        specs: j.specs,
+        pagesPerCopy: j.pagesPerCopy,
+        totalPaise: j.totalPaise,
+        mode: j.mode,
+        at: j.updatedAt,
+        printer: j.assignedPrinter?.label ?? null,
+        student: { name: j.student.name, phoneMasked: maskPhone(j.student.phone) },
+        file: j.file.originalName,
+      })),
+    });
   }),
 );
 

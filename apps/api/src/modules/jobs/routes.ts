@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { computePrice, createJobSchema, jobSpecsSchema, type JobSpecs, type RateCard } from '@printq/shared';
+import { computePrice, createJobSchema, jobSpecsSchema, type JobSpecs } from '@printq/shared';
+import { shopOptions } from '../../lib/shopOptions.js';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
@@ -25,7 +26,7 @@ jobsRouter.post(
     });
     if (!file || file.pages == null) throw notFound('File not ready');
 
-    const breakdown = computePrice(specs, file.pages, file.shop.rateCard as unknown as RateCard);
+    const breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
     res.json({ quote: breakdown, pages: file.pages });
   }),
 );
@@ -51,7 +52,7 @@ jobsRouter.post(
     });
     if (!file || file.pages == null) throw notFound('File not ready');
 
-    const breakdown = computePrice(specs, file.pages, file.shop.rateCard as unknown as RateCard);
+    const breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
     if (breakdown.totalPaise < 100) throw badRequest('Minimum order is ₹1');
 
     const job = await prisma.job.create({

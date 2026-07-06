@@ -4,18 +4,32 @@ import { API_URL, api, getToken, rupees } from '../../api.js';
 import { enablePush, pushPermission } from '../../push.js';
 import Topbar from '../../components/Topbar.js';
 
+interface Paper {
+  id: string;
+  label: string;
+  bwPaise: number;
+  colorPaise: number | null;
+}
+interface Binding {
+  id: string;
+  label: string;
+  paise: number;
+}
+interface ShopOptions {
+  papers: Paper[];
+  bindings: Binding[];
+  duplexEnabled: boolean;
+}
 interface Specs {
   copies: number;
-  paperSize: 'A4' | 'A3';
+  paperSize: string;
   color: boolean;
   duplex: boolean;
-  binding: 'stapling' | 'spiral_binding' | null;
+  binding: string | null;
   pageRange: string | null;
 }
-
 interface Quote {
   pagesPerCopy: number;
-  perPagePaise: number;
   pagesTotalPaise: number;
   bindingPaise: number;
   totalPaise: number;
@@ -27,7 +41,6 @@ declare global {
   }
 }
 
-/** datetime-local needs a local ISO without seconds */
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -36,14 +49,8 @@ function toLocalInput(d: Date): string {
 export default function NewJob() {
   const { slug = '', fileId = '' } = useParams();
   const navigate = useNavigate();
-  const [specs, setSpecs] = useState<Specs>({
-    copies: 1,
-    paperSize: 'A4',
-    color: false,
-    duplex: false,
-    binding: null,
-    pageRange: null,
-  });
+  const [opts, setOpts] = useState<ShopOptions | null>(null);
+  const [specs, setSpecs] = useState<Specs | null>(null);
   const [mode, setMode] = useState<'instant' | 'scheduled'>('instant');
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
   const [pages, setPages] = useState<number | null>(null);
@@ -53,6 +60,24 @@ export default function NewJob() {
 
   const token = getToken('student');
   const previewUrl = `${API_URL}/api/files/${fileId}/preview?token=${encodeURIComponent(token ?? '')}`;
+
+  // load the shop's offered options and seed defaults
+  useEffect(() => {
+    api<{ shop: { options: ShopOptions } }>(`/api/public/shops/${slug}`)
+      .then((r) => {
+        setOpts(r.shop.options);
+        const p0 = r.shop.options.papers[0];
+        setSpecs({
+          copies: 1,
+          paperSize: p0?.id ?? 'A4',
+          color: false,
+          duplex: false,
+          binding: null,
+          pageRange: null,
+        });
+      })
+      .catch(() => setError('Could not load this shop.'));
+  }, [slug]);
 
   const refreshQuote = useCallback(
     async (s: Specs) => {
@@ -74,41 +99,42 @@ export default function NewJob() {
   );
 
   useEffect(() => {
+    if (!specs) return;
     const t = setTimeout(() => void refreshQuote(specs), 300);
     return () => clearTimeout(t);
   }, [specs, refreshQuote]);
 
   function set<K extends keyof Specs>(key: K, value: Specs[K]) {
-    setSpecs((prev) => ({ ...prev, [key]: value }));
+    setSpecs((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
+  const paper = opts?.papers.find((p) => p.id === specs?.paperSize);
+  const colorAvailable = paper?.colorPaise != null;
+
+  // if the chosen paper can't do colour, force B/W
+  useEffect(() => {
+    if (specs?.color && !colorAvailable) set('color', false);
+  }, [specs?.paperSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function payAndQueue() {
+    if (!specs) return;
     setBusy(true);
     setError('');
     try {
       const body: Record<string, unknown> = { fileId, specs, mode };
       if (mode === 'scheduled') body.scheduledTime = new Date(slot).toISOString();
-
       const res = await api<{
         job: { id: string };
         checkout: { mode: 'mock' | 'razorpay'; keyId?: string; orderId?: string; amountPaise?: number };
       }>('/api/jobs', { method: 'POST', role: 'student', body });
 
-      // best moment to ask: they just committed to a job they'll wait on
       if (pushPermission() === 'default') void enablePush();
 
       if (res.checkout.mode === 'mock') {
-        await api('/api/payments/mock/confirm', {
-          method: 'POST',
-          role: 'student',
-          body: { jobId: res.job.id },
-        });
+        await api('/api/payments/mock/confirm', { method: 'POST', role: 'student', body: { jobId: res.job.id } });
         navigate(`/jobs/${res.job.id}`);
         return;
       }
-
-      // Razorpay checkout — the job is confirmed by the server webhook, this
-      // page just opens the payment UI and then watches the job status.
       await loadRazorpay();
       const rzp = new window.Razorpay!({
         key: res.checkout.keyId,
@@ -127,6 +153,16 @@ export default function NewJob() {
     }
   }
 
+  if (!opts || !specs) {
+    return (
+      <div className="page">
+        <Topbar />
+        <p className="dim">Loading…</p>
+        {error && <p className="error">{error}</p>}
+      </div>
+    );
+  }
+
   const minSlot = toLocalInput(new Date(Date.now() + 20 * 60_000));
   const maxSlot = toLocalInput(new Date(Date.now() + 72 * 3_600_000));
 
@@ -134,9 +170,7 @@ export default function NewJob() {
     <div className="page">
       <Topbar />
       <h1>Set your print</h1>
-      <p className="dim">
-        This preview is exactly what will print{pages ? ` · ${pages} pages` : ''}.
-      </p>
+      <p className="dim">This preview is exactly what will print{pages ? ` · ${pages} pages` : ''}.</p>
       <iframe className="preview-frame" src={previewUrl} title="Print preview" />
 
       <div className="card stack">
@@ -154,42 +188,58 @@ export default function NewJob() {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label htmlFor="size">Paper</label>
-            <select id="size" value={specs.paperSize} onChange={(e) => set('paperSize', e.target.value as Specs['paperSize'])}>
-              <option value="A4">A4</option>
-              <option value="A3">A3</option>
+            <label htmlFor="paper">Paper</label>
+            <select id="paper" value={specs.paperSize} onChange={(e) => set('paperSize', e.target.value)}>
+              {opts.papers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label} — {rupees(p.bwPaise)}/pg
+                </option>
+              ))}
             </select>
           </div>
         </div>
         <div className="row">
           <div style={{ flex: 1 }}>
             <label htmlFor="color">Colour</label>
-            <select id="color" value={specs.color ? 'color' : 'bw'} onChange={(e) => set('color', e.target.value === 'color')}>
+            <select
+              id="color"
+              value={specs.color ? 'color' : 'bw'}
+              disabled={!colorAvailable}
+              onChange={(e) => set('color', e.target.value === 'color')}
+            >
               <option value="bw">Black &amp; white</option>
-              <option value="color">Colour</option>
+              {colorAvailable && <option value="color">Colour — {rupees(paper!.colorPaise!)}/pg</option>}
             </select>
           </div>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="sides">Sides</label>
-            <select id="sides" value={specs.duplex ? 'duplex' : 'single'} onChange={(e) => set('duplex', e.target.value === 'duplex')}>
-              <option value="single">One-sided</option>
-              <option value="duplex">Both sides</option>
-            </select>
-          </div>
+          {opts.duplexEnabled && (
+            <div style={{ flex: 1 }}>
+              <label htmlFor="sides">Sides</label>
+              <select id="sides" value={specs.duplex ? 'duplex' : 'single'} onChange={(e) => set('duplex', e.target.value === 'duplex')}>
+                <option value="single">One-sided</option>
+                <option value="duplex">Both sides</option>
+              </select>
+            </div>
+          )}
         </div>
         <div className="row">
-          <div style={{ flex: 1 }}>
-            <label htmlFor="binding">Binding</label>
-            <select
-              id="binding"
-              value={specs.binding ?? 'none'}
-              onChange={(e) => set('binding', e.target.value === 'none' ? null : (e.target.value as Specs['binding']))}
-            >
-              <option value="none">None</option>
-              <option value="stapling">Stapled</option>
-              <option value="spiral_binding">Spiral bound</option>
-            </select>
-          </div>
+          {opts.bindings.length > 0 && (
+            <div style={{ flex: 1 }}>
+              <label htmlFor="binding">Binding</label>
+              <select
+                id="binding"
+                value={specs.binding ?? 'none'}
+                onChange={(e) => set('binding', e.target.value === 'none' ? null : e.target.value)}
+              >
+                <option value="none">None</option>
+                {opts.bindings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.label}
+                    {b.paise > 0 ? ` — ${rupees(b.paise)}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div style={{ flex: 1 }}>
             <label htmlFor="range">Pages (optional)</label>
             <input
@@ -205,31 +255,16 @@ export default function NewJob() {
 
       <div className="card stack">
         <div className="seg" role="radiogroup" aria-label="When to print">
-          <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>
-            Print now
-          </button>
-          <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>
-            Pick a slot
-          </button>
+          <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>Print now</button>
+          <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>Pick a slot</button>
         </div>
         {mode === 'instant' ? (
-          <p className="dim" style={{ margin: 0 }}>
-            You join the live queue the moment payment is done.
-          </p>
+          <p className="dim" style={{ margin: 0 }}>You join the live queue the moment payment is done.</p>
         ) : (
           <div>
             <label htmlFor="slot">Print at</label>
-            <input
-              id="slot"
-              type="datetime-local"
-              value={slot}
-              min={minSlot}
-              max={maxSlot}
-              onChange={(e) => setSlot(e.target.value)}
-            />
-            <p className="dim" style={{ marginBottom: 0 }}>
-              Book tonight, walk in tomorrow — your spot is reserved at that time.
-            </p>
+            <input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} />
+            <p className="dim" style={{ marginBottom: 0 }}>Book tonight, walk in tomorrow — your spot is reserved.</p>
           </div>
         )}
       </div>
@@ -238,21 +273,13 @@ export default function NewJob() {
         {quote ? (
           <div className="receipt">
             <div className="line">
-              <span>
-                {quote.pagesPerCopy} pages × {specs.copies} {specs.copies === 1 ? 'copy' : 'copies'}
-              </span>
+              <span>{quote.pagesPerCopy} pages × {specs.copies} {specs.copies === 1 ? 'copy' : 'copies'}</span>
               <span>{rupees(quote.pagesTotalPaise)}</span>
             </div>
             {quote.bindingPaise > 0 && (
-              <div className="line">
-                <span>binding</span>
-                <span>{rupees(quote.bindingPaise)}</span>
-              </div>
+              <div className="line"><span>binding</span><span>{rupees(quote.bindingPaise)}</span></div>
             )}
-            <div className="line total">
-              <span>Total</span>
-              <span>{rupees(quote.totalPaise)}</span>
-            </div>
+            <div className="line total"><span>Total</span><span>{rupees(quote.totalPaise)}</span></div>
           </div>
         ) : (
           <p className="dim" style={{ margin: 0 }}>Pricing…</p>
@@ -262,9 +289,7 @@ export default function NewJob() {
         </button>
       </div>
       {error && <div className="error">{error}</div>}
-      <p className="dim">
-        <a href={`/s/${slug}`}>← choose a different file</a>
-      </p>
+      <p className="dim"><a href={`/s/${slug}`}>← choose different files</a></p>
     </div>
   );
 }

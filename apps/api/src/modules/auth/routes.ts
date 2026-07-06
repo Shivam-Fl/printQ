@@ -2,7 +2,7 @@ import { Router } from 'express';
 import argon2 from 'argon2';
 import { z } from 'zod';
 import {
-  DEFAULT_RATE_CARD,
+  DEFAULT_PRINT_OPTIONS,
   requestLoginOtpSchema,
   shopLoginSchema,
   verifyLoginOtpSchema,
@@ -151,7 +151,8 @@ authRouter.post(
         address: body.address,
         campusName: body.campusName ?? null,
         autoAssignEnabled: true,
-        rateCard: DEFAULT_RATE_CARD as unknown as object,
+        rateCard: {}, // legacy column, superseded by printOptions
+        printOptions: DEFAULT_PRINT_OPTIONS as unknown as object,
       },
     });
     const user = await prisma.shopUser.create({

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FINISHING_OPTIONS, JOB_MODES, PAPER_SIZES, PRINTER_STATUSES } from './types.js';
+import { JOB_MODES, PRINTER_STATUSES } from './types.js';
 
 /** Indian mobile normalized to E.164 (+91XXXXXXXXXX). Accepts 10-digit input. */
 export const phoneSchema = z
@@ -19,31 +19,54 @@ export const pageRangeSchema = z
   .max(200)
   .regex(/^\d+(-\d+)?(\s*,\s*\d+(-\d+)?)*$/, 'Use a format like 1-5,8');
 
+/** Paper/binding are shop-defined ids — validated against the shop at request time. */
+const optionId = z.string().trim().min(1).max(40);
+
 export const jobSpecsSchema = z.object({
   copies: z.number().int().min(1).max(100),
-  paperSize: z.enum(PAPER_SIZES),
+  paperSize: optionId,
   color: z.boolean(),
   duplex: z.boolean(),
-  binding: z.enum(FINISHING_OPTIONS).nullable().default(null),
+  binding: optionId.nullable().default(null),
   pageRange: pageRangeSchema.nullable().default(null),
 });
 export type JobSpecsInput = z.infer<typeof jobSpecsSchema>;
 
+/** Shop's configurable print menu (Settings page). */
+export const printOptionsSchema = z.object({
+  papers: z
+    .array(
+      z.object({
+        id: optionId,
+        label: z.string().trim().min(1).max(40),
+        bwPaise: z.number().int().min(0).max(1_000_000),
+        colorPaise: z.number().int().min(0).max(1_000_000).nullable(),
+      }),
+    )
+    .min(1, 'Add at least one paper type')
+    .max(12),
+  bindings: z
+    .array(
+      z.object({
+        id: optionId,
+        label: z.string().trim().min(1).max(40),
+        paise: z.number().int().min(0).max(1_000_000),
+      }),
+    )
+    .max(12),
+  duplexEnabled: z.boolean(),
+});
+
 export const printerInputSchema = z.object({
   label: z.string().trim().min(1).max(80),
-  paperSizesLoaded: z.array(z.enum(PAPER_SIZES)).min(1),
+  paperSizesLoaded: z.array(optionId).min(1),
   colorSupport: z.boolean(),
   currentlyLoadedPaper: z.string().trim().max(80).optional(),
-  finishingOptions: z.array(z.enum(FINISHING_OPTIONS)).default([]),
+  finishingOptions: z.array(optionId).default([]),
   avgPagesPerMinute: z.number().int().min(1).max(200).default(15),
   status: z.enum(PRINTER_STATUSES).default('online'),
 });
 export type PrinterInput = z.infer<typeof printerInputSchema>;
-
-export const rateCardSchema = z.object({
-  pagePrices: z.record(z.string(), z.number().int().min(0).max(1_000_000)),
-  bindingPrices: z.record(z.enum(FINISHING_OPTIONS), z.number().int().min(0).max(1_000_000)),
-});
 
 export const requestLoginOtpSchema = z.object({
   phone: phoneSchema,

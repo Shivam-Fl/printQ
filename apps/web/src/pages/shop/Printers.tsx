@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
-import Topbar from '../../components/Topbar.js';
+import ShopNav from '../../components/ShopNav.js';
 
 interface Printer {
   id: string;
@@ -100,7 +100,7 @@ export default function Printers() {
 
   return (
     <div className="page wide">
-      <Topbar tag="printers" right={<Link to="/dashboard">← Dashboard</Link>} />
+      <ShopNav />
 
       {shop && (
         <div className="card row between">

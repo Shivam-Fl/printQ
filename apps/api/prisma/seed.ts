@@ -4,7 +4,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import argon2 from 'argon2';
-import { DEFAULT_RATE_CARD } from '@printq/shared';
+import { DEFAULT_PRINT_OPTIONS } from '@printq/shared';
 
 const prisma = new PrismaClient();
 
@@ -21,7 +21,8 @@ async function main() {
       address: 'Gate 2, Demo College Road',
       campusName: 'Demo College',
       autoAssignEnabled: true,
-      rateCard: DEFAULT_RATE_CARD as unknown as object,
+      rateCard: {}, // legacy column, superseded by printOptions
+      printOptions: DEFAULT_PRINT_OPTIONS as unknown as object,
     },
   });
 

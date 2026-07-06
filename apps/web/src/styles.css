@@ -605,6 +605,70 @@ tr:last-child td { border-bottom: none; }
 .list-row .ic { color: var(--pencil); display: grid; place-items: center; }
 .list-row .ic svg { width: 20px; height: 20px; }
 
+/* ---------- shop top nav ---------- */
+
+.shopnav {
+  display: flex;
+  align-items: center;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  padding: 14px 0 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 8px;
+}
+.shopnav .brand { margin-right: 6px; }
+.shopnav .links { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.shopnav .links a {
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--pencil);
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-decoration: none;
+}
+.shopnav .links a:hover { background: var(--paper); }
+.shopnav .links a.active { background: var(--stamp-soft); color: var(--stamp); }
+
+/* ---------- stat tiles ---------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.stat {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+.stat .n { font-family: var(--font-mono); font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; }
+.stat .k { font-size: 0.78rem; color: var(--pencil); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+.stat.accent { background: var(--stamp); border-color: var(--stamp); color: #fff; }
+.stat.accent .k { color: rgba(255, 255, 255, 0.8); }
+
+/* mini bar chart (7-day revenue) */
+.bars { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-top: 8px; }
+.bars .bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+.bars .bar .fill { width: 100%; background: var(--stamp-soft); border: 1px solid var(--stamp); border-radius: 6px 6px 0 0; min-height: 3px; }
+.bars .bar .lbl { font-size: 0.68rem; color: var(--pencil); font-family: var(--font-mono); }
+
+/* settings option rows */
+.opt-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.opt-row:last-of-type { border-bottom: none; }
+.opt-row .rm { background: none; border: none; color: var(--danger); cursor: pointer; padding: 10px; font-size: 1.1rem; }
+@media (max-width: 560px) {
+  .opt-row { grid-template-columns: 1fr 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ticket, .toast { animation: none; }
   button { transition: none; }

@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
-import { InvalidTransitionError } from '@printq/shared';
+import { InvalidTransitionError, PricingError } from '@printq/shared';
 import { HttpError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 
@@ -19,6 +19,10 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
   if (err instanceof InvalidTransitionError) {
     res.status(409).json({ error: 'This action is not possible in the job’s current state' });
+    return;
+  }
+  if (err instanceof PricingError) {
+    res.status(400).json({ error: err.message });
     return;
   }
   if (err instanceof HttpError) {

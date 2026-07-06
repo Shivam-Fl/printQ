@@ -70,22 +70,41 @@ async function docxToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }
   }
 }
 
-/** BullMQ 'convert' handler: original upload → normalized print-ready PDF. */
+async function sourceToPdf(buffer: Buffer, mime: string): Promise<{ pdf: Buffer; pages: number }> {
+  if (mime === 'application/pdf') return pdfToNormalized(buffer);
+  if (mime === 'image/jpeg' || mime === 'image/png') return imageToPdf(buffer);
+  return docxToPdf(buffer);
+}
+
+type Source = { key: string; mime: string; name: string };
+
+/** BullMQ 'convert' handler: upload(s) → one normalized print-ready PDF. */
 export async function convertFile(fileId: string): Promise<void> {
   const file = await prisma.uploadedFile.findUnique({ where: { id: fileId } });
   if (!file || file.status === 'deleted') return;
 
   await prisma.uploadedFile.update({ where: { id: fileId }, data: { status: 'converting' } });
   try {
-    const original = await storage.get(file.originalKey);
+    const sources: Source[] = Array.isArray(file.sources)
+      ? (file.sources as unknown as Source[])
+      : [{ key: file.originalKey, mime: file.mimeType, name: file.originalName }];
 
     let result: { pdf: Buffer; pages: number };
-    if (file.mimeType === 'application/pdf') {
-      result = await pdfToNormalized(original);
-    } else if (file.mimeType === 'image/jpeg' || file.mimeType === 'image/png') {
-      result = await imageToPdf(original);
+    if (sources.length === 1) {
+      const buf = await storage.get(sources[0]!.key);
+      result = await sourceToPdf(buf, sources[0]!.mime);
     } else {
-      result = await docxToPdf(original);
+      // convert each source, then concatenate into one document (order preserved)
+      const merged = await PDFDocument.create();
+      for (const src of sources) {
+        const buf = await storage.get(src.key);
+        const { pdf } = await sourceToPdf(buf, src.mime);
+        const doc = await PDFDocument.load(pdf);
+        const pages = await merged.copyPages(doc, doc.getPageIndices());
+        for (const p of pages) merged.addPage(p);
+      }
+      const bytes = await merged.save();
+      result = { pdf: Buffer.from(bytes), pages: merged.getPageCount() };
     }
     if (result.pages < 1) throw new Error('Converted document has no pages');
 
@@ -119,7 +138,10 @@ export async function cleanupExpiredFiles(): Promise<void> {
   });
   for (const file of expired) {
     try {
-      await storage.delete(file.originalKey);
+      const keys = Array.isArray(file.sources)
+        ? (file.sources as unknown as Source[]).map((s) => s.key)
+        : [file.originalKey];
+      for (const key of keys) await storage.delete(key);
       if (file.convertedKey) await storage.delete(file.convertedKey);
       await prisma.uploadedFile.update({
         where: { id: file.id },

@@ -13,6 +13,9 @@ import ShopRegister from './pages/shop/ShopRegister.js';
 import Dashboard from './pages/shop/Dashboard.js';
 import Printers from './pages/shop/Printers.js';
 import Agents from './pages/shop/Agents.js';
+import Settings from './pages/shop/Settings.js';
+import Insights from './pages/shop/Insights.js';
+import History from './pages/shop/History.js';
 
 export default function App() {
   return (
@@ -31,8 +34,11 @@ export default function App() {
         <Route path="/dashboard/login" element={<ShopLogin />} />
         <Route path="/dashboard/register" element={<ShopRegister />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/dashboard/insights" element={<Insights />} />
+        <Route path="/dashboard/history" element={<History />} />
         <Route path="/dashboard/printers" element={<Printers />} />
         <Route path="/dashboard/agents" element={<Agents />} />
+        <Route path="/dashboard/settings" element={<Settings />} />
       </Routes>
       <Toasts />
     </>
