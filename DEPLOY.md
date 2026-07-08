@@ -17,11 +17,11 @@ auto-confirms via `/api/payments/mock/confirm`, no Razorpay account needed to st
 testing. Flip this to real payments whenever you're ready (Phase 2, step 6 below).
 
 **Migrations run on container start, not as a separate deploy step** —
-`preDeployCommand` needs a paid Render plan, so `render.yaml`'s `dockerCommand` runs
-`prisma migrate deploy` immediately before starting the server instead
-(`sh -c "npx prisma migrate deploy ... && node apps/api/dist/server.js"`). It's
-idempotent — a no-op if there's nothing pending — so this is safe to run on every
-cold start, not just on deploy.
+`preDeployCommand` needs a paid Render plan, so the image's own entrypoint
+(`docker-entrypoint.sh`, set as the Dockerfile's `CMD`) runs `prisma migrate deploy`
+immediately before starting the server instead. It's idempotent — a no-op if
+there's nothing pending — so this is safe to run on every cold start, not just on
+deploy.
 
 ## Phase 1 — free testing week
 

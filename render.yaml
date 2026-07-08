@@ -27,10 +27,11 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # preDeployCommand needs a paid plan — on free tier, run migrations as part of
-    # the start command instead (idempotent: a no-op if nothing's pending, so
-    # re-running it on every cold start/restart is harmless).
-    dockerCommand: sh -c "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/server.js"
+    # preDeployCommand needs a paid plan — on free tier, migrations run instead
+    # via the image's own CMD (docker-entrypoint.sh: migrate deploy, then start
+    # the server). No dockerCommand override here — Render's dockerCommand
+    # string isn't reliably shell-parsed (a quoted `&&` chain got passed
+    # through as one literal token in testing), so the fix lives in the image.
     healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV

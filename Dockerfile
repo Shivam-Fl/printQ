@@ -1,9 +1,12 @@
 # PrintQ production image — single deployable serving the API + built web app
 # from one Express process (see apps/api/src/app.ts). See DEPLOY.md.
 #
-# Two ways to run the resulting image:
-#   web service:      node apps/api/dist/server.js            (RUN_WORKERS=false)
-#   background worker: node apps/api/dist/worker.js
+# Default CMD (docker-entrypoint.sh) runs pending migrations then starts the
+# API+web+workers process — this is the "web service" mode.
+# To run only the BullMQ worker instead (e.g. a separate Render/Fly service
+# once you've split it out — see DEPLOY.md's upgrade checklist), override the
+# command: node apps/api/dist/worker.js (skip migrations there; the web
+# service's entrypoint already ran them).
 
 # ---------- build ----------
 FROM node:22-slim AS build
@@ -52,6 +55,8 @@ COPY --from=build /app/apps/api/package.json apps/api/package.json
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/api/prisma apps/api/prisma
 COPY --from=build /app/apps/web/dist apps/web/dist
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 EXPOSE 4000
-CMD ["node", "apps/api/dist/server.js"]
+CMD ["./docker-entrypoint.sh"]
