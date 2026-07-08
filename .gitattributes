@@ -1,0 +1,3 @@
+# Force LF regardless of local git config (Windows autocrlf) — a shebang
+# script with CRLF line endings fails outright inside a Linux container.
+* text=auto eol=lf
