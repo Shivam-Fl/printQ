@@ -71,11 +71,30 @@ model Shop {
   otpWindowMinutes  Int      @default(10)
   createdAt         DateTime @default(now())
 
-  users    ShopUser[]
-  printers Printer[]
-  agents   Agent[]
-  jobs     Job[]
-  files    UploadedFile[]
+  users         ShopUser[]
+  printers      Printer[]
+  agents        Agent[]
+  jobs          Job[]
+  files         UploadedFile[]
+  openInterests ShopOpenInterest[]
+  coupons       Coupon[]
+}
+
+/// A discount code — platform-wide (shopId null) or scoped to one shop.
+model Coupon {
+  id     String  @id @default(uuid())
+  code   String  @unique
+  shopId String?
+  shop   Shop?   @relation(fields: [shopId], references: [id])
+
+  /// exactly one of these is set
+  percentOff Int?
+  paiseOff   Int?
+
+  expiresAt      DateTime?
+  maxRedemptions Int?
+  redeemedCount  Int       @default(0)
+  createdAt      DateTime  @default(now())
 }
 
 model ShopUser {
@@ -100,6 +119,19 @@ model Student {
   jobs              Job[]
   files             UploadedFile[]
   pushSubscriptions PushSubscription[]
+  openInterests     ShopOpenInterest[]
+}
+
+/// A student asked to be pinged when a closed shop has a printer online again.
+model ShopOpenInterest {
+  id        String   @id @default(uuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id])
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([shopId, studentId])
 }
 
 /// Web Push subscription for the installed PWA.
@@ -128,6 +160,19 @@ model LoginOtp {
   @@index([phone, createdAt])
 }
 
+/// Shop-owner forgot-password codes. Hashed (argon2 + pepper), same as LoginOtp.
+model PasswordResetOtp {
+  id         String    @id @default(uuid())
+  email      String
+  otpHash    String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email, createdAt])
+}
+
 model Printer {
   id                   String        @id @default(uuid())
   shopId               String
@@ -141,6 +186,9 @@ model Printer {
   status               PrinterStatus @default(online)
   /// what the queue last promoted (instant/scheduled) — drives fair alternation
   lastPromotedMode     JobMode?
+  /// exact OS/spooler printer name an agent should dispatch to; null = not yet
+  /// linked to real hardware (falls back to the manual-assign safety net)
+  osPrinterName        String?
   createdAt            DateTime      @default(now())
 
   jobs Job[]
@@ -159,6 +207,9 @@ model Agent {
   connectedPrinterIds String[]    @default([])
   lastHeartbeatAt     DateTime?
   status              AgentStatus @default(offline)
+  /// last getPrinters() report from this PC: [{ name, paperSizes }]
+  detectedPrinters    Json?
+  detectedAt          DateTime?
   createdAt           DateTime    @default(now())
 
   @@index([shopId])
@@ -219,6 +270,10 @@ model Job {
   paymentOrderId  String?       @unique
   paymentId       String?
 
+  /// coupon code applied at checkout, if any — discount already folded into totalPaise
+  couponCode    String?
+  discountPaise Int     @default(0)
+
   mode          JobMode   @default(instant)
   scheduledTime DateTime?
 
@@ -237,6 +292,10 @@ model Job {
 
   noShowCount Int       @default(0)
   noShowAt    DateTime?
+
+  /// student's post-pickup rating — settable once, only after `completed`
+  rating     Int?
+  reviewText String?
 
   /// payment-confirmation time; queue order is (queuedAt asc)
   queuedAt         DateTime?

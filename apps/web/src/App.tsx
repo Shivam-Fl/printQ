@@ -5,6 +5,7 @@ import Login from './pages/student/Login.js';
 import Home from './pages/student/Home.js';
 import Profile from './pages/student/Profile.js';
 import ShopLanding from './pages/student/ShopLanding.js';
+import ShopDirectory from './pages/student/ShopDirectory.js';
 import NewJob from './pages/student/NewJob.js';
 import JobStatus from './pages/student/JobStatus.js';
 import MyJobs from './pages/student/MyJobs.js';
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/jobs" element={<MyJobs />} />
         <Route path="/jobs/:id" element={<JobStatus />} />
+        <Route path="/shops" element={<ShopDirectory />} />
         <Route path="/s/:slug" element={<ShopLanding />} />
         <Route path="/s/:slug/file/:fileId" element={<NewJob />} />
         {/* shop */}

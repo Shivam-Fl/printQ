@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, getToken, rememberShop, rupees } from '../../api.js';
+import { api, downloadFile, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import { enablePush, pushPermission } from '../../push.js';
 import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
@@ -27,6 +27,8 @@ interface JobDetail {
   otpCode: string | null;
   otpExpiresAt: string | null;
   noShowCount: number;
+  paymentStatus: 'pending' | 'paid' | 'refunded' | 'failed';
+  rating: number | null;
   shop: { name: string; address: string; slug: string };
   file: { originalName: string; pages: number | null };
 }
@@ -115,6 +117,15 @@ export default function JobStatus() {
     }
   }
 
+  async function rate(stars: number) {
+    try {
+      await api(`/api/jobs/${id}/rating`, { method: 'POST', role: 'student', body: { rating: stars } });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save rating');
+    }
+  }
+
   if (!job) {
     return (
       <StudentShell>
@@ -141,6 +152,7 @@ export default function JobStatus() {
         <div className="row">
           <span className={`stamp ${m.tone}`}>{m.label}</span>
           <span className="dim">{job.shop.name}</span>
+          {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
         </div>
 
         {/* ---- hero state ---- */}
@@ -212,6 +224,17 @@ export default function JobStatus() {
           <div className="line"><span>{b.pagesPerCopy} pages × {b.copies} {b.copies === 1 ? 'copy' : 'copies'}</span><span>{rupees(b.pagesTotalPaise)}</span></div>
           {b.bindingPaise > 0 && <div className="line"><span>binding</span><span>{rupees(b.bindingPaise)}</span></div>}
           <div className="line total"><span>Paid</span><span>{rupees(b.totalPaise)}</span></div>
+          <button
+            className="ghost small"
+            style={{ marginTop: 10 }}
+            onClick={() =>
+              downloadFile(`/api/jobs/${job.id}/receipt`, 'student', `printq-receipt-${job.id.slice(0, 8)}.pdf`).catch(
+                () => setError('Could not download receipt'),
+              )
+            }
+          >
+            Download receipt
+          </button>
         </div>
 
         {/* ---- timeline (only for the normal path) ---- */}
@@ -233,6 +256,26 @@ export default function JobStatus() {
               </ul>
             </div>
           </>
+        )}
+
+        {/* ---- rating ---- */}
+        {job.status === 'completed' && (
+          <div className="card">
+            {job.rating ? (
+              <p style={{ margin: 0 }}>You rated this print {'★'.repeat(job.rating)}{'☆'.repeat(5 - job.rating)}</p>
+            ) : (
+              <>
+                <strong>How was this print?</strong>
+                <div className="row" style={{ marginTop: 8 }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button key={n} className="ghost" style={{ fontSize: '1.2rem', padding: '6px 10px' }} onClick={() => rate(n)}>
+                      {'★'.repeat(n)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {/* ---- actions ---- */}

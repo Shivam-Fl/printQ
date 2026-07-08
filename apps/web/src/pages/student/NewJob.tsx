@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { parsePageRange } from '@printq/shared';
 import { API_URL, api, getToken, rupees } from '../../api.js';
 import { enablePush, pushPermission } from '../../push.js';
 import Topbar from '../../components/Topbar.js';
@@ -32,6 +33,7 @@ interface Quote {
   pagesPerCopy: number;
   pagesTotalPaise: number;
   bindingPaise: number;
+  discountPaise: number;
   totalPaise: number;
 }
 
@@ -58,6 +60,17 @@ export default function NewJob() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [pageMode, setPageMode] = useState<'all' | 'custom'>('all');
+  const [rangeAdvanced, setRangeAdvanced] = useState(false);
+  const [rangeFrom, setRangeFrom] = useState(1);
+  const [rangeTo, setRangeTo] = useState(1);
+  const [rawRange, setRawRange] = useState('');
+  const [rangeError, setRangeError] = useState('');
+
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
+  const [couponError, setCouponError] = useState('');
+
   const token = getToken('student');
   const previewUrl = `${API_URL}/api/files/${fileId}/preview?token=${encodeURIComponent(token ?? '')}`;
 
@@ -80,12 +93,12 @@ export default function NewJob() {
   }, [slug]);
 
   const refreshQuote = useCallback(
-    async (s: Specs) => {
+    async (s: Specs, couponCode: string | null) => {
       try {
         const res = await api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
           method: 'POST',
           role: 'student',
-          body: { fileId, specs: s },
+          body: couponCode ? { fileId, specs: s, couponCode } : { fileId, specs: s },
         });
         setQuote(res.quote);
         setPages(res.pages);
@@ -100,9 +113,25 @@ export default function NewJob() {
 
   useEffect(() => {
     if (!specs) return;
-    const t = setTimeout(() => void refreshQuote(specs), 300);
+    const t = setTimeout(() => void refreshQuote(specs, appliedCoupon), 300);
     return () => clearTimeout(t);
-  }, [specs, refreshQuote]);
+  }, [specs, appliedCoupon, refreshQuote]);
+
+  async function applyCoupon() {
+    if (!specs || !couponInput.trim()) return;
+    setCouponError('');
+    try {
+      const res = await api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
+        method: 'POST',
+        role: 'student',
+        body: { fileId, specs, couponCode: couponInput.trim() },
+      });
+      setQuote(res.quote);
+      setAppliedCoupon(couponInput.trim());
+    } catch (err) {
+      setCouponError(err instanceof Error ? err.message : 'Invalid coupon');
+    }
+  }
 
   function set<K extends keyof Specs>(key: K, value: Specs[K]) {
     setSpecs((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -116,6 +145,33 @@ export default function NewJob() {
     if (specs?.color && !colorAvailable) set('color', false);
   }, [specs?.paperSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // once the page count is known, default the custom-range "to" field to the last page
+  useEffect(() => {
+    if (pages && rangeFrom === 1 && rangeTo === 1) setRangeTo(pages);
+  }, [pages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // compose + validate the page range client-side before it ever reaches pricing/checkout
+  useEffect(() => {
+    if (pageMode === 'all') {
+      setRangeError('');
+      set('pageRange', null);
+      return;
+    }
+    const candidate = rangeAdvanced ? rawRange.trim() : rangeFrom === rangeTo ? `${rangeFrom}` : `${rangeFrom}-${rangeTo}`;
+    if (!candidate) {
+      setRangeError('Enter a page range');
+      return;
+    }
+    if (!pages) return;
+    try {
+      parsePageRange(candidate, pages);
+      setRangeError('');
+      set('pageRange', candidate === `1-${pages}` ? null : candidate);
+    } catch (err) {
+      setRangeError(err instanceof Error ? err.message : 'Invalid page range');
+    }
+  }, [pageMode, rangeAdvanced, rangeFrom, rangeTo, rawRange, pages]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function payAndQueue() {
     if (!specs) return;
     setBusy(true);
@@ -123,6 +179,7 @@ export default function NewJob() {
     try {
       const body: Record<string, unknown> = { fileId, specs, mode };
       if (mode === 'scheduled') body.scheduledTime = new Date(slot).toISOString();
+      if (appliedCoupon) body.couponCode = appliedCoupon;
       const res = await api<{
         job: { id: string };
         checkout: { mode: 'mock' | 'razorpay'; keyId?: string; orderId?: string; amountPaise?: number };
@@ -240,16 +297,65 @@ export default function NewJob() {
               </select>
             </div>
           )}
-          <div style={{ flex: 1 }}>
-            <label htmlFor="range">Pages (optional)</label>
-            <input
-              id="range"
-              type="text"
-              placeholder="e.g. 1-5,8"
-              value={specs.pageRange ?? ''}
-              onChange={(e) => set('pageRange', e.target.value.trim() === '' ? null : e.target.value)}
-            />
+        </div>
+
+        <div>
+          <label>Pages</label>
+          <div className="seg" role="radiogroup" aria-label="Which pages">
+            <button className={pageMode === 'all' ? 'on' : ''} onClick={() => setPageMode('all')}>All pages</button>
+            <button className={pageMode === 'custom' ? 'on' : ''} onClick={() => setPageMode('custom')}>Custom range</button>
           </div>
+          {pageMode === 'custom' && (
+            <div style={{ marginTop: 8 }}>
+              {rangeAdvanced ? (
+                <>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1-5,8"
+                    value={rawRange}
+                    onChange={(e) => setRawRange(e.target.value)}
+                    autoFocus
+                  />
+                  <button className="ghost small" style={{ marginTop: 6 }} onClick={() => setRangeAdvanced(false)}>
+                    Use a simple from/to range
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="row">
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="rfrom">From page</label>
+                      <input
+                        id="rfrom"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={pages ?? 1}
+                        value={rangeFrom}
+                        onChange={(e) => setRangeFrom(Math.max(1, Number(e.target.value) || 1))}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="rto">To page</label>
+                      <input
+                        id="rto"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={pages ?? 1}
+                        value={rangeTo}
+                        onChange={(e) => setRangeTo(Math.max(1, Number(e.target.value) || 1))}
+                      />
+                    </div>
+                  </div>
+                  <button className="ghost small" style={{ marginTop: 6 }} onClick={() => setRangeAdvanced(true)}>
+                    Need more than one range? (e.g. 1-5,8)
+                  </button>
+                </>
+              )}
+              {rangeError && <p className="error" style={{ margin: '6px 0 0' }}>{rangeError}</p>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -279,12 +385,44 @@ export default function NewJob() {
             {quote.bindingPaise > 0 && (
               <div className="line"><span>binding</span><span>{rupees(quote.bindingPaise)}</span></div>
             )}
+            {quote.discountPaise > 0 && (
+              <div className="line"><span>coupon ({appliedCoupon})</span><span>-{rupees(quote.discountPaise)}</span></div>
+            )}
             <div className="line total"><span>Total</span><span>{rupees(quote.totalPaise)}</span></div>
           </div>
         ) : (
           <p className="dim" style={{ margin: 0 }}>Pricing…</p>
         )}
-        <button style={{ width: '100%', marginTop: 14 }} disabled={!quote || busy} onClick={payAndQueue}>
+
+        {appliedCoupon ? (
+          <p className="dim" style={{ margin: '10px 0 0' }}>
+            Coupon <strong className="mono">{appliedCoupon}</strong> applied.{' '}
+            <button
+              className="ghost small"
+              onClick={() => {
+                setAppliedCoupon(null);
+                setCouponInput('');
+              }}
+            >
+              Remove
+            </button>
+          </p>
+        ) : (
+          <div className="row" style={{ marginTop: 10, flexWrap: 'nowrap' }}>
+            <input
+              type="text"
+              placeholder="Coupon code"
+              value={couponInput}
+              onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === 'Enter' && void applyCoupon()}
+              style={{ flex: 1 }}
+            />
+            <button className="ghost small" disabled={!couponInput.trim()} onClick={applyCoupon}>Apply</button>
+          </div>
+        )}
+        {couponError && <p className="error" style={{ margin: '6px 0 0' }}>{couponError}</p>}
+
+        <button style={{ width: '100%', marginTop: 14 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
           {busy ? 'Starting…' : mode === 'scheduled' ? 'Pay & book slot' : 'Pay & join queue'}
         </button>
       </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, setToken } from '../../api.js';
+import { api, setShopRole, setToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
 
 export default function ShopRegister() {
@@ -29,6 +29,7 @@ export default function ShopRegister() {
         body: { ...form, campusName: form.campusName || undefined },
       });
       setToken('shop', res.token);
+      setShopRole('owner');
       setStudentLink(`${window.location.origin}/s/${res.shop.slug}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');

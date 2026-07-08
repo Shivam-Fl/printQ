@@ -112,6 +112,12 @@ a:hover { text-decoration: underline; }
   padding: 18px;
   margin: 12px 0;
   box-shadow: var(--shadow);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.card.dragging {
+  border: 2px dashed var(--stamp);
+  background: var(--stamp-soft);
 }
 
 /* ---------- the token ticket (signature) ---------- */

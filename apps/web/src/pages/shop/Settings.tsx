@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api, getToken } from '../../api.js';
+import { useCallback, useEffect, useState } from 'react';
+import { api, getShopRole, getToken } from '../../api.js';
 import { useNavigate } from 'react-router-dom';
 import ShopNav from '../../components/ShopNav.js';
 
@@ -151,6 +151,119 @@ export default function Settings() {
       </div>
       {error && <p className="error">{error}</p>}
       <p className="dim" style={{ marginTop: 8 }}>Note: a paper/binding only appears to students if a printer that's marked online has it loaded (set that on the Printers page).</p>
+
+      {getShopRole() === 'owner' && <StaffSection />}
+    </div>
+  );
+}
+
+interface StaffRow {
+  id: string;
+  email: string;
+  name: string;
+  role: 'owner' | 'staff';
+  createdAt: string;
+}
+
+function StaffSection() {
+  const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [form, setForm] = useState({ email: '', name: '', pin: '' });
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api<{ staff: StaffRow[] }>('/api/shop/staff', { role: 'shop' });
+      setStaff(res.staff);
+    } catch {
+      /* ignore — owner-only route, silently hidden if it 401s */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function addStaff() {
+    setError('');
+    try {
+      await api('/api/shop/staff', { method: 'POST', role: 'shop', body: form });
+      setForm({ email: '', name: '', pin: '' });
+      setShowForm(false);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add staff member');
+    }
+  }
+
+  async function removeStaff(id: string) {
+    if (!confirm('Remove this staff member?')) return;
+    try {
+      await api(`/api/shop/staff/${id}`, { method: 'DELETE', role: 'shop' });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove staff member');
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="row between">
+        <h2 style={{ margin: 0 }}>Staff</h2>
+        <button className="small" onClick={() => setShowForm((v) => !v)}>
+          {showForm ? 'Close' : '+ Add staff'}
+        </button>
+      </div>
+      <p className="dim" style={{ marginTop: 4 }}>
+        Counter staff sign in with a short PIN instead of a password — quicker on a shared PC.
+      </p>
+
+      {showForm && (
+        <div className="stack" style={{ marginTop: 8 }}>
+          <input
+            type="text"
+            placeholder="Name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+          <input
+            type="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="4-6 digit PIN"
+            value={form.pin}
+            onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
+          />
+          <button
+            disabled={!form.name || !form.email || form.pin.length < 4}
+            onClick={addStaff}
+          >
+            Add staff member
+          </button>
+        </div>
+      )}
+
+      <div style={{ marginTop: 10 }}>
+        {staff.map((s) => (
+          <div key={s.id} className="row between" style={{ padding: '6px 0', borderTop: '1px solid var(--rule)' }}>
+            <div>
+              <strong>{s.name}</strong>{' '}
+              <span className="dim">{s.email}</span>{' '}
+              {s.role === 'owner' && <span className="stamp blue">owner</span>}
+            </div>
+            {s.role === 'staff' && (
+              <button className="ghost small" onClick={() => removeStaff(s.id)}>Remove</button>
+            )}
+          </div>
+        ))}
+      </div>
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

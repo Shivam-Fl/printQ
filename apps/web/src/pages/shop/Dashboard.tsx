@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getToken, rupees } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
+import { flashTitle, playChime } from '../../newOrderAlert.js';
 import ShopNav from '../../components/ShopNav.js';
 
 interface QueueJob {
@@ -48,6 +49,7 @@ export default function Dashboard() {
   const [manualPrinter, setManualPrinter] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const seenWaitingIds = useRef<Set<string> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -70,6 +72,19 @@ export default function Dashboard() {
     }
     void refresh();
   }, [refresh, navigate]);
+
+  // beep + flash the tab title when a job the dashboard hasn't seen yet joins the live queue
+  useEffect(() => {
+    const waitingIds = new Set(jobs.filter((j) => j.status === 'queued' || j.status === 'notified').map((j) => j.id));
+    if (seenWaitingIds.current) {
+      const isNew = [...waitingIds].some((id) => !seenWaitingIds.current!.has(id));
+      if (isNew) {
+        playChime();
+        if (document.hidden) flashTitle('🔔 New print job — PrintQ');
+      }
+    }
+    seenWaitingIds.current = waitingIds;
+  }, [jobs]);
 
   useEffect(() => {
     const socket = getShopSocket();

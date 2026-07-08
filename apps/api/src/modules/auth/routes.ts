@@ -3,8 +3,11 @@ import argon2 from 'argon2';
 import { z } from 'zod';
 import {
   DEFAULT_PRINT_OPTIONS,
+  confirmPasswordResetSchema,
   requestLoginOtpSchema,
+  requestPasswordResetSchema,
   shopLoginSchema,
+  staffLoginSchema,
   verifyLoginOtpSchema,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
@@ -15,7 +18,9 @@ import { validateBody } from '../../middleware/validate.js';
 import { loginLimiter, otpRequestLimiter, otpVerifyLimiter } from '../../middleware/rateLimit.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { sendLoginOtp } from '../../providers/notification/index.js';
+import { emailProvider } from '../../providers/email/index.js';
 import { env } from '../../config/env.js';
+import { logger } from '../../lib/logger.js';
 
 export const authRouter = Router();
 
@@ -194,5 +199,91 @@ authRouter.post(
       user: { id: user.id, name: user.name, role: user.role, shopId: user.shopId },
       otpWindowMinutes: env.OTP_WINDOW_MINUTES,
     });
+  }),
+);
+
+/** Fast counter login for staff/owner alike: email + short numeric PIN. */
+authRouter.post(
+  '/shop/staff-login',
+  loginLimiter,
+  validateBody(staffLoginSchema),
+  asyncHandler(async (req, res) => {
+    const { email, pin } = req.body as { email: string; pin: string };
+    const user = await prisma.shopUser.findUnique({ where: { email } });
+    const hash =
+      user?.passwordHash ??
+      '$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const valid = await argon2.verify(hash, pin).catch(() => false);
+    if (!user || !valid) throw unauthorized('Invalid email or PIN');
+
+    res.json({
+      token: signShopToken(user.id, user.shopId, user.role),
+      user: { id: user.id, name: user.name, role: user.role, shopId: user.shopId },
+      otpWindowMinutes: env.OTP_WINDOW_MINUTES,
+    });
+  }),
+);
+
+const RESET_OTP_TTL_MS = 15 * 60_000;
+const MAX_RESET_OTP_ATTEMPTS = 5;
+
+/** Step 1 of forgot-password: email a 6-digit reset code (always 200 — no email enumeration). */
+authRouter.post(
+  '/shop/request-reset',
+  otpRequestLimiter,
+  validateBody(requestPasswordResetSchema),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body as { email: string };
+    const user = await prisma.shopUser.findUnique({ where: { email } });
+
+    if (user) {
+      const otp = generateOtp();
+      await prisma.passwordResetOtp.create({
+        data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(Date.now() + RESET_OTP_TTL_MS) },
+      });
+      // dev: the code appears in the API console; launch: wire EMAIL_PROVIDER=resend
+      logger.info({ email, resetCode: otp }, 'password_reset_otp');
+      await emailProvider
+        .send(email, 'Reset your PrintQ password', `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`)
+        .catch((err) => logger.error({ err, email }, 'password_reset_email_failed'));
+    }
+    res.json({ ok: true });
+  }),
+);
+
+/** Step 2: verify the code and set a new password. */
+authRouter.post(
+  '/shop/reset-password',
+  otpVerifyLimiter,
+  validateBody(confirmPasswordResetSchema),
+  asyncHandler(async (req, res) => {
+    const { email, otp, newPassword } = req.body as { email: string; otp: string; newPassword: string };
+
+    const record = await prisma.passwordResetOtp.findFirst({
+      where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!record) throw badRequest('Code expired or not found — request a new one');
+    if (record.attempts >= MAX_RESET_OTP_ATTEMPTS) {
+      throw badRequest('Too many wrong attempts — request a new code');
+    }
+
+    const valid = await verifyOtpHash(record.otpHash, otp);
+    if (!valid) {
+      await prisma.passwordResetOtp.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      throw unauthorized('Incorrect code');
+    }
+
+    const user = await prisma.shopUser.findUnique({ where: { email } });
+    if (!user) throw badRequest('Code expired or not found — request a new one');
+
+    await prisma.$transaction([
+      prisma.passwordResetOtp.update({ where: { id: record.id }, data: { consumedAt: new Date() } }),
+      prisma.shopUser.update({
+        where: { id: user.id },
+        data: { passwordHash: await argon2.hash(newPassword, { type: argon2.argon2id }) },
+      }),
+    ]);
+    res.json({ ok: true });
   }),
 );

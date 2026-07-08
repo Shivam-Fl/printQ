@@ -1,4 +1,4 @@
-import type { JobSpecs, PriceBreakdown, PrintOptions } from './types.js';
+import type { JobSpecs, PriceBreakdown, PrintOptions, ResolvedCoupon } from './types.js';
 import { countSelectedPages } from './pageRange.js';
 
 /** Sensible starting options for a new shop (owner edits these in Settings). */
@@ -53,6 +53,25 @@ export function computePrice(
     pagesTotalPaise,
     bindingLabel,
     bindingPaise,
+    discountPaise: 0,
     totalPaise: pagesTotalPaise + bindingPaise,
+  };
+}
+
+/** Minimum a job can cost after any discount — matches the platform's ₹1 order floor. */
+const MIN_ORDER_PAISE = 100;
+
+/** Applies an already-resolved (valid, in-scope) coupon on top of a computed price. */
+export function applyCoupon(breakdown: PriceBreakdown, coupon: ResolvedCoupon): PriceBreakdown {
+  const preDiscountTotal = breakdown.pagesTotalPaise + breakdown.bindingPaise;
+  const rawDiscount = coupon.percentOff
+    ? Math.round((preDiscountTotal * coupon.percentOff) / 100)
+    : (coupon.paiseOff ?? 0);
+  const discountPaise = Math.min(rawDiscount, Math.max(0, preDiscountTotal - MIN_ORDER_PAISE));
+
+  return {
+    ...breakdown,
+    discountPaise,
+    totalPaise: preDiscountTotal - discountPaise,
   };
 }

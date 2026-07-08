@@ -1,36 +1,73 @@
 /**
  * PrintQ print agent — runs on a shop PC that can reach one or more printers.
  *
- * Configuration via environment (or a .env loaded by the shell):
- *   PRINTQ_API_URL      e.g. https://api.printq.example  (or http://localhost:4000)
- *   PRINTQ_AGENT_TOKEN  token shown once when the owner registers this PC
- *   PRINTER_MAP         JSON mapping PrintQ printer ids to OS printer names,
- *                       e.g. {"<printer-uuid>":"HP LaserJet 1020"}
+ * First run: paste the agent token shown once on the dashboard's Agents page.
+ * It's saved locally (~/.printq-agent/config.json) so you never enter it
+ * again — just start the agent the same way each time (e.g. a desktop
+ * shortcut running `npm start`).
  *
- * Flow: connect socket → receive job:dispatch → claim (first agent wins) →
- * download converted PDF → hand to OS spooler → report complete/fail.
+ * Printers are auto-detected from the OS — no more hand-typed printer-name
+ * mapping. The agent reports every installed printer it can see; the
+ * dashboard's Printers page lets the owner link a PrintQ printer profile to
+ * one of them with a single click, and which PC can reach which printer is
+ * derived automatically from that link.
+ *
+ * Configuration:
+ *   PRINTQ_API_URL      e.g. https://api.printq.example (default http://localhost:4000)
+ *   PRINTQ_AGENT_TOKEN  optional — skips the first-run prompt if already set
+ *
+ * Flow: connect socket -> report detected printers -> receive job:dispatch ->
+ * claim (first agent wins) -> download converted PDF -> hand to OS spooler ->
+ * report complete/fail.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline/promises';
 import { io, type Socket } from 'socket.io-client';
 import printer from 'pdf-to-printer';
 
 const API_URL = process.env.PRINTQ_API_URL ?? 'http://localhost:4000';
-const TOKEN = process.env.PRINTQ_AGENT_TOKEN ?? '';
-const PRINTER_MAP: Record<string, string> = JSON.parse(process.env.PRINTER_MAP ?? '{}');
+const CONFIG_DIR = path.join(homedir(), '.printq-agent');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HEARTBEAT_MS = 30_000;
-
-if (!TOKEN) {
-  console.error('PRINTQ_AGENT_TOKEN is required (ask the shop owner dashboard for one)');
-  process.exit(1);
-}
 
 interface DispatchPayload {
   jobId: string;
   printerId: string;
   specs: { copies: number; duplex: boolean; color: boolean };
 }
+
+/** First run: prompt once for the token and remember it; every run after, just read it. */
+async function loadToken(): Promise<string> {
+  if (process.env.PRINTQ_AGENT_TOKEN) return process.env.PRINTQ_AGENT_TOKEN;
+
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      const saved = JSON.parse(await readFile(CONFIG_FILE, 'utf8')) as { token?: string };
+      if (saved.token) return saved.token;
+    } catch {
+      // corrupt config — fall through and re-prompt
+    }
+  }
+
+  console.log('PrintQ agent — first-time setup on this PC.');
+  console.log("Paste the token shown once on your shop dashboard's Agents page.");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const token = (await rl.question('Agent token: ')).trim();
+  rl.close();
+  if (!token) {
+    console.error('No token entered — exiting.');
+    process.exit(1);
+  }
+  await mkdir(CONFIG_DIR, { recursive: true });
+  await writeFile(CONFIG_FILE, JSON.stringify({ token }, null, 2), { mode: 0o600 });
+  console.log(`Saved — you won't need to enter this again on this PC (${CONFIG_FILE}).`);
+  return token;
+}
+
+const TOKEN = await loadToken();
 
 async function api(pathname: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API_URL}${pathname}`, {
@@ -39,17 +76,41 @@ async function api(pathname: string, init: RequestInit = {}): Promise<Response> 
   });
 }
 
-async function printJob(job: DispatchPayload): Promise<void> {
-  const osPrinter = PRINTER_MAP[job.printerId];
-  if (!osPrinter) {
-    console.warn(`No OS printer mapped for PrintQ printer ${job.printerId} — skipping`);
-    return;
+/** Tell the dashboard every printer this PC can see — replaces hand-typed printer-name mapping. */
+async function reportPrinters(): Promise<void> {
+  try {
+    const detected = await printer.getPrinters();
+    await api('/api/agent/printers', {
+      method: 'POST',
+      body: JSON.stringify({
+        printers: detected.map((p) => ({ name: p.name, paperSizes: p.paperSizes })),
+      }),
+    });
+    console.log(`Reported ${detected.length} printer(s) found on this PC.`);
+  } catch (err) {
+    console.error('Printer detection failed —', err instanceof Error ? err.message : err);
   }
+}
 
-  // claim — if another agent got there first this 409s and we back off
+async function printJob(job: DispatchPayload): Promise<void> {
+  // claim first (server already scopes this to printers this PC is linked
+  // to, via connectedPrinterIds) — the conditional update is the lock.
   const claim = await api(`/api/agent/jobs/${job.jobId}/claim`, { method: 'POST' });
   if (!claim.ok) {
     console.log(`Job ${job.jobId}: not claimed (${claim.status})`);
+    return;
+  }
+  const { job: claimed } = (await claim.json()) as { job: { osPrinterName: string | null } };
+  const osPrinter = claimed.osPrinterName;
+
+  if (!osPrinter) {
+    console.warn(
+      `Job ${job.jobId}: this PrintQ printer isn't linked to an OS printer yet — link it on the dashboard's Printers page.`,
+    );
+    await api(`/api/agent/jobs/${job.jobId}/fail`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'printer not linked to an OS printer' }),
+    }).catch(() => undefined);
     return;
   }
 
@@ -103,6 +164,7 @@ function connect(): Socket {
 
   socket.on('connect', () => {
     console.log('Connected to PrintQ');
+    void reportPrinters();
     void drainPending();
   });
   socket.on('job:dispatch', (payload: DispatchPayload) => {
@@ -118,7 +180,7 @@ setInterval(() => {
   api('/api/agent/heartbeat', { method: 'POST' }).catch((err) =>
     console.error('heartbeat failed', err instanceof Error ? err.message : err),
   );
+  void reportPrinters();
 }, HEARTBEAT_MS);
 
 console.log(`PrintQ agent starting — API: ${API_URL}`);
-console.log(`Mapped printers: ${Object.keys(PRINTER_MAP).length}`);

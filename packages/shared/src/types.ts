@@ -70,7 +70,16 @@ export interface PriceBreakdown {
   pagesTotalPaise: number;
   bindingLabel: string | null;
   bindingPaise: number;
+  /** amount taken off by a coupon, already folded into totalPaise */
+  discountPaise: number;
   totalPaise: number;
+}
+
+/** A resolved, still-valid coupon — expiry/redemption/shop-scope already checked. */
+export interface ResolvedCoupon {
+  code: string;
+  percentOff: number | null;
+  paiseOff: number | null;
 }
 
 export interface PrinterProfile {

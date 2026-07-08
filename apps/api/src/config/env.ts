@@ -41,6 +41,19 @@ const envSchema = z.object({
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
+  // Student login OTPs happen pre-session, so they can't be in-app — an SMS
+  // provider is required for a real launch (console just logs to the API).
+  SMS_PROVIDER: z.enum(['console', 'msg91']).default('console'),
+  MSG91_AUTH_KEY: z.string().optional(),
+  MSG91_SENDER_ID: z.string().optional(),
+  MSG91_TEMPLATE_ID: z.string().optional(),
+
+  // Shop-owner forgot-password codes — email delivery, same pluggable pattern
+  // (REST API, no SDK — same style as the Razorpay/MSG91 providers above).
+  EMAIL_PROVIDER: z.enum(['console', 'resend']).default('console'),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+
   // Web Push (PWA notifications). Generate once: npx web-push generate-vapid-keys
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
@@ -77,6 +90,20 @@ if (env.PAYMENT_PROVIDER === 'razorpay') {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET || !env.RAZORPAY_WEBHOOK_SECRET) {
     // eslint-disable-next-line no-console
     console.error('PAYMENT_PROVIDER=razorpay requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET');
+    process.exit(1);
+  }
+}
+if (env.SMS_PROVIDER === 'msg91') {
+  if (!env.MSG91_AUTH_KEY || !env.MSG91_SENDER_ID || !env.MSG91_TEMPLATE_ID) {
+    // eslint-disable-next-line no-console
+    console.error('SMS_PROVIDER=msg91 requires MSG91_AUTH_KEY, MSG91_SENDER_ID and MSG91_TEMPLATE_ID');
+    process.exit(1);
+  }
+}
+if (env.EMAIL_PROVIDER === 'resend') {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+    // eslint-disable-next-line no-console
+    console.error('EMAIL_PROVIDER=resend requires RESEND_API_KEY and EMAIL_FROM');
     process.exit(1);
   }
 }

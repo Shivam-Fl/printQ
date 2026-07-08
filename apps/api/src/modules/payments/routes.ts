@@ -102,6 +102,9 @@ paymentsRouter.post(
       },
       update: {},
     });
+    // mirrors the real Razorpay webhook setting paymentId before confirming —
+    // a job needs a payment reference for refundIfPaid to act on later
+    await prisma.job.update({ where: { id: jobId }, data: { paymentId: `mock_${jobId}` } });
     await onPaymentConfirmed(jobId);
     res.json({ ok: true });
   }),

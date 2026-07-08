@@ -1,10 +1,13 @@
 import { Router } from 'express';
+import argon2 from 'argon2';
 import { z } from 'zod';
 import {
+  createStaffSchema,
   printOptionsSchema,
   printerInputSchema,
   releaseOtpSchema,
   type JobSpecs,
+  type PriceBreakdown,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
@@ -14,6 +17,7 @@ import { otpVerifyLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
+import { renderReceipt } from '../../lib/receipt.js';
 import { releaseByOtp } from '../queue/release.js';
 import {
   advancePrinterQueue,
@@ -22,11 +26,31 @@ import {
   recommendPrinter,
 } from '../queue/engine.js';
 import { applyTransition } from '../jobs/transitions.js';
+import { notifyStudent } from '../../providers/notification/index.js';
 import { env } from '../../config/env.js';
 
 export const shopRouter = Router();
 
 const maskPhone = (phone: string) => `•••${phone.slice(-4)}`;
+
+/** Tell everyone waiting on a closed shop that it's taking jobs again, then clear the list. */
+async function notifyShopReopened(shopId: string): Promise<void> {
+  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { name: true, slug: true } });
+  if (!shop) return;
+  const waiting = await prisma.shopOpenInterest.findMany({ where: { shopId }, select: { studentId: true } });
+  if (waiting.length === 0) return;
+
+  await Promise.all(
+    waiting.map((w) =>
+      notifyStudent(w.studentId, {
+        title: `${shop.name} is open again`,
+        body: 'Send your file now — no queue right now.',
+        url: `/s/${shop.slug}`,
+      }),
+    ),
+  );
+  await prisma.shopOpenInterest.deleteMany({ where: { shopId } });
+}
 
 /** Shop settings + profile for the logged-in staff member. */
 shopRouter.get(
@@ -158,6 +182,7 @@ shopRouter.get(
         totalPaise: true,
         mode: true,
         updatedAt: true,
+        paymentStatus: true,
         assignedPrinter: { select: { label: true } },
         student: { select: { name: true, phone: true } },
         file: { select: { originalName: true } },
@@ -172,11 +197,90 @@ shopRouter.get(
         totalPaise: j.totalPaise,
         mode: j.mode,
         at: j.updatedAt,
+        paymentStatus: j.paymentStatus,
         printer: j.assignedPrinter?.label ?? null,
         student: { name: j.student.name, phoneMasked: maskPhone(j.student.phone) },
         file: j.file.originalName,
       })),
     });
+  }),
+);
+
+const csvCell = (v: string | number) => {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/** Same history data as CSV, for the owner's own bookkeeping/accounting. */
+shopRouter.get(
+  '/history.csv',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const jobs = await prisma.job.findMany({
+      where: { shopId: req.shopUser!.shopId, status: { in: ['completed', 'expired', 'cancelled'] } },
+      orderBy: { updatedAt: 'desc' },
+      take: 1000,
+      select: {
+        updatedAt: true,
+        student: { select: { name: true, phone: true } },
+        file: { select: { originalName: true } },
+        assignedPrinter: { select: { label: true } },
+        status: true,
+        totalPaise: true,
+        discountPaise: true,
+        paymentStatus: true,
+      },
+    });
+
+    const header = ['Date', 'Student', 'File', 'Printer', 'Status', 'Amount (INR)', 'Discount (INR)', 'Payment'];
+    const rows = jobs.map((j) =>
+      [
+        j.updatedAt.toISOString(),
+        j.student.name ?? maskPhone(j.student.phone),
+        j.file.originalName,
+        j.assignedPrinter?.label ?? '',
+        j.status,
+        (j.totalPaise / 100).toFixed(2),
+        (j.discountPaise / 100).toFixed(2),
+        j.paymentStatus,
+      ]
+        .map(csvCell)
+        .join(','),
+    );
+    const csv = [header.join(','), ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="printq-history.csv"');
+    res.send(csv);
+  }),
+);
+
+/** A downloadable receipt for the shop's own record of a job. */
+shopRouter.get(
+  '/jobs/:id/receipt',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const job = await prisma.job.findFirst({
+      where: { id: param(req, 'id'), shopId: req.shopUser!.shopId },
+      include: { shop: true, student: true, file: true },
+    });
+    if (!job) throw notFound();
+
+    const pdf = await renderReceipt({
+      jobId: job.id,
+      createdAt: job.createdAt,
+      shopName: job.shop.name,
+      shopAddress: job.shop.address,
+      studentLabel: job.student.name ?? maskPhone(job.student.phone),
+      fileName: job.file.originalName,
+      specs: job.specs as unknown as JobSpecs,
+      breakdown: job.priceBreakdown as unknown as PriceBreakdown,
+      totalPaise: job.totalPaise,
+      paymentStatus: job.paymentStatus,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="printq-receipt-${job.id.slice(0, 8)}.pdf"`);
+    res.send(Buffer.from(pdf));
   }),
 );
 
@@ -344,12 +448,36 @@ shopRouter.patch(
     const shopId = req.shopUser!.shopId;
     const existing = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!existing) throw notFound();
+    const otherOnlineBefore = await prisma.printer.count({
+      where: { shopId, id: { not: existing.id }, status: 'online' },
+    });
     const printer = await prisma.printer.update({
       where: { id: existing.id },
       data: req.body as object,
     });
     // a printer coming online may unblock its queue
-    if (printer.status === 'online') await advancePrinterQueue(printer.id, shopId);
+    if (printer.status === 'online') {
+      await advancePrinterQueue(printer.id, shopId);
+      // shop was fully closed and just came back online — tell anyone waiting
+      if (existing.status !== 'online' && otherOnlineBefore === 0) await notifyShopReopened(shopId);
+    }
+
+    // linking to an OS printer name: any agent that already sees that name on
+    // its PC is reachable from here — auto-add without a manual chip-pick.
+    if (printer.osPrinterName) {
+      const agents = await prisma.agent.findMany({ where: { shopId } });
+      for (const agent of agents) {
+        const detected = (agent.detectedPrinters as { name: string }[] | null) ?? [];
+        const sees = detected.some((d) => d.name === printer.osPrinterName);
+        if (sees && !agent.connectedPrinterIds.includes(printer.id)) {
+          await prisma.agent.update({
+            where: { id: agent.id },
+            data: { connectedPrinterIds: [...agent.connectedPrinterIds, printer.id] },
+          });
+        }
+      }
+    }
+
     await emitQueueUpdate(shopId);
     res.json({ printer });
   }),
@@ -386,6 +514,8 @@ shopRouter.get(
         lastHeartbeatAt: true,
         status: true,
         createdAt: true,
+        detectedPrinters: true,
+        detectedAt: true,
       },
     });
     res.json({ agents });
@@ -452,6 +582,58 @@ shopRouter.delete(
     });
     if (!agent) throw notFound();
     await prisma.agent.delete({ where: { id: agent.id } });
+    res.json({ ok: true });
+  }),
+);
+
+// ---------- Staff management (owner-only) ----------
+
+shopRouter.get(
+  '/staff',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const staff = await prisma.shopUser.findMany({
+      where: { shopId: req.shopUser!.shopId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, email: true, name: true, role: true, createdAt: true },
+    });
+    res.json({ staff });
+  }),
+);
+
+/** Counter staff get a short PIN instead of a full password — fast login on a shared PC. */
+shopRouter.post(
+  '/staff',
+  requireShopOwner,
+  validateBody(createStaffSchema),
+  asyncHandler(async (req, res) => {
+    const { email, name, pin } = req.body as { email: string; name: string; pin: string };
+    const existing = await prisma.shopUser.findUnique({ where: { email } });
+    if (existing) throw badRequest('An account with this email already exists');
+
+    const staff = await prisma.shopUser.create({
+      data: {
+        shopId: req.shopUser!.shopId,
+        email,
+        name,
+        role: 'staff',
+        passwordHash: await argon2.hash(pin, { type: argon2.argon2id }),
+      },
+      select: { id: true, email: true, name: true, role: true, createdAt: true },
+    });
+    res.status(201).json({ staff });
+  }),
+);
+
+shopRouter.delete(
+  '/staff/:id',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const staff = await prisma.shopUser.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!staff) throw notFound();
+    if (staff.role === 'owner') throw conflict('The owner account can\'t be removed');
+    await prisma.shopUser.delete({ where: { id: staff.id } });
     res.json({ ok: true });
   }),
 );

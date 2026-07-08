@@ -1,0 +1,27 @@
+# Never send the host's own installs/builds into the build context — the
+# Dockerfile runs its own npm ci and build inside the container.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+
+# apps/agent never runs server-side; its own node_modules/dist are irrelevant here
+apps/agent/dist/
+
+.git/
+.github/
+
+.env
+.env.*
+!.env.example
+
+apps/api/storage/
+uploads/
+*.log
+logs/
+coverage/
+
+.DS_Store
+Thumbs.db
+.vscode/

@@ -62,6 +62,40 @@ This file records the decisions so future sessions (human or AI) don't undo them
 - Agent claim/lock (`claimedByAgentId`, conditional update) prevents double-printing
   when several PCs reach the same printer.
 
+## Phase 2 additions
+
+- **Staff PINs**: counter staff (`ShopUser.role = 'staff'`) authenticate with a short numeric PIN
+  (4-6 digits) instead of a full password, for fast entry on a shared PC. The PIN is hashed with
+  the same argon2id call as owner passwords (`passwordHash` column is reused — the hash doesn't
+  care about input shape). Only the owner can create or remove staff accounts
+  (`requireShopOwner` on `/api/shop/staff*`); a staff account can never delete another account,
+  including its own.
+- **Forgot-password**: reset codes are hashed the same way as login OTPs (argon2id + `OTP_PEPPER`),
+  15-minute expiry, 5 attempts, single-use, and the request route always returns `200 {ok:true}`
+  regardless of whether the email exists (no account enumeration — same pattern as login).
+- **Refunds**: `refundIfPaid()` only ever acts on a job it can see is `paymentStatus: paid`, and
+  flips that status via a conditional `updateMany` (idempotent — a retry or race is a no-op, not
+  a double refund). Refund amounts always come from the job's own stored `totalPaise`, never a
+  client-supplied value.
+- **SMS/Email providers** are pluggable (`SmsProvider`, `EmailProvider`) with a `console` default
+  that never leaves the server — real delivery only turns on when the founder sets
+  `SMS_PROVIDER=msg91` / `EMAIL_PROVIDER=resend` with real credentials (`PLAN.md` §9).
+- **Printer auto-setup**: an agent's reported `detectedPrinters` list only ever links to a
+  `Printer` row already scoped to that agent's own shop (`shopId` in every relevant query) — one
+  shop's agent can never see or claim another shop's printers or jobs.
+
+## Phase 4 additions
+
+- **Coupons**: the client only ever sends a `couponCode` string — `percentOff`/`paiseOff` and all
+  expiry/redemption-limit/shop-scope checks are resolved server-side
+  (`apps/api/src/modules/jobs/coupons.ts`); a discount can never push a job below the platform's
+  ₹1 minimum-order floor (`applyCoupon()` in `packages/shared/src/pricing.ts`).
+- **Ratings**: a job can only be rated by its owning student (`studentId` in the WHERE clause),
+  only once `status = 'completed'`, and only once ever (checked server-side, not just hidden in
+  the UI).
+- **Receipts/CSV**: both scoped by ownership the same way as every other job route (`studentId`
+  or `shopId` in the query) — a student or shop can only ever download their own records.
+
 ## Reporting
 
 This is a pilot-stage project. Report issues to the repo owner directly.

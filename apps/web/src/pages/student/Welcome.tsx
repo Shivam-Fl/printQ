@@ -54,6 +54,9 @@ export default function Welcome() {
       <p className="dim" style={{ textAlign: 'center', marginTop: 24 }}>
         Just exploring? <Link to="/s/demo">Try the demo shop →</Link>
       </p>
+      <p className="dim" style={{ textAlign: 'center', marginTop: 8 }}>
+        <Link to="/shops">Find a shop near you →</Link>
+      </p>
     </div>
   );
 }

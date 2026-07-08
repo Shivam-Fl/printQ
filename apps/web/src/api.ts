@@ -18,6 +18,14 @@ export function clearToken(role: Role): void {
   localStorage.removeItem(tokenKey(role));
 }
 
+/** 'owner' | 'staff' for the logged-in shop user — gates owner-only UI (e.g. Staff management). */
+export function setShopRole(role: 'owner' | 'staff'): void {
+  localStorage.setItem('printq:shop:role', role);
+}
+export function getShopRole(): 'owner' | 'staff' | null {
+  return localStorage.getItem('printq:shop:role') as 'owner' | 'staff' | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -55,6 +63,22 @@ export async function api<T>(
 }
 
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
+
+/** Fetch an authenticated binary response (e.g. a receipt PDF) and save it. */
+export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {
+  const token = getToken(role);
+  const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /** Remember the last shop the student ordered from, so "New print" has a target. */
 export function rememberShop(slug: string): void {

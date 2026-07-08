@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
+import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
+
+interface DetectedPrinter {
+  name: string;
+  paperSizes: string[];
+}
 
 interface AgentRow {
   id: string;
@@ -9,30 +15,22 @@ interface AgentRow {
   connectedPrinterIds: string[];
   lastHeartbeatAt: string | null;
   status: 'online' | 'offline';
-}
-
-interface Printer {
-  id: string;
-  label: string;
+  detectedPrinters: DetectedPrinter[] | null;
+  detectedAt: string | null;
 }
 
 export default function Agents() {
   const navigate = useNavigate();
   const [agents, setAgents] = useState<AgentRow[]>([]);
-  const [printers, setPrinters] = useState<Printer[]>([]);
   const [label, setLabel] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
+  const [newAgentId, setNewAgentId] = useState<string | null>(null);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
-      const [a, p] = await Promise.all([
-        api<{ agents: AgentRow[] }>('/api/shop/agents', { role: 'shop' }),
-        api<{ printers: Printer[] }>('/api/shop/printers', { role: 'shop' }),
-      ]);
+      const a = await api<{ agents: AgentRow[] }>('/api/shop/agents', { role: 'shop' });
       setAgents(a.agents);
-      setPrinters(p.printers);
     } catch (err) {
       if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
       else setError(err instanceof Error ? err.message : 'Failed to load');
@@ -47,30 +45,43 @@ export default function Agents() {
     void refresh();
   }, [refresh, navigate]);
 
+  useEffect(() => {
+    const socket = getShopSocket();
+    if (!socket) return;
+    const onDetected = () => void refresh();
+    socket.on('agent:printers_detected', onDetected);
+    const interval = newAgentId ? setInterval(() => void refresh(), 3000) : undefined;
+    return () => {
+      socket.off('agent:printers_detected', onDetected);
+      if (interval) clearInterval(interval);
+    };
+  }, [refresh, newAgentId]);
+
   async function register() {
     setError('');
     try {
-      const res = await api<{ token: string }>('/api/shop/agents', {
+      const res = await api<{ token: string; agent: { id: string } }>('/api/shop/agents', {
         method: 'POST',
         role: 'shop',
-        body: { machineLabel: label, connectedPrinterIds: selected },
+        body: { machineLabel: label, connectedPrinterIds: [] },
       });
       setNewToken(res.token);
+      setNewAgentId(res.agent.id);
       setLabel('');
-      setSelected([]);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not register agent');
     }
   }
 
-  const printerLabel = (id: string) => printers.find((p) => p.id === id)?.label ?? id.slice(0, 8);
+  const waitingAgent = agents.find((a) => a.id === newAgentId);
 
   return (
     <div className="page wide">
       <ShopNav />
-      <p className="dim">
-        An agent is the small PrintQ program on a shop PC that actually sends jobs to your printers.
+      <p className="dim" id="agents-hint">
+        An agent is the small PrintQ program on a shop PC that talks to your printers. It finds every
+        printer installed on that PC automatically — you never type a printer name.
       </p>
 
       {newToken && (
@@ -89,11 +100,26 @@ export default function Agents() {
             {newToken}
           </code>
           <p className="dim" style={{ margin: 0 }}>
-            On the shop PC: set PRINTQ_AGENT_TOKEN to this value, map printers via PRINTER_MAP, then
-            start the agent.
+            On the shop PC: install the agent once, then run it. The first time it starts, it'll ask you
+            to paste this token — after that it remembers it, so you just start it the same way every
+            time. That's the only setup step; every printer connected to that PC shows up on the{' '}
+            <Link to="/dashboard/printers">Printers page</Link> automatically.
           </p>
-          <button className="ghost small" onClick={() => setNewToken(null)}>
-            Done, I copied it
+          {waitingAgent && (waitingAgent.detectedPrinters?.length ?? 0) === 0 && (
+            <div className="row" style={{ gap: 8 }}>
+              <span className="stamp blue">waiting for this PC to connect…</span>
+            </div>
+          )}
+          {waitingAgent && (waitingAgent.detectedPrinters?.length ?? 0) > 0 && (
+            <div className="stack">
+              <span className="stamp green">connected — found {waitingAgent.detectedPrinters!.length} printer(s)</span>
+              <p className="dim" style={{ margin: 0 }}>
+                Go to the <Link to="/dashboard/printers">Printers page</Link> to add them.
+              </p>
+            </div>
+          )}
+          <button className="ghost small" onClick={() => { setNewToken(null); setNewAgentId(null); }}>
+            Done
           </button>
         </div>
       )}
@@ -110,27 +136,6 @@ export default function Agents() {
             onChange={(e) => setLabel(e.target.value)}
           />
         </div>
-        <div>
-          <label>Printers this PC can reach</label>
-          <div className="row">
-            {printers.map((p) => (
-              <button
-                key={p.id}
-                className={`chip ${selected.includes(p.id) ? 'on' : ''}`}
-                onClick={() =>
-                  setSelected((s) => (s.includes(p.id) ? s.filter((x) => x !== p.id) : [...s, p.id]))
-                }
-              >
-                {p.label}
-              </button>
-            ))}
-            {printers.length === 0 && (
-              <span className="dim">
-                Add printers first — <Link to="/dashboard/printers">Printers page</Link>
-              </span>
-            )}
-          </div>
-        </div>
         <button disabled={!label} onClick={register}>
           Register &amp; get token
         </button>
@@ -141,7 +146,7 @@ export default function Agents() {
       <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
         <table>
           <thead>
-            <tr><th>Machine</th><th>Printers</th><th>Last heartbeat</th><th>Status</th></tr>
+            <tr><th>Machine</th><th>Detected printers</th><th>Last heartbeat</th><th>Status</th></tr>
           </thead>
           <tbody>
             {agents.length === 0 && (
@@ -150,7 +155,11 @@ export default function Agents() {
             {agents.map((a) => (
               <tr key={a.id}>
                 <td>{a.machineLabel}</td>
-                <td>{a.connectedPrinterIds.map(printerLabel).join(', ') || '—'}</td>
+                <td>
+                  {a.detectedPrinters && a.detectedPrinters.length > 0
+                    ? a.detectedPrinters.map((d) => d.name).join(', ')
+                    : '—'}
+                </td>
                 <td className="dim mono">
                   {a.lastHeartbeatAt ? new Date(a.lastHeartbeatAt).toLocaleTimeString() : 'never'}
                 </td>

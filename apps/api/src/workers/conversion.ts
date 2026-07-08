@@ -57,9 +57,22 @@ async function docxToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }
   try {
     const inputPath = path.join(dir, `${randomUUID()}.docx`);
     await writeFile(inputPath, buffer);
+    // Concurrent conversions (BullMQ worker concurrency > 1) must not share a
+    // LibreOffice profile — soffice takes a lock on it, so two jobs converting
+    // at once can collide and fail with a generic "source file could not be
+    // loaded" error. A per-job profile directory keeps each invocation isolated.
     await execFileAsync(
       env.SOFFICE_PATH,
-      ['--headless', '--norestore', '--convert-to', 'pdf', '--outdir', dir, inputPath],
+      [
+        '--headless',
+        '--norestore',
+        `-env:UserInstallation=file://${path.join(dir, 'loprofile')}`,
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        dir,
+        inputPath,
+      ],
       { timeout: 120_000 },
     );
     const outPath = inputPath.replace(/\.docx$/, '.pdf');

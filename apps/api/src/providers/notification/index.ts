@@ -1,6 +1,7 @@
 import { logger } from '../../lib/logger.js';
 import { publishEvent } from '../../realtime/events.js';
 import { sendPush, type PushMessage } from '../push/index.js';
+import { smsProvider } from '../sms/index.js';
 
 /**
  * Student notifications are in-app first: a socket event for the open app and
@@ -19,11 +20,16 @@ export async function notifyStudent(studentId: string, message: PushMessage): Pr
 
 /**
  * Login OTPs happen before any session exists, so they can't be in-app.
- * Dev/pilot: the code is logged to the API console. For launch, plug an SMS
- * provider (e.g. MSG91) into this one function.
+ * The code always goes to the API console (dev visibility + what e2e/proof
+ * scripts read); SMS delivery is layered on via the pluggable SmsProvider —
+ * set SMS_PROVIDER=msg91 (+ MSG91_* env vars) for real launch delivery.
  */
 export async function sendLoginOtp(phone: string, otp: string): Promise<void> {
-  // field name deliberately avoids the `*.otp` pino redaction — this console
-  // delivery IS the dev channel; swap in an SMS provider here for launch
-  logger.info({ phone, loginCode: otp }, 'login_otp (console — wire an SMS provider for launch)');
+  // field name deliberately avoids the `*.otp` pino redaction
+  logger.info({ phone, loginCode: otp }, 'login_otp');
+  try {
+    await smsProvider.sendOtp(phone, otp);
+  } catch (err) {
+    logger.error({ err, phone }, 'sms_otp_send_failed');
+  }
 }

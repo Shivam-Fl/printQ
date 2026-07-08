@@ -17,6 +17,7 @@ import { publishEvent } from '../../realtime/events.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { applyTransition, type ActorType } from '../jobs/transitions.js';
+import { refundIfPaid } from '../payments/refund.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
 
@@ -331,6 +332,7 @@ export async function handleGraceExpiry(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job || job.status !== 'no_show') return;
   await applyTransition(jobId, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
+  await refundIfPaid(job);
   publishEvent(`student:${job.studentId}`, 'job:update', { jobId, status: 'expired' });
   await emitQueueUpdate(job.shopId);
 }

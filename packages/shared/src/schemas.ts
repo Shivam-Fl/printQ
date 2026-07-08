@@ -65,6 +65,8 @@ export const printerInputSchema = z.object({
   finishingOptions: z.array(optionId).default([]),
   avgPagesPerMinute: z.number().int().min(1).max(200).default(15),
   status: z.enum(PRINTER_STATUSES).default('online'),
+  /** exact OS/spooler printer name to dispatch to — set via the detected-printer picker */
+  osPrinterName: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type PrinterInput = z.infer<typeof printerInputSchema>;
 
@@ -83,11 +85,36 @@ export const shopLoginSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+const shopEmail = z.string().trim().toLowerCase().email().max(254);
+/** Short numeric PIN — fast entry on a shared counter PC, not a full password. */
+const staffPin = z.string().trim().regex(/^\d{4,6}$/, 'PIN is 4-6 digits');
+
+export const requestPasswordResetSchema = z.object({ email: shopEmail });
+
+export const confirmPasswordResetSchema = z.object({
+  email: shopEmail,
+  otp: z.string().trim().regex(/^\d{6}$/, 'Code is 6 digits'),
+  newPassword: z.string().min(8).max(128),
+});
+
+export const createStaffSchema = z.object({
+  email: shopEmail,
+  name: z.string().trim().min(1).max(80),
+  pin: staffPin,
+});
+
+export const staffLoginSchema = z.object({
+  email: shopEmail,
+  pin: staffPin,
+});
+
 export const releaseOtpSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
   /** manual-mode: shop picks the printer; auto-mode: omitted */
   printerId: z.string().uuid().optional(),
 });
+
+export const couponCodeSchema = z.string().trim().min(1).max(40);
 
 export const createJobSchema = z
   .object({
@@ -96,6 +123,7 @@ export const createJobSchema = z
     mode: z.enum(JOB_MODES).default('instant'),
     /** required for scheduled mode: 15 min – 72 h ahead */
     scheduledTime: z.coerce.date().optional(),
+    couponCode: couponCodeSchema.optional(),
   })
   .superRefine((val, ctx) => {
     if (val.mode === 'scheduled') {

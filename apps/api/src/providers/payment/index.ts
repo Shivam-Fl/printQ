@@ -11,6 +11,8 @@ export interface CreatedOrder {
 export interface PaymentProvider {
   name: 'mock' | 'razorpay';
   createOrder(jobId: string, amountPaise: number): Promise<CreatedOrder>;
+  /** Full refund of a captured payment (cancelled or expired-without-print jobs). */
+  refund(paymentId: string, amountPaise: number): Promise<void>;
 }
 
 /**
@@ -26,6 +28,10 @@ class MockPaymentProvider implements PaymentProvider {
       providerOrderId: `mock_${randomUUID()}`,
       checkout: { mode: 'mock', jobId, amountPaise },
     };
+  }
+
+  async refund(): Promise<void> {
+    // dev/pilot: nothing to call out to — the paymentStatus flip is the record
   }
 }
 
@@ -61,6 +67,19 @@ class RazorpayProvider implements PaymentProvider {
         currency: 'INR',
       },
     };
+  }
+
+  async refund(paymentId: string, amountPaise: number): Promise<void> {
+    const auth = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
+    const res = await fetch(`https://api.razorpay.com/v1/payments/${paymentId}/refund`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amountPaise }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Razorpay refund failed (${res.status}): ${body}`);
+    }
   }
 }
 

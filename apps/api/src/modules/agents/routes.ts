@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, conflict, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireAgent } from '../../middleware/auth.js';
+import { validateBody } from '../../middleware/validate.js';
 import { storage } from '../../providers/storage/index.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
@@ -24,6 +26,46 @@ agentRouter.post(
   }),
 );
 
+const detectedPrintersSchema = z.object({
+  printers: z
+    .array(z.object({ name: z.string().trim().min(1).max(200), paperSizes: z.array(z.string()).default([]) }))
+    .max(50),
+});
+
+/**
+ * Reported by the agent from getPrinters() on connect + every heartbeat —
+ * replaces the old hand-typed PRINTER_MAP: the dashboard shows this list so
+ * the owner links a PrintQ printer profile to a real OS printer with one click.
+ */
+agentRouter.post(
+  '/printers',
+  validateBody(detectedPrintersSchema),
+  asyncHandler(async (req, res) => {
+    const agent = req.agent!;
+    const { printers } = req.body as { printers: { name: string; paperSizes: string[] }[] };
+
+    // Auto-topology: any PrintQ printer already linked (by osPrinterName) to one
+    // of the names this PC can see is reachable from here — no manual "which
+    // printers can this PC reach" step needed for the common case. Owners can
+    // still override via PATCH /shop/agents/:id.
+    const names = printers.map((p) => p.name);
+    const reachable = names.length
+      ? await prisma.printer.findMany({
+          where: { shopId: agent.shopId, osPrinterName: { in: names } },
+          select: { id: true },
+        })
+      : [];
+    const connectedPrinterIds = [...new Set([...agent.connectedPrinterIds, ...reachable.map((p) => p.id)])];
+
+    await prisma.agent.update({
+      where: { id: agent.id },
+      data: { detectedPrinters: printers, detectedAt: new Date(), connectedPrinterIds },
+    });
+    publishEvent(`shop:${agent.shopId}`, 'agent:printers_detected', { agentId: agent.id, printers });
+    res.json({ ok: true });
+  }),
+);
+
 /**
  * Dispatch recovery: jobs verified while the agent was offline. Scoped to
  * printers this agent can reach, unclaimed or claimed by itself.
@@ -39,9 +81,21 @@ agentRouter.get(
         assignedPrinterId: { in: agent.connectedPrinterIds },
         OR: [{ claimedByAgentId: null }, { claimedByAgentId: agent.id }],
       },
-      select: { id: true, assignedPrinterId: true, specs: true },
+      select: {
+        id: true,
+        assignedPrinterId: true,
+        specs: true,
+        assignedPrinter: { select: { osPrinterName: true } },
+      },
     });
-    res.json({ jobs });
+    res.json({
+      jobs: jobs.map((j) => ({
+        id: j.id,
+        assignedPrinterId: j.assignedPrinterId,
+        specs: j.specs,
+        osPrinterName: j.assignedPrinter?.osPrinterName ?? null,
+      })),
+    });
   }),
 );
 
@@ -71,10 +125,22 @@ agentRouter.post(
     });
     if (!job) throw conflict('Job state changed');
 
+    const printer = job.assignedPrinterId
+      ? await prisma.printer.findUnique({
+          where: { id: job.assignedPrinterId },
+          select: { osPrinterName: true },
+        })
+      : null;
+
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'printing' });
     publishEvent(`shop:${job.shopId}`, 'queue:job_printing', { jobId: job.id });
     res.json({
-      job: { id: job.id, printerId: job.assignedPrinterId, specs: job.specs },
+      job: {
+        id: job.id,
+        printerId: job.assignedPrinterId,
+        specs: job.specs,
+        osPrinterName: printer?.osPrinterName ?? null,
+      },
     });
   }),
 );

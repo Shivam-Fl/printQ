@@ -1,22 +1,45 @@
-/* PrintQ service worker: push notifications + minimal app-shell cache. */
-const CACHE = 'printq-shell-v1';
+/* PrintQ service worker: push notifications + app-shell/asset caching. */
+const SHELL_CACHE = 'printq-shell-v2';
+const ASSET_CACHE = 'printq-assets-v2';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/'])));
+  event.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(['/'])));
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))),
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== SHELL_CACHE && k !== ASSET_CACHE).map((k) => caches.delete(k))),
+    ),
   );
   self.clients.claim();
 });
 
-// network-first; cached shell only as offline fallback for navigations
 self.addEventListener('fetch', (event) => {
-  if (event.request.mode !== 'navigate') return;
-  event.respondWith(fetch(event.request).catch(() => caches.match('/')));
+  const req = event.request;
+  const url = new URL(req.url);
+
+  // navigations: network-first, cached shell as the offline fallback
+  if (req.mode === 'navigate') {
+    event.respondWith(fetch(req).catch(() => caches.match('/')));
+    return;
+  }
+
+  // built JS/CSS/fonts (Vite's content-hashed /assets/*): cache-first — the
+  // hash in the filename already busts the cache on every new deploy
+  if (url.origin === self.location.origin && url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(req).then(
+        (cached) =>
+          cached ??
+          fetch(req).then((res) => {
+            if (res.ok) caches.open(ASSET_CACHE).then((c) => c.put(req, res.clone()));
+            return res;
+          }),
+      ),
+    );
+  }
 });
 
 self.addEventListener('push', (event) => {

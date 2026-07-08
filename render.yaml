@@ -1,0 +1,87 @@
+# Render Blueprint — see DEPLOY.md for the full setup walkthrough.
+#
+# One combined web service runs the API + built web app + BullMQ workers in one
+# process (pilot mode, same as `npm run dev:api` locally) — see apps/api/src/server.ts.
+# This keeps STORAGE_DRIVER=local correct (one container, one filesystem) for the
+# free-tier testing phase. Splitting workers into their own service + moving to real
+# S3-compatible storage (e.g. Cloudflare R2) is the natural next step once you're
+# ready to pay and want LibreOffice crash-isolated from the API — see DEPLOY.md's
+# upgrade checklist.
+
+databases:
+  - name: printq-db
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - name: printq-redis
+    type: keyvalue
+    plan: free
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: everywhere (tighten once you're off the free plan)
+
+  - name: printq-web
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    preDeployCommand: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RUN_WORKERS
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: printq-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: printq-redis
+          type: keyvalue
+          property: connectionString
+
+      # --- required secrets: fill these in the Render dashboard after first deploy ---
+      - key: CORS_ORIGINS
+        sync: false # set to your printq-web onrender.com URL once you know it
+      - key: PUBLIC_WEB_URL
+        sync: false # same URL as CORS_ORIGINS
+      - key: PAYMENT_PROVIDER
+        value: razorpay
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false # npx web-push generate-vapid-keys
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false # mailto:you@example.com
+
+      # --- auto-generated secrets: Render creates these for you, no action needed ---
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+
+      # --- soft-launch defaults: flip these once you have real MSG91/Resend accounts ---
+      - key: SMS_PROVIDER
+        value: console
+      - key: EMAIL_PROVIDER
+        value: console
+
+      # --- storage: local disk for the free-tier testing week (ephemeral — see DEPLOY.md) ---
+      - key: STORAGE_DRIVER
+        value: local
+      - key: STORAGE_LOCAL_DIR
+        value: ./storage
+      - key: SOFFICE_PATH
+        value: /usr/bin/soffice
+      - key: LOG_LEVEL
+        value: info

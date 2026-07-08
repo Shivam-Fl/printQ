@@ -1,5 +1,13 @@
 import { Router } from 'express';
-import { computePrice, createJobSchema, jobSpecsSchema, type JobSpecs } from '@printq/shared';
+import {
+  applyCoupon,
+  computePrice,
+  couponCodeSchema,
+  createJobSchema,
+  jobSpecsSchema,
+  type JobSpecs,
+  type PriceBreakdown,
+} from '@printq/shared';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
@@ -8,6 +16,9 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { paymentProvider } from '../../providers/payment/index.js';
 import { advancePrinterQueue, emitQueueUpdate, requeueJob } from '../queue/engine.js';
+import { refundIfPaid } from '../payments/refund.js';
+import { renderReceipt } from '../../lib/receipt.js';
+import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
 import { z } from 'zod';
 
@@ -17,16 +28,17 @@ export const jobsRouter = Router();
 jobsRouter.post(
   '/quote',
   requireStudent,
-  validateBody(z.object({ fileId: z.string().uuid(), specs: jobSpecsSchema })),
+  validateBody(z.object({ fileId: z.string().uuid(), specs: jobSpecsSchema, couponCode: couponCodeSchema.optional() })),
   asyncHandler(async (req, res) => {
-    const { fileId, specs } = req.body as { fileId: string; specs: JobSpecs };
+    const { fileId, specs, couponCode } = req.body as { fileId: string; specs: JobSpecs; couponCode?: string };
     const file = await prisma.uploadedFile.findFirst({
       where: { id: fileId, studentId: req.student!.id, status: 'ready' },
       include: { shop: true },
     });
     if (!file || file.pages == null) throw notFound('File not ready');
 
-    const breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    if (couponCode) breakdown = applyCoupon(breakdown, await resolveCoupon(couponCode, file.shopId));
     res.json({ quote: breakdown, pages: file.pages });
   }),
 );
@@ -40,11 +52,12 @@ jobsRouter.post(
   requireStudent,
   validateBody(createJobSchema),
   asyncHandler(async (req, res) => {
-    const { fileId, specs, mode, scheduledTime } = req.body as {
+    const { fileId, specs, mode, scheduledTime, couponCode } = req.body as {
       fileId: string;
       specs: JobSpecs;
       mode: 'instant' | 'scheduled';
       scheduledTime?: Date;
+      couponCode?: string;
     };
     const file = await prisma.uploadedFile.findFirst({
       where: { id: fileId, studentId: req.student!.id, status: 'ready' },
@@ -52,7 +65,13 @@ jobsRouter.post(
     });
     if (!file || file.pages == null) throw notFound('File not ready');
 
-    const breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    let resolvedCouponCode: string | null = null;
+    if (couponCode) {
+      const resolved = await resolveCoupon(couponCode, file.shopId);
+      breakdown = applyCoupon(breakdown, resolved);
+      resolvedCouponCode = resolved.code;
+    }
     if (breakdown.totalPaise < 100) throw badRequest('Minimum order is ₹1');
 
     const job = await prisma.job.create({
@@ -64,10 +83,13 @@ jobsRouter.post(
         pagesPerCopy: breakdown.pagesPerCopy,
         priceBreakdown: breakdown as unknown as object,
         totalPaise: breakdown.totalPaise,
+        couponCode: resolvedCouponCode,
+        discountPaise: breakdown.discountPaise,
         mode,
         scheduledTime: mode === 'scheduled' ? scheduledTime : null,
       },
     });
+    if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
     const order = await paymentProvider.createOrder(job.id, breakdown.totalPaise);
     await prisma.job.update({
@@ -130,12 +152,43 @@ jobsRouter.get(
         otpExpiresAt: true,
         noShowCount: true,
         assignedPrinterId: true,
+        paymentStatus: true,
+        rating: true,
         shop: { select: { name: true, slug: true, address: true } },
         file: { select: { originalName: true, pages: true } },
       },
     });
     if (!job) throw notFound();
     res.json({ job: { ...job, otpCode: job.status === 'notified' ? job.otpCode : null } });
+  }),
+);
+
+/** A downloadable receipt for the student's own job. */
+jobsRouter.get(
+  '/:id/receipt',
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const job = await prisma.job.findFirst({
+      where: { id: param(req, 'id'), studentId: req.student!.id },
+      include: { shop: true, student: true, file: true },
+    });
+    if (!job) throw notFound();
+
+    const pdf = await renderReceipt({
+      jobId: job.id,
+      createdAt: job.createdAt,
+      shopName: job.shop.name,
+      shopAddress: job.shop.address,
+      studentLabel: job.student.name ?? job.student.phone,
+      fileName: job.file.originalName,
+      specs: job.specs as unknown as JobSpecs,
+      breakdown: job.priceBreakdown as unknown as PriceBreakdown,
+      totalPaise: job.totalPaise,
+      paymentStatus: job.paymentStatus,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="printq-receipt-${job.id.slice(0, 8)}.pdf"`);
+    res.send(Buffer.from(pdf));
   }),
 );
 
@@ -166,9 +219,35 @@ jobsRouter.post(
       id: req.student!.id,
     });
     if (!updated) throw conflict('Job state changed, try again');
+    await refundIfPaid(job);
     // a cancelled front job must not block the printer's queue
     if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
     await emitQueueUpdate(job.shopId);
     res.json({ job: { id: job.id, status: updated.status } });
+  }),
+);
+
+const rateJobSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  reviewText: z.string().trim().max(500).optional(),
+});
+
+/** A student rates a completed job — settable once. */
+jobsRouter.post(
+  '/:id/rating',
+  requireStudent,
+  validateBody(rateJobSchema),
+  asyncHandler(async (req, res) => {
+    const { rating, reviewText } = req.body as { rating: number; reviewText?: string };
+    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), studentId: req.student!.id } });
+    if (!job) throw notFound();
+    if (job.status !== 'completed') throw conflict('Only a completed job can be rated');
+    if (job.rating != null) throw conflict('This job has already been rated');
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: { rating, reviewText: reviewText ?? null },
+    });
+    res.json({ ok: true });
   }),
 );

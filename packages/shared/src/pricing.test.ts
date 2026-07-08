@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PRINT_OPTIONS, PricingError, computePrice } from './pricing.js';
+import { DEFAULT_PRINT_OPTIONS, PricingError, applyCoupon, computePrice } from './pricing.js';
 import type { JobSpecs, PrintOptions } from './types.js';
 
 const base: JobSpecs = {
@@ -65,5 +65,27 @@ describe('computePrice', () => {
   it('uses integer paise throughout', () => {
     const p = computePrice({ ...base, copies: 7 }, 13, DEFAULT_PRINT_OPTIONS);
     expect(Number.isInteger(p.totalPaise)).toBe(true);
+  });
+});
+
+describe('applyCoupon', () => {
+  it('applies a percent-off discount', () => {
+    const p = computePrice(base, 10, DEFAULT_PRINT_OPTIONS); // 2000 paise
+    const discounted = applyCoupon(p, { code: 'TEN', percentOff: 10, paiseOff: null });
+    expect(discounted.discountPaise).toBe(200);
+    expect(discounted.totalPaise).toBe(1800);
+  });
+
+  it('applies a flat paise-off discount', () => {
+    const p = computePrice(base, 10, DEFAULT_PRINT_OPTIONS); // 2000 paise
+    const discounted = applyCoupon(p, { code: 'FLAT500', percentOff: null, paiseOff: 500 });
+    expect(discounted.discountPaise).toBe(500);
+    expect(discounted.totalPaise).toBe(1500);
+  });
+
+  it('never discounts below the minimum order floor', () => {
+    const p = computePrice(base, 1, DEFAULT_PRINT_OPTIONS); // 200 paise
+    const discounted = applyCoupon(p, { code: 'HUGE', percentOff: null, paiseOff: 10_000 });
+    expect(discounted.totalPaise).toBe(100);
   });
 });

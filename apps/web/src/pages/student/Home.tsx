@@ -4,6 +4,7 @@ import { ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../ap
 import { statusMeta } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
+import InstallPrompt from '../../components/InstallPrompt.js';
 import { IconChevron, IconPlus, IconStore } from '../../components/Icons.js';
 
 interface JobRow {
@@ -69,6 +70,8 @@ export default function Home() {
         <div className="hero">
           <span className="hi">Hi {firstName} 👋</span>
         </div>
+
+        <InstallPrompt />
 
         <button className="cta-print" onClick={startPrint}>
           <span className="ic">

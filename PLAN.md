@@ -118,6 +118,54 @@ WhatsApp-bot ordering, analytics, platform admin.
 
 1. **Hosting** — API + worker need a Node host with Redis & Postgres (Railway/Fly.io/VPS). Web is static.
 2. **Razorpay** — KYC'd account; set `RAZORPAY_KEY_ID/KEY_SECRET/WEBHOOK_SECRET`. Until then `PAYMENT_PROVIDER=mock`.
-3. **WhatsApp Business** — Meta Cloud API number + template approval; set `WHATSAPP_*` vars. Until then `NOTIFICATION_PROVIDER=console`.
-4. **Object storage** — any S3-compatible bucket (R2 recommended). Until then `STORAGE_DRIVER=local`.
-5. **Domain + TLS** — terminate TLS at the host/proxy; set `CORS_ORIGINS` + `PUBLIC_WEB_URL`.
+3. **SMS (student login OTP)** — an MSG91 account (or swap in another provider behind the same
+   `SmsProvider` interface, `apps/api/src/providers/sms/index.ts`); set `SMS_PROVIDER=msg91` +
+   `MSG91_AUTH_KEY/SENDER_ID/TEMPLATE_ID`. Until then `SMS_PROVIDER=console` — the code only
+   reaches the API log, which is fine for a pilot but **not for real students**, since they have
+   no other way to receive their login code.
+4. **Email (shop forgot-password)** — a Resend account (or swap in another provider behind
+   `EmailProvider`, `apps/api/src/providers/email/index.ts`); set `EMAIL_PROVIDER=resend` +
+   `RESEND_API_KEY/EMAIL_FROM`. Until then `EMAIL_PROVIDER=console`.
+5. **Object storage** — any S3-compatible bucket (R2 recommended). Until then `STORAGE_DRIVER=local`.
+6. **Domain + TLS** — terminate TLS at the host/proxy; set `CORS_ORIGINS` + `PUBLIC_WEB_URL`.
+
+## 10. Phase 2 additions (launch-readiness pass)
+
+- **Printer auto-setup**: `Printer.osPrinterName` links a PrintQ printer profile to a real OS
+  printer name; `Agent.detectedPrinters` is what `getPrinters()` (already used via
+  `pdf-to-printer`) reports from each shop PC. The dashboard's Printers/Agents pages turn this
+  into a one-click "add this printer" flow — no more hand-typed `PRINTER_MAP` JSON. Topology
+  (`Agent.connectedPrinterIds`) is now auto-derived from OS-name matches in both directions
+  (agent connects first, or printer gets linked first); manual override still works via the
+  existing PATCH routes.
+- **Refunds**: `PaymentProvider.refund()` (mock: no-op; Razorpay: real refund call) fires
+  automatically whenever a *paid* job is cancelled or expires after a no-show with no requeue
+  (`apps/api/src/modules/payments/refund.ts`).
+- **Forgot-password** (shop owner) and **staff/PIN accounts** (`ShopUserRole.staff`, short
+  numeric PIN instead of a full password for fast counter login) are both live —
+  `POST /api/auth/shop/request-reset` + `/reset-password`, `POST /api/shop/staff` (owner-only) +
+  `POST /api/auth/shop/staff-login`.
+
+## 11. Phase 3 additions (usability polish)
+
+Visual page-range picker (all/custom + steppers, raw-range advanced fallback, client-side
+validation via `packages/shared/src/pageRange.ts`), drag-and-drop + camera-capture upload,
+"notify me when open" (`ShopOpenInterest` model, Web Push when a closed shop's first printer
+comes back online), a shop-dashboard new-job chime + tab-title flash
+(`apps/web/src/newOrderAlert.ts`), downloadable PDF receipts (`apps/api/src/lib/receipt.ts`,
+student + shop routes), and a PWA install-prompt banner plus a cache-first runtime strategy for
+built `/assets/*` in the hand-written service worker (`apps/web/public/sw.js`) — not
+`vite-plugin-pwa`, since injecting Workbox alongside the existing push-notification service
+worker carried more integration risk than the offline-caching win was worth this round.
+
+## 12. Phase 4 additions (bounded growth features)
+
+- **Ratings**: `Job.rating`/`reviewText`, settable once by the owning student only after
+  `completed`; average shown on the shop landing page.
+- **Coupons**: `Coupon` model (platform-wide or shop-scoped, percent- or flat-off, expiry,
+  redemption cap); resolved server-side (`apps/api/src/modules/jobs/coupons.ts`) and applied via
+  the pure `applyCoupon()` in `packages/shared/src/pricing.ts` — the client only ever sends a
+  code, never a discount amount.
+- **Shop directory**: `GET /api/public/shops?q=` (name/campus text search, no geo/maps) + a
+  "Find a shop" page, since a direct `/s/:slug` link/QR was the only entry point before.
+- **CSV export**: `GET /api/shop/history.csv` for the owner's own bookkeeping.
