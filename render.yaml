@@ -27,7 +27,10 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    preDeployCommand: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+    # preDeployCommand needs a paid plan — on free tier, run migrations as part of
+    # the start command instead (idempotent: a no-op if nothing's pending, so
+    # re-running it on every cold start/restart is harmless).
+    dockerCommand: sh -c "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/server.js"
     healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
@@ -49,14 +52,11 @@ services:
         sync: false # set to your printq-web onrender.com URL once you know it
       - key: PUBLIC_WEB_URL
         sync: false # same URL as CORS_ORIGINS
+      # dummy checkout for now — every job auto-confirms via /api/payments/mock/confirm,
+      # no Razorpay account needed yet. Switch to `razorpay` + add RAZORPAY_KEY_ID/
+      # KEY_SECRET/WEBHOOK_SECRET (sync: false) once you're ready to take real payments.
       - key: PAYMENT_PROVIDER
-        value: razorpay
-      - key: RAZORPAY_KEY_ID
-        sync: false
-      - key: RAZORPAY_KEY_SECRET
-        sync: false
-      - key: RAZORPAY_WEBHOOK_SECRET
-        sync: false
+        value: mock
       - key: VAPID_PUBLIC_KEY
         sync: false # npx web-push generate-vapid-keys
       - key: VAPID_PRIVATE_KEY

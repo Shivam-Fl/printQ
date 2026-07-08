@@ -12,6 +12,17 @@ the API, the built student/shop web app, and the BullMQ background workers
 exactly the same "pilot mode" the codebase runs locally via `npm run dev:api`. See
 `apps/api/src/server.ts` and `apps/api/src/app.ts` if you want the details.
 
+**Checkout starts in dummy/mock mode** (`PAYMENT_PROVIDER=mock`) — every job
+auto-confirms via `/api/payments/mock/confirm`, no Razorpay account needed to start
+testing. Flip this to real payments whenever you're ready (Phase 2, step 6 below).
+
+**Migrations run on container start, not as a separate deploy step** —
+`preDeployCommand` needs a paid Render plan, so `render.yaml`'s `dockerCommand` runs
+`prisma migrate deploy` immediately before starting the server instead
+(`sh -c "npx prisma migrate deploy ... && node apps/api/dist/server.js"`). It's
+idempotent — a no-op if there's nothing pending — so this is safe to run on every
+cold start, not just on deploy.
+
 ## Phase 1 — free testing week
 
 ### One-time setup
@@ -22,34 +33,28 @@ exactly the same "pilot mode" the codebase runs locally via `npm run dev:api`. S
    ```
    npx web-push generate-vapid-keys
    ```
-   Keep the public/private key pair from the output — you'll paste them in step 5.
-3. **Get Razorpay test-mode credentials** from your existing Razorpay account:
-   Dashboard → Settings → API Keys → generate a **Test Mode** key id + secret (test
-   mode uses fake money — nothing real is charged during this testing phase). You'll
-   also need a webhook secret: Dashboard → Webhooks → Add New Webhook once you know
-   your Render URL (step 4 gives you that URL; come back to this after).
-4. **Create the Render Blueprint**: in the Render dashboard, "New" → "Blueprint" →
+   Keep the public/private key pair from the output — you'll paste them in step 4.
+3. **Create the Render Blueprint**: in the Render dashboard, "New" → "Blueprint" →
    connect this GitHub repo → Render reads `render.yaml` and shows you `printq-web`
    (web service), `printq-db` (Postgres), `printq-redis` (Key Value) → click "Apply."
    First build takes a few minutes (it's compiling TypeScript and installing
    LibreOffice). Once it's live, note the assigned URL —
    `https://printq-web-xxxx.onrender.com` (Render appends a random suffix if the
    plain name is taken).
-5. **Fill in the secrets** Render couldn't generate for you — go to `printq-web` →
+4. **Fill in the secrets** Render couldn't generate for you — go to `printq-web` →
    Environment, and set:
-   - `CORS_ORIGINS` and `PUBLIC_WEB_URL` — both to the exact URL from step 4
+   - `CORS_ORIGINS` and `PUBLIC_WEB_URL` — both to the exact URL from step 3
      (e.g. `https://printq-web-xxxx.onrender.com`, no trailing slash). **The app will
      fail to boot without these set** — production refuses a wildcard/empty CORS
      origin by design (`apps/api/src/config/env.ts`).
-   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` — from step 3.
-   - `RAZORPAY_WEBHOOK_SECRET` — go finish step 3 now that you have the URL: add the
-     webhook pointing at `https://<your-url>/api/payments/webhook/razorpay`, subscribe
-     to the `payment.captured` event, copy the secret Razorpay shows you.
    - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` — from step 2.
    - `VAPID_SUBJECT` — `mailto:your-real-email@example.com` (Web Push requires a
      contact address; doesn't need to be public-facing, just valid).
    - Save changes — Render redeploys automatically.
-6. **Seed the demo shop** (optional, for your own testing): the existing
+
+   (No Razorpay account needed for this phase — `PAYMENT_PROVIDER=mock` is already
+   set in `render.yaml`. See Phase 2 step 6 for going live with real payments.)
+5. **Seed the demo shop** (optional, for your own testing): the existing
    `apps/api/prisma/seed.ts` seeds a demo shop/owner. Run it once against the deployed
    database from your machine: set `DATABASE_URL` locally to the value shown in the
    Render Postgres dashboard (Internal or External connection string — use the
@@ -62,10 +67,8 @@ Work through this once the service is live and secrets are set:
 - [ ] Student phone login: request an OTP, then check the Render service's **Logs**
   tab for a `login_otp` line with the code (SMS delivery is `console` until you have
   an MSG91 account — this is expected, not a bug).
-- [ ] Upload a PDF, set specs, pay with the mock provider path is disabled now that
-  `PAYMENT_PROVIDER=razorpay` — use a
-  [Razorpay test card](https://razorpay.com/docs/payments/payments/test-card-upi-details/)
-  to actually exercise the real checkout + webhook path.
+- [ ] Upload a PDF, set specs, and pay — checkout auto-confirms immediately
+  (`PAYMENT_PROVIDER=mock`), no real payment happens yet.
 - [ ] Upload a **DOCX** file specifically — this is the one path that needs
   LibreOffice; confirm it converts instead of failing.
 - [ ] Register a shop, add a printer, register an agent, and run the real
@@ -104,9 +107,16 @@ Do this before onboarding a real shop and real paying students:
    students have no way to receive their login OTP outside of your Render logs.
 5. **Wire real email delivery** (forgot-password): get a Resend account, set
    `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` / `EMAIL_FROM`.
-6. **Switch Razorpay to live-mode keys** once you're ready to take real payments —
-   generate them from the same account (Dashboard → toggle "Live Mode"), update
-   `RAZORPAY_KEY_ID`/`KEY_SECRET`/`WEBHOOK_SECRET`, add a new live-mode webhook.
+6. **Wire real payments** (replacing mock checkout): from your Razorpay account,
+   Dashboard → Settings → API Keys → generate a key pair (start in **Test Mode** to
+   dry-run the real checkout flow with fake money first, without needing a fully
+   KYC-activated Live account). Add a webhook — Dashboard → Webhooks → Add New
+   Webhook — pointing at `https://<your-url>/api/payments/webhook/razorpay`,
+   subscribed to the `payment.captured` event; copy the secret it shows you. Then in
+   Render, set `PAYMENT_PROVIDER=razorpay` + `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`
+   / `RAZORPAY_WEBHOOK_SECRET`. When you're ready for real money, switch the
+   dashboard to Live Mode, generate a live key pair and a live-mode webhook, and swap
+   those three values for the live ones.
 7. **Optional: a custom domain** instead of `*.onrender.com` (Render supports this
    directly — Settings → Custom Domains) and/or **optional: move to Fly.io's Mumbai
    region** once real traffic makes the latency difference to Indian users worth
