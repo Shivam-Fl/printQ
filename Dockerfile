@@ -27,9 +27,9 @@ RUN npm ci
 
 COPY . .
 RUN npm run db:generate -w apps/api
-RUN npm run build -w packages/shared \
-    && npm run build -w apps/api \
-    && npm run build -w apps/web
+# Root build also packages the downloadable Windows print agent before Vite
+# copies public assets into the production web bundle.
+RUN npm run build
 # drop devDependencies in place so the runtime stage can copy node_modules as-is
 RUN npm prune --omit=dev
 

@@ -17,6 +17,8 @@ apps/agent/dist/
 !.env.example
 
 apps/api/storage/
+/storage/
+/.tmp/
 uploads/
 *.log
 logs/

@@ -35,7 +35,11 @@ webhookRouter.post(
     const eventId = req.headers['x-razorpay-event-id'];
     const payload = JSON.parse((req.body as Buffer).toString('utf8')) as {
       event: string;
-      payload?: { payment?: { entity?: { id?: string; order_id?: string } } };
+      payload?: {
+        payment?: {
+          entity?: { id?: string; order_id?: string; amount?: number; currency?: string; status?: string };
+        };
+      };
     };
 
     // idempotency: a webhook can fire more than once for the same event
@@ -54,13 +58,35 @@ webhookRouter.post(
         ? await prisma.job.findUnique({ where: { paymentOrderId: orderId } })
         : null;
 
-      await prisma.paymentEvent.create({
-        data: {
+      if (
+        job &&
+        (payment?.amount !== job.totalPaise || payment.currency !== 'INR' || payment.status !== 'captured')
+      ) {
+        logger.error(
+          {
+            jobId: job.id,
+            expectedAmount: job.totalPaise,
+            receivedAmount: payment?.amount,
+            currency: payment?.currency,
+            status: payment?.status,
+          },
+          'razorpay_captured_payment_mismatch',
+        );
+        res.status(400).json({ error: 'Payment details do not match order' });
+        return;
+      }
+
+      await prisma.paymentEvent.upsert({
+        where: {
+          providerEventId: typeof eventId === 'string' ? eventId : `rzp_${payment?.id ?? orderId ?? 'unknown'}`,
+        },
+        create: {
           provider: 'razorpay',
-          providerEventId: typeof eventId === 'string' ? eventId : `rzp_${payment?.id ?? Date.now()}`,
+          providerEventId: typeof eventId === 'string' ? eventId : `rzp_${payment?.id ?? orderId ?? 'unknown'}`,
           jobId: job?.id ?? null,
           payload: payload as object,
         },
+        update: {},
       });
 
       if (job) {

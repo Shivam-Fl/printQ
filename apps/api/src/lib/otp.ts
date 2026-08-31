@@ -1,4 +1,11 @@
-import { randomInt, createHash, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+} from 'node:crypto';
 import argon2 from 'argon2';
 import { env } from '../config/env.js';
 
@@ -17,6 +24,41 @@ export function hashOtp(otp: string): Promise<string> {
 
 export function verifyOtpHash(hash: string, otp: string): Promise<boolean> {
   return argon2.verify(hash, otp + env.OTP_PEPPER).catch(() => false);
+}
+
+const releaseCodeKey = createHash('sha256')
+  .update(`printq-release-code:${env.OTP_PEPPER}`)
+  .digest();
+
+/** Deterministic, peppered lookup key for a shop's six-digit counter code. */
+export function digestReleaseCode(shopId: string, code: string): string {
+  return createHmac('sha256', releaseCodeKey).update(`${shopId}:${code}`).digest('hex');
+}
+
+/** AES-GCM protects the recoverable code at rest; shopId is authenticated AAD. */
+export function encryptReleaseCode(shopId: string, code: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', releaseCodeKey, iv);
+  cipher.setAAD(Buffer.from(shopId));
+  const ciphertext = Buffer.concat([cipher.update(code, 'utf8'), cipher.final()]);
+  return `v1.${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+export function decryptReleaseCode(shopId: string, value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const [version, iv, tag, ciphertext] = value.split('.');
+    if (version !== 'v1' || !iv || !tag || !ciphertext) return null;
+    const decipher = createDecipheriv('aes-256-gcm', releaseCodeKey, Buffer.from(iv, 'base64url'));
+    decipher.setAAD(Buffer.from(shopId));
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(ciphertext, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch {
+    return null;
+  }
 }
 
 /** Opaque 48-hex-char agent token; only its sha256 is persisted. */

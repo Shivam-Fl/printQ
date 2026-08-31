@@ -23,7 +23,27 @@ export function createApp(): express.Express {
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // real client IPs behind the TLS-terminating proxy
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          baseUri: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'self'"],
+          scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
+          scriptSrcAttr: ["'none'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'https://cdn.razorpay.com', 'https://*.razorpay.com'],
+          connectSrc: ["'self'", 'https://api.razorpay.com', 'https://*.razorpay.com'],
+          frameSrc: ["'self'", 'https://api.razorpay.com', 'https://checkout.razorpay.com', 'https://*.razorpay.com'],
+          fontSrc: ["'self'", 'data:'],
+          manifestSrc: ["'self'"],
+          workerSrc: ["'self'"],
+        },
+      },
+    }),
+  );
   app.use(
     cors({
       origin: (origin, callback) => {

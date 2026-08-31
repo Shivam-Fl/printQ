@@ -12,14 +12,24 @@
     "dev:worker": "npm run dev:worker -w apps/api",
     "dev:web": "npm run dev -w apps/web",
     "dev:agent": "npm run dev -w apps/agent",
-    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web && npm run build -w apps/agent",
+    "dev:agent:sim": "npm run dev -w apps/agent -- --simulate",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/agent && npm run package:agent && npm run build -w apps/web",
+    "package:agent": "node scripts/package-agent.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e:sim": "node scripts/e2e-sim.mjs",
+    "test:launch": "npm run build && npm run test && npm run test:e2e:sim",
     "db:migrate": "npm run db:migrate -w apps/api",
     "db:seed": "npm run db:seed -w apps/api"
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0",
+    "nanoid": "^3.3.18",
+    "postcss": "^8.5.26",
+    "socket.io-parser": "^4.2.7"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

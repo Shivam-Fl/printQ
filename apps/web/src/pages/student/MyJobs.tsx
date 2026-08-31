@@ -31,7 +31,7 @@ function JobCard({ job }: { job: JobRow }) {
           <div className="dim" style={{ marginTop: 2 }}>
             {job.shop.name}
             {job.mode === 'scheduled' && job.scheduledTime
-              ? ` · slot ${new Date(job.scheduledTime).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+              ? ` · planned ${new Date(job.scheduledTime).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
               : ` · ${ago(job.createdAt)}`}
           </div>
         </div>
@@ -66,13 +66,14 @@ export default function MyJobs() {
     <StudentShell>
       <div className="page">
         <Topbar right={<Link to="/profile">Profile</Link>} />
-        <h1>My jobs</h1>
-        {error && <p className="error">{error}</p>}
+        <div className="page-heading"><div><span className="eyebrow-label">Orders &amp; receipts</span><h1>My jobs</h1><p>Track active prints and open any past order for its receipt.</p></div></div>
+        {error && <div className="error-box" role="alert">{error}</div>}
+        {jobs === null && !error && <div className="empty-state"><strong>Loading your jobs…</strong></div>}
 
         {jobs && jobs.length === 0 && (
-          <div className="card">
-            <p style={{ margin: 0 }}>No prints yet.</p>
-            <p className="dim" style={{ marginBottom: 0 }}>
+          <div className="empty-state">
+            <strong>No prints yet</strong>
+            <p>
               Tap <strong>Print</strong> below, or <Link to="/s/demo">try the demo shop</Link>.
             </p>
           </div>

@@ -1,6 +1,7 @@
 /** Job lifecycle states — see printQ.md §8. Transitions live in stateMachine.ts. */
 export const JOB_STATUSES = [
   'pending_payment',
+  'awaiting_arrival',
   'queued',
   'notified',
   'otp_verified',
@@ -17,7 +18,7 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export const PRINTER_STATUSES = ['online', 'offline', 'jammed'] as const;
 export type PrinterStatus = (typeof PRINTER_STATUSES)[number];
 
-export const PAYMENT_STATUSES = ['pending', 'paid', 'refunded', 'failed'] as const;
+export const PAYMENT_STATUSES = ['pending', 'paid', 'refunding', 'refunded', 'failed'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const JOB_MODES = ['instant', 'scheduled'] as const;

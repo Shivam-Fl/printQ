@@ -1,0 +1,1 @@
+ALTER TABLE "Shop" ADD COLUMN "acceptingOrders" BOOLEAN NOT NULL DEFAULT true;

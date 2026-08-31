@@ -1,7 +1,7 @@
 import type { Job } from '@prisma/client';
 import type { JobSpecs } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { verifyOtpHash } from '../../lib/otp.js';
+import { digestReleaseCode, verifyOtpHash } from '../../lib/otp.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
@@ -16,9 +16,9 @@ export interface ReleaseResult {
 }
 
 /**
- * The shop's single OTP input (printQ.md §5.3–5.4). Finds which notified job
- * in this shop the OTP belongs to, verifies it, finalizes printer assignment
- * per the auto-assign setting, and dispatches the print.
+ * The shop's single counter-code input. It is intentionally independent of
+ * advisory queue order: any student physically at the counter can release a
+ * paid, print-ready order, even after a missed/removed queue position.
  */
 export async function releaseByOtp(
   shopId: string,
@@ -29,30 +29,50 @@ export async function releaseByOtp(
   const shop = await prisma.shop.findUnique({ where: { id: shopId } });
   if (!shop) throw notFound();
 
-  // A shop has at most one notified job per printer — small candidate set.
-  const candidates = await prisma.job.findMany({
-    where: { shopId, status: 'notified', otpHash: { not: null } },
+  const digest = digestReleaseCode(shopId, otp);
+  let matched: Job | null = await prisma.job.findFirst({
+    where: {
+      shopId,
+      releaseCodeDigest: digest,
+      paymentStatus: 'paid',
+      status: {
+        in: ['awaiting_arrival', 'queued', 'notified', 'no_show', 'otp_verified', 'printing', 'ready_for_pickup'],
+      },
+    },
+    orderBy: { createdAt: 'desc' },
   });
 
-  let matched: Job | null = null;
-  for (const candidate of candidates) {
-    if (await verifyOtpHash(candidate.otpHash!, otp)) {
-      matched = candidate;
-      break;
+  // Rolling-deploy compatibility for old jobs whose temporary OTP was argon2
+  // hashed before stable release codes existed.
+  if (!matched) {
+    const legacyCandidates = await prisma.job.findMany({
+      where: { shopId, status: 'notified', otpHash: { not: null } },
+    });
+    for (const candidate of legacyCandidates) {
+      if (await verifyOtpHash(candidate.otpHash!, otp)) {
+        matched = candidate;
+        break;
+      }
     }
   }
   if (!matched) throw badRequest('Invalid OTP', 'OTP_INVALID');
-  if (matched.otpExpiresAt && matched.otpExpiresAt.getTime() < Date.now()) {
+  if (!matched.releaseCodeDigest && matched.otpExpiresAt && matched.otpExpiresAt.getTime() < Date.now()) {
     throw conflict('This OTP has expired');
+  }
+  if (matched.status === 'otp_verified' || matched.status === 'printing') {
+    throw conflict('This order has already been released to a printer');
+  }
+  if (matched.status === 'ready_for_pickup') {
+    throw conflict('This order is already printed and ready for pickup');
   }
 
   const specs = matched.specs as unknown as JobSpecs;
 
   // Final printer choice. The provisional assignment from queue time is
   // re-validated — printers can go offline/jam while the student walks over.
+  const { eligible, recommended } = await recommendPrinter(shopId, specs, matched.pagesPerCopy, matched.id);
   let printerId = manualPrinterId ?? null;
   if (!printerId) {
-    const { eligible, recommended } = await recommendPrinter(shopId, specs, matched.pagesPerCopy);
     const stillEligible = eligible.some((e) => e.printerId === matched!.assignedPrinterId);
     printerId = stillEligible ? matched.assignedPrinterId : (recommended?.printerId ?? null);
 
@@ -70,17 +90,36 @@ export async function releaseByOtp(
       };
     }
   } else {
-    // manual override: printer must belong to this shop (no cross-shop IDs)
-    const printer = await prisma.printer.findFirst({ where: { id: printerId, shopId } });
-    if (!printer) throw badRequest('Unknown printer');
+    // Manual choice is still constrained to an online, capability-compatible
+    // printer. Owners update the printer profile when they swap paper/finishers.
+    if (!eligible.some((entry) => entry.printerId === printerId)) {
+      throw badRequest('That printer is offline or cannot produce this job');
+    }
   }
 
+  const arrivedAtCounter = matched.status === 'awaiting_arrival' || matched.status === 'no_show';
   const updated = await applyTransition(
     matched.id,
-    'notified',
-    'OTP_VERIFIED',
+    matched.status,
+    matched.releaseCodeDigest ? 'COUNTER_RELEASE' : 'OTP_VERIFIED',
     { type: 'shop', id: shopUserId },
-    { assignedPrinterId: printerId, otpHash: null, otpCode: null, claimedByAgentId: null },
+    {
+      assignedPrinterId: printerId,
+      claimedByAgentId: null,
+      printError: null,
+      ...(arrivedAtCounter
+        ? {
+            arrivedAt: new Date(),
+            queuedAt: new Date(),
+            checkInCount: { increment: 1 },
+          }
+        : {}),
+      // Clear only legacy temporary OTP data. The encrypted stable code stays
+      // available to the owning student through pickup.
+      otpHash: null,
+      otpCode: null,
+      otpExpiresAt: null,
+    },
   );
   if (!updated) throw conflict('Job state changed, try again');
 

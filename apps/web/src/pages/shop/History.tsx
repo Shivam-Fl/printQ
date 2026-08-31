@@ -11,7 +11,7 @@ interface Row {
   pagesPerCopy: number;
   totalPaise: number;
   at: string;
-  paymentStatus: 'pending' | 'paid' | 'refunded' | 'failed';
+  paymentStatus: 'pending' | 'paid' | 'refunding' | 'refunded' | 'failed';
   printer: string | null;
   student: { name: string | null; phoneMasked: string };
   file: string;

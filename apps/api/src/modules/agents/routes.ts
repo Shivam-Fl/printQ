@@ -10,6 +10,8 @@ import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { logger } from '../../lib/logger.js';
+import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
+import { notifyShopReopened } from '../shops/availability.js';
 
 export const agentRouter = Router();
 agentRouter.use(requireAgent);
@@ -61,6 +63,9 @@ agentRouter.post(
       where: { id: agent.id },
       data: { detectedPrinters: printers, detectedAt: new Date(), connectedPrinterIds },
     });
+    await advanceShopQueues(agent.shopId);
+    await emitQueueUpdate(agent.shopId);
+    await notifyShopReopened(agent.shopId);
     publishEvent(`shop:${agent.shopId}`, 'agent:printers_detected', { agentId: agent.id, printers });
     res.json({ ok: true });
   }),
@@ -122,7 +127,7 @@ agentRouter.post(
     const job = await applyTransition(param(req, 'id'), 'otp_verified', 'PRINT_STARTED', {
       type: 'agent',
       id: agent.id,
-    });
+    }, { printError: null, printAttempts: { increment: 1 } });
     if (!job) throw conflict('Job state changed');
 
     const printer = job.assignedPrinterId
@@ -181,7 +186,7 @@ agentRouter.post(
     const updated = await applyTransition(job.id, 'printing', 'PRINT_COMPLETED', {
       type: 'agent',
       id: agent.id,
-    });
+    }, { printError: null });
     if (!updated) throw conflict('Job state changed');
 
     await notifyStudent(job.studentId, {
@@ -215,11 +220,15 @@ agentRouter.post(
       'printing',
       'PRINT_FAILED',
       { type: 'agent', id: agent.id },
-      { claimedByAgentId: null },
+      { claimedByAgentId: null, printError: reason },
     );
     if (!updated) throw conflict('Job state changed');
 
     logger.warn({ jobId: job.id, agentId: agent.id, reason }, 'print_failed');
+    publishEvent(`student:${job.studentId}`, 'job:update', {
+      jobId: job.id,
+      status: 'otp_verified',
+    });
     publishEvent(`shop:${job.shopId}`, 'queue:print_failed', { jobId: job.id, reason });
     res.json({ ok: true });
   }),

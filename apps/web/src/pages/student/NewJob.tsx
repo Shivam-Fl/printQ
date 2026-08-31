@@ -226,208 +226,138 @@ export default function NewJob() {
   return (
     <div className="page">
       <Topbar />
-      <h1>Set your print</h1>
-      <p className="dim">This preview is exactly what will print{pages ? ` · ${pages} pages` : ''}.</p>
-      <iframe className="preview-frame" src={previewUrl} title="Print preview" />
+      <div className="checkout-heading">
+        <span className="eyebrow-label">Review before payment</span>
+        <h1>Set up your print</h1>
+        <p className="dim">Check the preview and choose only what you need. The total updates instantly.</p>
+        <div className="checkout-steps" aria-label="Order progress">
+          <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Payment</span><span>Arrive &amp; check in</span>
+        </div>
+      </div>
 
-      <div className="card stack">
-        <div className="row">
-          <div style={{ flex: 1 }}>
-            <label htmlFor="copies">Copies</label>
-            <input
-              id="copies"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={100}
-              value={specs.copies}
-              onChange={(e) => set('copies', Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-            />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="paper">Paper</label>
-            <select id="paper" value={specs.paperSize} onChange={(e) => set('paperSize', e.target.value)}>
-              {opts.papers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label} — {rupees(p.bwPaise)}/pg
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="row">
-          <div style={{ flex: 1 }}>
-            <label htmlFor="color">Colour</label>
-            <select
-              id="color"
-              value={specs.color ? 'color' : 'bw'}
-              disabled={!colorAvailable}
-              onChange={(e) => set('color', e.target.value === 'color')}
-            >
-              <option value="bw">Black &amp; white</option>
-              {colorAvailable && <option value="color">Colour — {rupees(paper!.colorPaise!)}/pg</option>}
-            </select>
-          </div>
-          {opts.duplexEnabled && (
-            <div style={{ flex: 1 }}>
-              <label htmlFor="sides">Sides</label>
-              <select id="sides" value={specs.duplex ? 'duplex' : 'single'} onChange={(e) => set('duplex', e.target.value === 'duplex')}>
-                <option value="single">One-sided</option>
-                <option value="duplex">Both sides</option>
-              </select>
+      <div className="checkout-grid">
+        <div className="checkout-main">
+          <section className="checkout-card">
+            <div className="checkout-card-head">
+              <h2>Print settings</h2>
+              <p>Paper, copies and finish.</p>
             </div>
-          )}
-        </div>
-        <div className="row">
-          {opts.bindings.length > 0 && (
-            <div style={{ flex: 1 }}>
-              <label htmlFor="binding">Binding</label>
-              <select
-                id="binding"
-                value={specs.binding ?? 'none'}
-                onChange={(e) => set('binding', e.target.value === 'none' ? null : e.target.value)}
-              >
-                <option value="none">None</option>
-                {opts.bindings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.label}
-                    {b.paise > 0 ? ` — ${rupees(b.paise)}` : ''}
-                  </option>
-                ))}
-              </select>
+            <div className="form-row">
+              <div className="field grow">
+                <label htmlFor="copies">Copies</label>
+                <input id="copies" type="number" inputMode="numeric" min={1} max={100} value={specs.copies} onChange={(e) => set('copies', Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
+              </div>
+              <div className="field grow">
+                <label htmlFor="paper">Paper</label>
+                <select id="paper" value={specs.paperSize} onChange={(e) => set('paperSize', e.target.value)}>
+                  {opts.papers.map((p) => <option key={p.id} value={p.id}>{p.label} — {rupees(p.bwPaise)}/page</option>)}
+                </select>
+              </div>
             </div>
-          )}
-        </div>
-
-        <div>
-          <label>Pages</label>
-          <div className="seg" role="radiogroup" aria-label="Which pages">
-            <button className={pageMode === 'all' ? 'on' : ''} onClick={() => setPageMode('all')}>All pages</button>
-            <button className={pageMode === 'custom' ? 'on' : ''} onClick={() => setPageMode('custom')}>Custom range</button>
-          </div>
-          {pageMode === 'custom' && (
-            <div style={{ marginTop: 8 }}>
-              {rangeAdvanced ? (
-                <>
-                  <input
-                    type="text"
-                    placeholder="e.g. 1-5,8"
-                    value={rawRange}
-                    onChange={(e) => setRawRange(e.target.value)}
-                    autoFocus
-                  />
-                  <button className="ghost small" style={{ marginTop: 6 }} onClick={() => setRangeAdvanced(false)}>
-                    Use a simple from/to range
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="row">
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="rfrom">From page</label>
-                      <input
-                        id="rfrom"
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={pages ?? 1}
-                        value={rangeFrom}
-                        onChange={(e) => setRangeFrom(Math.max(1, Number(e.target.value) || 1))}
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="rto">To page</label>
-                      <input
-                        id="rto"
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={pages ?? 1}
-                        value={rangeTo}
-                        onChange={(e) => setRangeTo(Math.max(1, Number(e.target.value) || 1))}
-                      />
-                    </div>
-                  </div>
-                  <button className="ghost small" style={{ marginTop: 6 }} onClick={() => setRangeAdvanced(true)}>
-                    Need more than one range? (e.g. 1-5,8)
-                  </button>
-                </>
+            <div className="form-row">
+              <div className="field grow">
+                <label htmlFor="color">Ink</label>
+                <select id="color" value={specs.color ? 'color' : 'bw'} disabled={!colorAvailable} onChange={(e) => set('color', e.target.value === 'color')}>
+                  <option value="bw">Black &amp; white</option>
+                  {colorAvailable && <option value="color">Colour — {rupees(paper!.colorPaise!)}/page</option>}
+                </select>
+              </div>
+              {opts.duplexEnabled && (
+                <div className="field grow">
+                  <label htmlFor="sides">Sides</label>
+                  <select id="sides" value={specs.duplex ? 'duplex' : 'single'} onChange={(e) => set('duplex', e.target.value === 'duplex')}>
+                    <option value="single">One-sided</option><option value="duplex">Both sides</option>
+                  </select>
+                </div>
               )}
-              {rangeError && <p className="error" style={{ margin: '6px 0 0' }}>{rangeError}</p>}
             </div>
-          )}
-        </div>
-      </div>
+            {opts.bindings.length > 0 && (
+              <div className="field">
+                <label htmlFor="binding">Binding or finishing</label>
+                <select id="binding" value={specs.binding ?? 'none'} onChange={(e) => set('binding', e.target.value === 'none' ? null : e.target.value)}>
+                  <option value="none">None</option>
+                  {opts.bindings.map((b) => <option key={b.id} value={b.id}>{b.label}{b.paise > 0 ? ` — ${rupees(b.paise)}` : ''}</option>)}
+                </select>
+              </div>
+            )}
+          </section>
 
-      <div className="card stack">
-        <div className="seg" role="radiogroup" aria-label="When to print">
-          <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>Print now</button>
-          <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>Pick a slot</button>
-        </div>
-        {mode === 'instant' ? (
-          <p className="dim" style={{ margin: 0 }}>You join the live queue the moment payment is done.</p>
-        ) : (
-          <div>
-            <label htmlFor="slot">Print at</label>
-            <input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} />
-            <p className="dim" style={{ marginBottom: 0 }}>Book tonight, walk in tomorrow — your spot is reserved.</p>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        {quote ? (
-          <div className="receipt">
-            <div className="line">
-              <span>{quote.pagesPerCopy} pages × {specs.copies} {specs.copies === 1 ? 'copy' : 'copies'}</span>
-              <span>{rupees(quote.pagesTotalPaise)}</span>
+          <section className="checkout-card">
+            <div className="checkout-card-head">
+              <h2>Pages</h2>
+              <p>Print the whole document or only selected pages.</p>
             </div>
-            {quote.bindingPaise > 0 && (
-              <div className="line"><span>binding</span><span>{rupees(quote.bindingPaise)}</span></div>
+            <div className="seg" role="radiogroup" aria-label="Which pages">
+              <button className={pageMode === 'all' ? 'on' : ''} onClick={() => setPageMode('all')}>All {pages ? `${pages} pages` : 'pages'}</button>
+              <button className={pageMode === 'custom' ? 'on' : ''} onClick={() => setPageMode('custom')}>Choose pages</button>
+            </div>
+            {pageMode === 'custom' && (
+              <div style={{ marginTop: 14 }}>
+                {rangeAdvanced ? (
+                  <>
+                    <label htmlFor="advanced-range">Page numbers or ranges</label>
+                    <input id="advanced-range" type="text" placeholder="For example: 1-5, 8, 11-14" value={rawRange} onChange={(e) => setRawRange(e.target.value)} autoFocus />
+                    <button className="text-button" style={{ marginTop: 7 }} onClick={() => setRangeAdvanced(false)}>Use simple from/to fields</button>
+                  </>
+                ) : (
+                  <>
+                    <div className="form-row">
+                      <div className="field grow"><label htmlFor="rfrom">From page</label><input id="rfrom" type="number" inputMode="numeric" min={1} max={pages ?? 1} value={rangeFrom} onChange={(e) => setRangeFrom(Math.max(1, Number(e.target.value) || 1))} /></div>
+                      <div className="field grow"><label htmlFor="rto">To page</label><input id="rto" type="number" inputMode="numeric" min={1} max={pages ?? 1} value={rangeTo} onChange={(e) => setRangeTo(Math.max(1, Number(e.target.value) || 1))} /></div>
+                    </div>
+                    <button className="text-button" style={{ marginTop: 7 }} onClick={() => setRangeAdvanced(true)}>Need separate ranges?</button>
+                  </>
+                )}
+                {rangeError && <div className="error-box" role="alert">{rangeError}</div>}
+              </div>
             )}
-            {quote.discountPaise > 0 && (
-              <div className="line"><span>coupon ({appliedCoupon})</span><span>-{rupees(quote.discountPaise)}</span></div>
-            )}
-            <div className="line total"><span>Total</span><span>{rupees(quote.totalPaise)}</span></div>
-          </div>
-        ) : (
-          <p className="dim" style={{ margin: 0 }}>Pricing…</p>
-        )}
+          </section>
 
-        {appliedCoupon ? (
-          <p className="dim" style={{ margin: '10px 0 0' }}>
-            Coupon <strong className="mono">{appliedCoupon}</strong> applied.{' '}
-            <button
-              className="ghost small"
-              onClick={() => {
-                setAppliedCoupon(null);
-                setCouponInput('');
-              }}
-            >
-              Remove
+          <section className="checkout-card">
+            <div className="checkout-card-head"><h2>When do you plan to arrive?</h2><p>Payment prepares the order. Your live queue position starts only after you reach the shop and check in.</p></div>
+            <div className="seg" role="radiogroup" aria-label="When to print">
+              <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>Flexible arrival</button>
+              <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>Reserve a time</button>
+            </div>
+            {mode === 'instant' ? <p className="dim" style={{ marginBottom: 0 }}>Your position appears as soon as payment is confirmed.</p> : (
+              <div style={{ marginTop: 14 }}><label htmlFor="slot">Planned arrival</label><input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} /><p className="dim" style={{ marginBottom: 0 }}>We’ll remind you near this time. Check-in still starts only when you are physically there.</p></div>
+            )}
+          </section>
+        </div>
+
+        <aside className="checkout-sidebar">
+          <div className="preview-card">
+            <div className="preview-card-head"><strong>Print preview</strong><span>{pages ? `${pages} pages` : 'Preparing…'}</span></div>
+            <iframe className="preview-frame" src={previewUrl} title="Print preview" />
+          </div>
+          <div className="checkout-total">
+            {quote ? (
+              <div className="receipt">
+                <div className="line"><span>{quote.pagesPerCopy} pages × {specs.copies}</span><span>{rupees(quote.pagesTotalPaise)}</span></div>
+                {quote.bindingPaise > 0 && <div className="line"><span>Finishing</span><span>{rupees(quote.bindingPaise)}</span></div>}
+                {quote.discountPaise > 0 && <div className="line"><span>Coupon ({appliedCoupon})</span><span>−{rupees(quote.discountPaise)}</span></div>}
+                <div className="line total"><span>Total</span><span>{rupees(quote.totalPaise)}</span></div>
+              </div>
+            ) : <p style={{ margin: 0 }}>Updating total…</p>}
+
+            {appliedCoupon ? (
+              <p style={{ margin: '12px 0 0', color: '#b9c2d2', fontSize: '.82rem' }}>Coupon <strong className="mono">{appliedCoupon}</strong> applied. <button className="text-button" onClick={() => { setAppliedCoupon(null); setCouponInput(''); }}>Remove</button></p>
+            ) : (
+              <div className="row" style={{ marginTop: 12, flexWrap: 'nowrap' }}>
+                <input type="text" aria-label="Coupon code" placeholder="Coupon code" value={couponInput} onChange={(e) => setCouponInput(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && void applyCoupon()} style={{ flex: 1 }} />
+                <button className="ghost small" disabled={!couponInput.trim()} onClick={applyCoupon}>Apply</button>
+              </div>
+            )}
+            {couponError && <p className="error" style={{ marginBottom: 0 }}>{couponError}</p>}
+            <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
+              {busy ? 'Opening payment…' : mode === 'scheduled' ? 'Pay & save arrival time' : 'Pay & prepare order'}
             </button>
-          </p>
-        ) : (
-          <div className="row" style={{ marginTop: 10, flexWrap: 'nowrap' }}>
-            <input
-              type="text"
-              placeholder="Coupon code"
-              value={couponInput}
-              onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === 'Enter' && void applyCoupon()}
-              style={{ flex: 1 }}
-            />
-            <button className="ghost small" disabled={!couponInput.trim()} onClick={applyCoupon}>Apply</button>
+            <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>Secure payment · exact preview · status notifications</p>
           </div>
-        )}
-        {couponError && <p className="error" style={{ margin: '6px 0 0' }}>{couponError}</p>}
-
-        <button style={{ width: '100%', marginTop: 14 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
-          {busy ? 'Starting…' : mode === 'scheduled' ? 'Pay & book slot' : 'Pay & join queue'}
-        </button>
+        </aside>
       </div>
-      {error && <div className="error">{error}</div>}
-      <p className="dim"><a href={`/s/${slug}`}>← choose different files</a></p>
+      {error && <div className="error-box" role="alert">{error}</div>}
+      <p className="dim"><a href={`/s/${slug}`}>← Choose different files</a></p>
     </div>
   );
 }

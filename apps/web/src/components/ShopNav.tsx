@@ -5,6 +5,7 @@ import { resetSockets } from '../socket.js';
 
 const LINKS = [
   { to: '/dashboard', label: 'Queue', end: true },
+  { to: '/dashboard/setup', label: 'Setup' },
   { to: '/dashboard/insights', label: 'Insights' },
   { to: '/dashboard/history', label: 'History' },
   { to: '/dashboard/printers', label: 'Printers' },

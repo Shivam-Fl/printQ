@@ -308,3 +308,12 @@ queued/notified  →  cancelled         (optional: student cancels before OTP)
 - [ ] A no-show can be marked and the queue moves forward automatically.
 - [ ] Printer profile settings page exists and feeds the assignment logic.
 - [ ] Auto-assign toggle works in both directions, including the manual-mode fallback safety net.
+# Launch-model amendment (implemented August 2026)
+
+The arrival-based workflow requested after this original product brief supersedes the
+payment-time queue, expiring turn-OTP, no-show/requeue and reserved-slot behavior below.
+For the shipping product, upload/payment creates a prepared order outside the physical
+line; check-in at the shop creates a new shop-wide position; removal loses that position
+and re-check-in goes to the end; and a stable encrypted six-digit counter code can find
+and print the paid job irrespective of advisory queue order. Planned times are reminders,
+not remote reservations. `README.md` and `SECURITY.md` are the current operational spec.

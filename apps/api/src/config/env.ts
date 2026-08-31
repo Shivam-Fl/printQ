@@ -62,6 +62,8 @@ const envSchema = z.object({
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
   FILE_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  /// Paid orders that never arrive are refunded and closed after this window.
+  PREPARED_ORDER_TTL_HOURS: z.coerce.number().int().min(24).max(720).default(168),
   /// "almost your turn" alert when this many people (or fewer) are ahead
   NEAR_FRONT_THRESHOLD: z.coerce.number().int().min(1).max(20).default(5),
   /// scheduled jobs become eligible this many minutes before their slot

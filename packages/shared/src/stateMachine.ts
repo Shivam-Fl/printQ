@@ -2,6 +2,9 @@ import type { JobStatus } from './types.js';
 
 export const JOB_EVENTS = [
   'PAYMENT_CONFIRMED',
+  'ARRIVED',
+  'QUEUE_SKIPPED',
+  'COUNTER_RELEASE',
   'FRONT_REACHED',
   'OTP_VERIFIED',
   'WINDOW_EXPIRED',
@@ -21,14 +24,22 @@ export type JobEvent = (typeof JOB_EVENTS)[number];
  * Every status write in the system must go through transition().
  */
 const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
-  pending_payment: { PAYMENT_CONFIRMED: 'queued', CANCEL: 'cancelled' },
-  queued: { FRONT_REACHED: 'notified', CANCEL: 'cancelled' },
+  pending_payment: { PAYMENT_CONFIRMED: 'awaiting_arrival', CANCEL: 'cancelled' },
+  awaiting_arrival: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', CANCEL: 'cancelled' },
+  queued: {
+    FRONT_REACHED: 'notified',
+    COUNTER_RELEASE: 'otp_verified',
+    QUEUE_SKIPPED: 'awaiting_arrival',
+    CANCEL: 'cancelled',
+  },
   notified: {
     OTP_VERIFIED: 'otp_verified',
+    COUNTER_RELEASE: 'otp_verified',
+    QUEUE_SKIPPED: 'awaiting_arrival',
     WINDOW_EXPIRED: 'no_show',
     CANCEL: 'cancelled',
   },
-  no_show: { REQUEUE: 'requeued', GRACE_EXPIRED: 'expired' },
+  no_show: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', REQUEUE: 'requeued', GRACE_EXPIRED: 'expired' },
   requeued: { REJOINED: 'queued' },
   otp_verified: { PRINT_STARTED: 'printing' },
   // PRINT_FAILED returns to otp_verified so the shop can re-dispatch without a new OTP

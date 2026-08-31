@@ -19,6 +19,12 @@ interface Options {
   bindings: Binding[];
   duplexEnabled: boolean;
 }
+interface ShopProfile {
+  name: string;
+  address: string;
+  campusName: string | null;
+  slug: string;
+}
 
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || `opt-${Date.now()}`;
@@ -28,6 +34,7 @@ const toPaise = (v: string) => (v.trim() === '' ? null : Math.max(0, Math.round(
 export default function Settings() {
   const navigate = useNavigate();
   const [opts, setOpts] = useState<Options | null>(null);
+  const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [autoAssign, setAutoAssign] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -38,9 +45,10 @@ export default function Settings() {
       navigate('/dashboard/login');
       return;
     }
-    api<{ shop: { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
+    api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
       .then((r) => {
         setOpts(r.shop.printOptions);
+        setProfile({ name: r.shop.name, address: r.shop.address, campusName: r.shop.campusName, slug: r.shop.slug });
         setAutoAssign(r.shop.autoAssignEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
@@ -61,7 +69,7 @@ export default function Settings() {
     setOpts({ ...opts, bindings: opts.bindings.map((b, idx) => (idx === i ? { ...b, ...patch } : b)) });
 
   async function save() {
-    if (!opts) return;
+    if (!opts || !profile) return;
     // clean up: drop empty-label rows, ensure ids
     const papers = opts.papers
       .filter((p) => p.label.trim())
@@ -77,7 +85,13 @@ export default function Settings() {
       await api('/api/shop/me', {
         method: 'PATCH',
         role: 'shop',
-        body: { printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled }, autoAssignEnabled: autoAssign },
+        body: {
+          name: profile.name,
+          address: profile.address,
+          campusName: profile.campusName?.trim() || null,
+          printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
+          autoAssignEnabled: autoAssign,
+        },
       });
       setOpts({ papers, bindings, duplexEnabled: opts.duplexEnabled });
       setSaved(true);
@@ -92,18 +106,32 @@ export default function Settings() {
   return (
     <div className="page wide">
       <ShopNav />
-      <h1>Settings</h1>
-      <p className="dim">Set the paper types, binding and prices students see. Add a custom sheet (e.g. your college's answer sheet) as its own paper.</p>
+      <div className="page-heading">
+        <div><span className="eyebrow-label">Storefront &amp; operations</span><h1>Settings</h1><p>Keep the shop details, print menu and team access accurate for students and staff.</p></div>
+      </div>
 
-      <div className="card row between">
+      {profile && (
+        <section className="settings-section">
+          <div className="settings-section-copy"><h2>Shop profile</h2><p>These details appear on your public order page and QR link.</p><a href={`/s/${profile.slug}`} target="_blank" rel="noreferrer">Preview student page ↗</a></div>
+          <div className="settings-surface stack">
+            <div className="form-row">
+              <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
+              <div className="field grow"><label htmlFor="profile-campus">Campus</label><input id="profile-campus" placeholder="Optional" value={profile.campusName ?? ''} onChange={(event) => setProfile({ ...profile, campusName: event.target.value })} /></div>
+            </div>
+            <div className="field"><label htmlFor="profile-address">Counter address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
+          </div>
+        </section>
+      )}
+
+      <div className="automation-panel">
         <div style={{ flex: 1, minWidth: 220 }}>
           <strong>Auto-assign printers</strong>
-          <p className="dim" style={{ margin: '4px 0 0' }}>On: the OTP sends each job to the best printer automatically. Off: you pick from a dropdown.</p>
+          <p className="dim" style={{ margin: '4px 0 0' }}>On: the counter code sends each job to the best printer automatically. Off: you pick from a dropdown.</p>
         </div>
         <button className={autoAssign ? '' : 'ghost'} onClick={() => setAutoAssign((v) => !v)}>{autoAssign ? 'ON' : 'OFF'}</button>
       </div>
 
-      <div className="card">
+      <div className="settings-surface">
         <div className="row between">
           <h2 style={{ margin: 0 }}>Paper types &amp; price</h2>
           <button className="small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bwPaise: 200, colorPaise: null }] })}>+ Add paper</button>
@@ -122,7 +150,7 @@ export default function Settings() {
         ))}
       </div>
 
-      <div className="card">
+      <div className="settings-surface">
         <div className="row between">
           <h2 style={{ margin: 0 }}>Binding &amp; finishing</h2>
           <button className="small" onClick={() => setOpts({ ...opts, bindings: [...opts.bindings, { id: '', label: '', paise: 0 }] })}>+ Add binding</button>
@@ -137,7 +165,7 @@ export default function Settings() {
         ))}
       </div>
 
-      <div className="card row between">
+      <div className="settings-surface row between">
         <div>
           <strong>Offer double-sided printing</strong>
           <p className="dim" style={{ margin: '4px 0 0' }}>Let students choose one-sided or both sides.</p>
@@ -146,7 +174,7 @@ export default function Settings() {
       </div>
 
       <div className="row" style={{ marginTop: 8 }}>
-        <button disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save settings'}</button>
+        <button disabled={saving || !profile?.name.trim() || !profile.address.trim()} onClick={save}>{saving ? 'Saving…' : 'Save all changes'}</button>
         {saved && <span className="stamp green">saved ✓</span>}
       </div>
       {error && <p className="error">{error}</p>}

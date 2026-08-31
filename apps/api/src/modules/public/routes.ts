@@ -4,6 +4,7 @@ import { asyncHandler, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { shopOptions } from '../../lib/shopOptions.js';
+import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
 
 export const publicRouter = Router();
 
@@ -18,9 +19,31 @@ publicRouter.get(
         : {},
       orderBy: { name: 'asc' },
       take: 20,
-      select: { slug: true, name: true, campusName: true, address: true },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        campusName: true,
+        address: true,
+        acceptingOrders: true,
+        printers: { select: { id: true, status: true } },
+        agents: { select: { status: true, connectedPrinterIds: true } },
+      },
     });
-    res.json({ shops });
+    res.json({
+      shops: shops.map((shop) => {
+        const reachable = new Set(
+          shop.agents.filter((agent) => agent.status === 'online').flatMap((agent) => agent.connectedPrinterIds),
+        );
+        return {
+          slug: shop.slug,
+          name: shop.name,
+          campusName: shop.campusName,
+          address: shop.address,
+          open: shop.acceptingOrders && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
+        };
+      }),
+    });
   }),
 );
 
@@ -39,9 +62,11 @@ publicRouter.get(
         name: true,
         address: true,
         campusName: true,
+        acceptingOrders: true,
         printOptions: true,
         printers: {
           select: {
+            id: true,
             paperSizesLoaded: true,
             colorSupport: true,
             finishingOptions: true,
@@ -52,7 +77,8 @@ publicRouter.get(
     });
     if (!shop) throw notFound();
 
-    const online = shop.printers.filter((p) => p.status === 'online');
+    const reachable = await reachablePrinterIds(shop.id);
+    const online = shop.printers.filter((p) => p.status === 'online' && reachable.has(p.id));
     const options = shopOptions(shop);
     // only surface options at least one online printer can actually produce
     const loadedPapers = new Set(online.flatMap((p) => p.paperSizesLoaded));
@@ -71,7 +97,7 @@ publicRouter.get(
         name: shop.name,
         address: shop.address,
         campusName: shop.campusName,
-        open: online.length > 0,
+        open: shop.acceptingOrders && online.length > 0,
         colorAvailable,
         rating: {
           average: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 10) / 10 : null,
@@ -100,7 +126,7 @@ publicRouter.post(
     });
     if (!shop) throw notFound();
 
-    const alreadyOpen = shop.printers.some((p) => p.status === 'online');
+    const alreadyOpen = await isShopOperational(shop.id);
     if (alreadyOpen) {
       res.json({ ok: true, alreadyOpen: true });
       return;

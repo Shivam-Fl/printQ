@@ -8,6 +8,7 @@ import { param } from '../../lib/http.js';
 import { requireStudent, requireStudentAllowQueryToken } from '../../middleware/auth.js';
 import { uploadLimiter } from '../../middleware/rateLimit.js';
 import { storage } from '../../providers/storage/index.js';
+import { fileRetentionDeadline } from '../../lib/fileRetention.js';
 import { convertQueue } from '../../lib/queues.js';
 
 export const filesRouter = Router();
@@ -87,6 +88,9 @@ filesRouter.post(
         mimeType: sources[0]!.mime,
         sizeBytes: totalBytes,
         status: 'uploaded',
+        // Covers abandoned previews and incomplete checkouts; active jobs are
+        // protected by cleanupExpiredFiles and terminal states restart this clock.
+        deleteAfter: fileRetentionDeadline(),
       },
     });
     await convertQueue.add('convert', { fileId: record.id });

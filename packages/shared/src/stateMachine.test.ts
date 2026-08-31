@@ -5,10 +5,10 @@ import { JOB_STATUSES } from './types.js';
 describe('job state machine', () => {
   it('walks the happy path end to end', () => {
     let s = transition('pending_payment', 'PAYMENT_CONFIRMED');
+    expect(s).toBe('awaiting_arrival');
+    s = transition(s, 'ARRIVED');
     expect(s).toBe('queued');
-    s = transition(s, 'FRONT_REACHED');
-    expect(s).toBe('notified');
-    s = transition(s, 'OTP_VERIFIED');
+    s = transition(s, 'COUNTER_RELEASE');
     expect(s).toBe('otp_verified');
     s = transition(s, 'PRINT_STARTED');
     expect(s).toBe('printing');
@@ -33,10 +33,16 @@ describe('job state machine', () => {
   });
 
   it('allows cancel only before release', () => {
+    expect(transition('awaiting_arrival', 'CANCEL')).toBe('cancelled');
     expect(transition('queued', 'CANCEL')).toBe('cancelled');
     expect(transition('notified', 'CANCEL')).toBe('cancelled');
     expect(() => transition('printing', 'CANCEL')).toThrow(InvalidTransitionError);
     expect(() => transition('completed', 'CANCEL')).toThrow(InvalidTransitionError);
+  });
+
+  it('keeps a skipped arrival paid and available without blocking the line', () => {
+    expect(transition('queued', 'QUEUE_SKIPPED')).toBe('awaiting_arrival');
+    expect(transition('awaiting_arrival', 'COUNTER_RELEASE')).toBe('otp_verified');
   });
 
   it('rejects payment confirmation twice', () => {

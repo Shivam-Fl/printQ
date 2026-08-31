@@ -27,8 +27,16 @@ interface JobDetail {
   otpCode: string | null;
   otpExpiresAt: string | null;
   noShowCount: number;
-  paymentStatus: 'pending' | 'paid' | 'refunded' | 'failed';
+  paymentStatus: 'pending' | 'paid' | 'refunding' | 'refunded' | 'failed';
   rating: number | null;
+  printError: string | null;
+  printAttempts: number;
+  position: number | null;
+  etaMinutes: number | null;
+  canCheckIn: boolean;
+  checkInOpensAt: string | null;
+  arrivedAt: string | null;
+  checkInCount: number;
   shop: { name: string; address: string; slug: string };
   file: { originalName: string; pages: number | null };
 }
@@ -37,13 +45,13 @@ const slotLabel = (iso: string) =>
   new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 const MILESTONES = [
-  { key: 'queued', label: 'In queue' },
-  { key: 'notified', label: 'Your turn' },
+  { key: 'awaiting_arrival', label: 'Prepared' },
+  { key: 'queued', label: 'Checked in' },
   { key: 'printing', label: 'Printing' },
   { key: 'ready_for_pickup', label: 'Ready to collect' },
   { key: 'completed', label: 'Collected' },
 ];
-const ORDER = ['pending_payment', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup', 'completed'];
+const ORDER = ['pending_payment', 'awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup', 'completed'];
 
 export default function JobStatus() {
   const { id = '' } = useParams();
@@ -52,17 +60,19 @@ export default function JobStatus() {
   const [position, setPosition] = useState<number | null>(null);
   const [eta, setEta] = useState<number | null>(null);
   const [otp, setOtp] = useState<string | null>(null);
-  const [canRequeue, setCanRequeue] = useState(false);
   const [pushOffered, setPushOffered] = useState(pushPermission() !== 'default');
   const [error, setError] = useState('');
+  const [confirmingArrival, setConfirmingArrival] = useState(false);
+  const [checkingIn, setCheckingIn] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const res = await api<{ job: JobDetail }>(`/api/jobs/${id}`, { role: 'student' });
       setJob(res.job);
-      if (res.job.otpCode) setOtp(res.job.otpCode);
+      setPosition(res.job.position);
+      setEta(res.job.etaMinutes);
+      setOtp(res.job.otpCode);
       if (res.job.shop.slug) rememberShop(res.job.shop.slug);
-      setCanRequeue(res.job.status === 'no_show' && res.job.noShowCount <= 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load this job');
     }
@@ -77,34 +87,37 @@ export default function JobStatus() {
   }, [refresh, navigate]);
 
   useEffect(() => {
+    if (!job || !statusMeta(job.status).active) return;
+    const poll = setInterval(() => void refresh(), 10_000);
+    return () => clearInterval(poll);
+  }, [job?.status, refresh]);
+
+  useEffect(() => {
     const socket = getStudentSocket();
     if (!socket) return;
     const onUpdate = (p: { jobId: string; status?: string; position?: number | null; etaMinutes?: number | null; canRequeue?: boolean }) => {
       if (p.jobId !== id) return;
       if (p.position !== undefined) setPosition(p.position);
       if (p.etaMinutes !== undefined) setEta(p.etaMinutes);
-      if (p.canRequeue !== undefined) setCanRequeue(p.canRequeue);
       if (p.status) void refresh();
     };
-    const onTurn = (p: { jobId: string; otp: string }) => {
-      if (p.jobId !== id) return;
-      setOtp(p.otp);
-      void refresh();
-    };
     socket.on('job:update', onUpdate);
-    socket.on('job:your_turn', onTurn);
     return () => {
       socket.off('job:update', onUpdate);
-      socket.off('job:your_turn', onTurn);
     };
   }, [id, refresh]);
 
-  async function requeue() {
+  async function checkIn() {
+    setCheckingIn(true);
+    setError('');
     try {
-      await api(`/api/jobs/${id}/requeue`, { method: 'POST', role: 'student' });
+      await api(`/api/jobs/${id}/check-in`, { method: 'POST', role: 'student' });
+      setConfirmingArrival(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Requeue failed');
+      setError(err instanceof Error ? err.message : 'Could not join the live line');
+    } finally {
+      setCheckingIn(false);
     }
   }
   async function cancel() {
@@ -140,7 +153,8 @@ export default function JobStatus() {
 
   const m = statusMeta(job.status);
   const b = job.priceBreakdown;
-  const pendingSlot = job.mode === 'scheduled' && job.status === 'queued' && job.scheduledTime && position === null;
+  const checkInOpen = !job.checkInOpensAt || new Date(job.checkInOpensAt).getTime() <= Date.now();
+  const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
   const reachedIdx = ORDER.indexOf(job.status);
 
@@ -152,31 +166,53 @@ export default function JobStatus() {
         <div className="row">
           <span className={`stamp ${m.tone}`}>{m.label}</span>
           <span className="dim">{job.shop.name}</span>
+          {job.paymentStatus === 'refunding' && <span className="stamp yellow">refund processing</span>}
           {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
         </div>
 
         {/* ---- hero state ---- */}
         {pendingSlot && (
           <div className="ticket">
-            <div className="eyebrow">slot reserved</div>
+            <div className="eyebrow">planned arrival</div>
             <div className="ticket-num" style={{ fontSize: '2rem' }}>{slotLabel(job.scheduledTime!)}</div>
-            <div className="sub">We'll alert you when your slot opens. Nothing to do till then.</div>
+            <div className="sub">Your order is prepared. Check-in opens shortly before this time, after you reach the shop.</div>
+          </div>
+        )}
+        {job.status === 'awaiting_arrival' && !pendingSlot && (
+          <div className="arrival-card">
+            <div>
+              <span className="eyebrow-label">Order prepared</span>
+              <h2>Join only after you arrive</h2>
+              <p>Your upload and payment do not occupy the physical line. Check in at the shop entrance to receive a fair walk-in position.</p>
+            </div>
+            {!confirmingArrival ? (
+              <button onClick={() => setConfirmingArrival(true)}>I’m at the shop</button>
+            ) : (
+              <div className="arrival-confirm">
+                <strong>Are you physically at {job.shop.name}?</strong>
+                <p>{job.checkInCount > 0
+                  ? 'This is a new check-in, so you will join at the end of the current physical line. Your counter code has not changed.'
+                  : 'This adds you to the live line now. If plans change, staff can remove you without cancelling your paid order.'}</p>
+                <div className="row">
+                  <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'Yes, join the line'}</button>
+                  <button className="ghost" disabled={checkingIn} onClick={() => setConfirmingArrival(false)}>Not yet</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {job.status === 'queued' && !pendingSlot && (
           <div className="ticket">
-            <div className="eyebrow">token · your place in line</div>
+            <div className="eyebrow">live walk-in position</div>
             <div className="ticket-num">{position ?? '·'}</div>
-            <div className="sub">{eta !== null ? `about ${eta} min` : 'calculating wait…'}</div>
+            <div className="sub">{eta !== null ? `roughly ${eta} min · stay near the counter` : 'position is advisory · stay near the counter'}</div>
           </div>
         )}
-        {job.status === 'notified' && (
+        {otp && ['awaiting_arrival', 'queued', 'notified', 'ready_for_pickup'].includes(job.status) && (
           <div className="ticket turn">
-            <div className="eyebrow">show this at the counter</div>
-            {otp ? <div className="otp-band">{otp}</div> : <div className="sub">Fetching your code…</div>}
-            {job.otpExpiresAt && (
-              <div className="sub">valid till {new Date(job.otpExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-            )}
+            <div className="eyebrow">your permanent counter code</div>
+            <div className="otp-band">{otp}</div>
+            <div className="sub">Tell this code to staff when you are at the counter. They can find and print your order even if your queue position was skipped.</div>
           </div>
         )}
         {job.status === 'ready_for_pickup' && (
@@ -185,19 +221,26 @@ export default function JobStatus() {
             <div className="ticket-num" style={{ fontSize: '1.7rem' }}>Collect at counter</div>
           </div>
         )}
+        {job.status === 'otp_verified' && job.printError && (
+          <div className="notice setup-notice">
+            <div><strong>The printer needs attention</strong><p>The shop has your verified order and can retry it without another OTP. You don’t need to rejoin the queue.</p></div>
+          </div>
+        )}
         {job.status === 'no_show' && (
           <div className="card stack">
-            <p style={{ margin: 0 }}>You missed your window.</p>
-            {canRequeue ? (
-              <button onClick={requeue}>Requeue for free</button>
-            ) : (
-              <p className="dim" style={{ margin: 0 }}>This job can't be requeued — start a new print.</p>
-            )}
+            <strong>Your paid order is still available</strong>
+            <p style={{ margin: 0 }}>This order left the line. Checking in again puts you at the end of the current line; your counter code still identifies the document.</p>
+            <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'I’m here — join live line'}</button>
+          </div>
+        )}
+        {job.status === 'pending_payment' && (
+          <div className="notice setup-notice">
+            <div><strong>Payment wasn’t completed</strong><p>No queue position has been reserved. Cancel this attempt, then start again when you’re ready.</p></div>
           </div>
         )}
 
         {/* ---- push nudge ---- */}
-        {(job.status === 'queued' || job.status === 'notified') && !pushOffered && (
+        {['awaiting_arrival', 'queued', 'notified'].includes(job.status) && !pushOffered && (
           <div className="card row between">
             <span className="dim" style={{ flex: 1 }}>Get alerted even if you close the app?</span>
             <button className="ghost small" onClick={async () => { await enablePush(); setPushOffered(true); }}>
@@ -246,7 +289,10 @@ export default function JobStatus() {
                 {MILESTONES.map((step) => {
                   const stepIdx = ORDER.indexOf(step.key);
                   const done = reachedIdx > stepIdx;
-                  const current = job.status === step.key || (step.key === 'printing' && job.status === 'otp_verified');
+                  const current =
+                    job.status === step.key ||
+                    (step.key === 'queued' && job.status === 'notified') ||
+                    (step.key === 'printing' && job.status === 'otp_verified');
                   return (
                     <li key={step.key} className={done ? 'done' : current ? 'current' : ''}>
                       <div className="t">{step.label}</div>
@@ -280,7 +326,7 @@ export default function JobStatus() {
 
         {/* ---- actions ---- */}
         <div className="stack" style={{ marginTop: 8 }}>
-          {(job.status === 'queued' || job.status === 'notified') && (
+          {['pending_payment', 'awaiting_arrival', 'queued', 'notified'].includes(job.status) && (
             <button className="ghost" onClick={cancel}>Cancel job</button>
           )}
           {terminal && (

@@ -29,6 +29,16 @@ describe('release/login OTPs', () => {
   it('verifyOtpHash never throws on garbage hashes', async () => {
     expect(await otpLib.verifyOtpHash('not-a-hash', '123456')).toBe(false);
   });
+
+  it('encrypts stable counter codes and scopes their lookup digest to one shop', () => {
+    const code = '482910';
+    const encrypted = otpLib.encryptReleaseCode('shop-a', code);
+    expect(encrypted).not.toContain(code);
+    expect(otpLib.decryptReleaseCode('shop-a', encrypted)).toBe(code);
+    expect(otpLib.decryptReleaseCode('shop-b', encrypted)).toBeNull();
+    expect(otpLib.digestReleaseCode('shop-a', code)).toBe(otpLib.digestReleaseCode('shop-a', code));
+    expect(otpLib.digestReleaseCode('shop-b', code)).not.toBe(otpLib.digestReleaseCode('shop-a', code));
+  });
 });
 
 describe('agent tokens', () => {

@@ -164,18 +164,23 @@ export default function ShopLanding() {
   return (
     <div className="page">
       <Topbar right={loggedIn ? <Link to="/home">Home</Link> : undefined} />
-      <h1>{shop.name}</h1>
-      <p className="dim">
-        {shop.address}
-        {shop.campusName ? ` · ${shop.campusName}` : ''}
-      </p>
-      <div className="row">
-        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'taking jobs' : 'closed'}</span>
-        {cheapest && <span className="dim mono">{cheapest.label} from {rupees(cheapest.bwPaise)}/page</span>}
-        {shop.colorAvailable && <span className="stamp blue">colour</span>}
-        {shop.rating.average != null && (
-          <span className="dim mono">★ {shop.rating.average} · {shop.rating.count} rating{shop.rating.count === 1 ? '' : 's'}</span>
-        )}
+      <div className="shop-hero">
+        <div>
+          <span className="eyebrow-label">Order online · collect at counter</span>
+          <h1>{shop.name}</h1>
+          <p className="dim">
+            {shop.address}
+            {shop.campusName ? ` · ${shop.campusName}` : ''}
+          </p>
+          <div className="shop-facts">
+            {cheapest && <span>{cheapest.label} from {rupees(cheapest.bwPaise)}/page</span>}
+            {shop.colorAvailable && <span>Colour available</span>}
+            {shop.rating.average != null && (
+              <span>★ {shop.rating.average} from {shop.rating.count} rating{shop.rating.count === 1 ? '' : 's'}</span>
+            )}
+          </div>
+        </div>
+        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'Taking orders' : 'Currently closed'}</span>
       </div>
 
       {!loggedIn ? (
@@ -188,16 +193,18 @@ export default function ShopLanding() {
         </div>
       ) : (
         <div
-          className={`card stack${dragging ? ' dragging' : ''}`}
+          className={`upload-panel${dragging ? ' dragging' : ''}${!shop.open ? ' closed' : ''}`}
           onDragOver={onDragOverFiles}
           onDragLeave={() => setDragging(false)}
           onDrop={onDropFiles}
         >
           <div>
-            <h2 style={{ margin: '0 0 2px' }}>Send files to print</h2>
-            <p className="dim" style={{ margin: 0 }}>
-              Pick one or many — PDF, Word, JPG, PNG — or drag them in. Several files print together
-              as one job.
+            <div className="upload-mark" aria-hidden>↑</div>
+            <h2>{shop.open ? 'Drop your files here' : 'Orders are paused'}</h2>
+            <p>
+              {shop.open
+                ? 'Choose one or several documents. We combine them into one preview before you pay.'
+                : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
             </p>
           </div>
           <input
@@ -220,16 +227,21 @@ export default function ShopLanding() {
               if (e.target.files && e.target.files.length > 0) void onFilesChosen(e.target.files);
             }}
           />
-          <div className="row">
-            <button disabled={uploading || !shop.open} onClick={() => fileInput.current?.click()}>
-              {uploading ? 'Uploading…' : 'Choose files'}
-            </button>
-            <button className="ghost" disabled={uploading || !shop.open} onClick={() => cameraInput.current?.click()}>
-              Scan with camera
-            </button>
-          </div>
+          {shop.open && (
+            <>
+              <div className="upload-actions">
+                <button disabled={uploading} onClick={() => fileInput.current?.click()}>
+                  {uploading ? 'Uploading safely…' : 'Choose files'}
+                </button>
+                <button className="ghost" disabled={uploading} onClick={() => cameraInput.current?.click()}>
+                  Scan paper with camera
+                </button>
+              </div>
+              <div className="upload-meta">PDF · DOCX · JPG · PNG · private files auto-delete</div>
+            </>
+          )}
           {!shop.open && <NotifyWhenOpen slug={slug} />}
-          {error && <div className="error">{error}</div>}
+          {error && <div className="error-box" role="alert">{error}</div>}
         </div>
       )}
     </div>

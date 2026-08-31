@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { subscribeEvents } from './events.js';
+import { advanceShopQueues, emitQueueUpdate } from '../modules/queue/engine.js';
+import { notifyShopReopened } from '../modules/shops/availability.js';
 
 /**
  * Socket topology:
@@ -61,6 +63,9 @@ export function setupRealtime(httpServer: HttpServer): Server {
         where: { id: socket.data.agentId as string },
         data: { status: 'online', lastHeartbeatAt: new Date() },
       });
+      await advanceShopQueues(socket.data.shopId as string);
+      await emitQueueUpdate(socket.data.shopId as string);
+      await notifyShopReopened(socket.data.shopId as string);
 
       socket.on('disconnect', async () => {
         try {

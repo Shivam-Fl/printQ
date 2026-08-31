@@ -30,7 +30,7 @@
     "cors": "^2.8.5",
     "express": "^5.0.0",
     "express-rate-limit": "^7.4.0",
-    "file-type": "^19.6.0",
+    "file-type": "^22.0.2",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.0",
     "jsonwebtoken": "^9.0.2",
@@ -39,7 +39,7 @@
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
     "rate-limit-redis": "^4.2.0",
-    "sharp": "^0.33.5",
+    "sharp": "^0.35.3",
     "socket.io": "^4.8.0",
     "web-push": "^3.6.7",
     "zod": "^3.25.0"

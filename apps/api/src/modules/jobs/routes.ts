@@ -15,12 +15,16 @@ import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { paymentProvider } from '../../providers/payment/index.js';
-import { advancePrinterQueue, emitQueueUpdate, requeueJob } from '../queue/engine.js';
+import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, requeueJob } from '../queue/engine.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
+import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { z } from 'zod';
+import { decryptReleaseCode } from '../../lib/otp.js';
+import { env } from '../../config/env.js';
+import { isShopOperational } from '../shops/availability.js';
 
 export const jobsRouter = Router();
 
@@ -36,6 +40,9 @@ jobsRouter.post(
       include: { shop: true },
     });
     if (!file || file.pages == null) throw notFound('File not ready');
+    if (!(await isShopOperational(file.shopId))) {
+      throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
+    }
 
     let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
     if (couponCode) breakdown = applyCoupon(breakdown, await resolveCoupon(couponCode, file.shopId));
@@ -64,6 +71,10 @@ jobsRouter.post(
       include: { shop: true },
     });
     if (!file || file.pages == null) throw notFound('File not ready');
+
+    if (!(await isShopOperational(file.shopId))) {
+      throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
+    }
 
     let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
     let resolvedCouponCode: string | null = null;
@@ -121,6 +132,8 @@ jobsRouter.get(
         specs: true,
         mode: true,
         scheduledTime: true,
+        arrivedAt: true,
+        checkInCount: true,
         createdAt: true,
         otpExpiresAt: true,
         noShowCount: true,
@@ -140,6 +153,7 @@ jobsRouter.get(
       where: { id: param(req, 'id'), studentId: req.student!.id },
       select: {
         id: true,
+        shopId: true,
         status: true,
         totalPaise: true,
         priceBreakdown: true,
@@ -147,19 +161,36 @@ jobsRouter.get(
         mode: true,
         scheduledTime: true,
         createdAt: true,
-        // the release OTP belongs to this student — shown in-app while active
-        otpCode: true,
+        releaseCodeEncrypted: true,
         otpExpiresAt: true,
         noShowCount: true,
+        arrivedAt: true,
+        checkInCount: true,
         assignedPrinterId: true,
         paymentStatus: true,
+        printError: true,
+        printAttempts: true,
         rating: true,
         shop: { select: { name: true, slug: true, address: true } },
         file: { select: { originalName: true, pages: true } },
       },
     });
     if (!job) throw notFound();
-    res.json({ job: { ...job, otpCode: job.status === 'notified' ? job.otpCode : null } });
+    const live = await getJobLiveMetrics(job.id);
+    const { releaseCodeEncrypted, shopId, ...safeJob } = job;
+    const codeVisible = !['completed', 'expired', 'cancelled'].includes(job.status);
+    const checkInOpensAt = job.mode === 'scheduled' && job.scheduledTime
+      ? new Date(job.scheduledTime.getTime() - env.SCHEDULE_LEAD_MINUTES * 60_000).toISOString()
+      : null;
+    res.json({
+      job: {
+        ...safeJob,
+        ...live,
+        otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
+        canCheckIn: job.paymentStatus === 'paid' && ['awaiting_arrival', 'no_show'].includes(job.status),
+        checkInOpensAt,
+      },
+    });
   }),
 );
 
@@ -192,7 +223,18 @@ jobsRouter.get(
   }),
 );
 
-/** One free requeue after a no-show (printQ.md §5.3). */
+/** Student confirms physical arrival; only then does queue time start. */
+jobsRouter.post(
+  '/:id/check-in',
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const job = await checkInJob(param(req, 'id'), req.student!.id);
+    const live = await getJobLiveMetrics(job.id);
+    res.json({ job: { id: job.id, status: job.status, ...live } });
+  }),
+);
+
+/** Compatibility path for jobs created under the old timed no-show model. */
 jobsRouter.post(
   '/:id/requeue',
   requireStudent,
@@ -202,7 +244,7 @@ jobsRouter.post(
   }),
 );
 
-/** Cancel before the print is released (queued/notified only). */
+/** Cancel before the print is released. Prepared remote orders are refundable. */
 jobsRouter.post(
   '/:id/cancel',
   requireStudent,
@@ -211,7 +253,12 @@ jobsRouter.post(
       where: { id: param(req, 'id'), studentId: req.student!.id },
     });
     if (!job) throw notFound();
-    if (job.status !== 'queued' && job.status !== 'notified' && job.status !== 'pending_payment') {
+    if (
+      job.status !== 'awaiting_arrival' &&
+      job.status !== 'queued' &&
+      job.status !== 'notified' &&
+      job.status !== 'pending_payment'
+    ) {
       throw conflict('Job can no longer be cancelled');
     }
     const updated = await applyTransition(job.id, job.status, 'CANCEL', {
@@ -220,6 +267,7 @@ jobsRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
     await refundIfPaid(job);
+    await scheduleFileDeletion(job.fileId);
     // a cancelled front job must not block the printer's queue
     if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
     await emitQueueUpdate(job.shopId);

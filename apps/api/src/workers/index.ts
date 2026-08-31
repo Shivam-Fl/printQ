@@ -4,7 +4,7 @@ import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { publishEvent } from '../realtime/events.js';
 import { convertFile, cleanupExpiredFiles } from './conversion.js';
-import { handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
+import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
 
 const STALE_AGENT_MS = 2 * 60_000;
 
@@ -50,7 +50,10 @@ export async function startWorkers(): Promise<void> {
   new Worker(
     'maintenance',
     async (job) => {
-      if (job.name === 'cleanup') await cleanupExpiredFiles();
+      if (job.name === 'cleanup') {
+        await expireStalePreparedOrders();
+        await cleanupExpiredFiles();
+      }
       else if (job.name === 'staleAgents') await detectStaleAgents();
     },
     { connection: bullConnection(), concurrency: 1 },

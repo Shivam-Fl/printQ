@@ -8,7 +8,7 @@ checklist** for when you're ready to charge real students real money.
 
 One Docker image (`Dockerfile`, repo root), one Render web service (`render.yaml`):
 the API, the built student/shop web app, and the BullMQ background workers
-(file conversion, no-show timers, scheduled slots) all run in a single process —
+(file conversion, planned-arrival reminders, retention/refund sweeps) all run in a single process —
 exactly the same "pilot mode" the codebase runs locally via `npm run dev:api`. See
 `apps/api/src/server.ts` and `apps/api/src/app.ts` if you want the details.
 
@@ -69,12 +69,19 @@ Work through this once the service is live and secrets are set:
   an MSG91 account — this is expected, not a bug).
 - [ ] Upload a PDF, set specs, and pay — checkout auto-confirms immediately
   (`PAYMENT_PROVIDER=mock`), no real payment happens yet.
+- [ ] Confirm the paid order says **awaiting arrival** and has no queue position. Tap
+  **I'm at the shop**, confirm it becomes position 1, then remove it from the line in
+  the dashboard and confirm a re-check-in goes to the end.
 - [ ] Upload a **DOCX** file specifically — this is the one path that needs
   LibreOffice; confirm it converts instead of failing.
-- [ ] Register a shop, add a printer, register an agent, and run the real
-  `apps/agent` from a Windows PC pointed at `PRINTQ_API_URL=https://<your-url>` — the
-  agent auto-detects the PC's printers exactly like it does in local testing.
-- [ ] Release a job by OTP and confirm it actually reaches that PC's printer.
+- [ ] Register a shop, open **Setup**, connect a computer in **Simulation** mode, and run
+  the downloaded Windows setup file. Confirm the setup score reaches 100% before using hardware.
+- [ ] Repeat with **Real printer** on the counter PC. The agent auto-detects Windows printers;
+  add one from the **Detected printers** panel and verify its paper/colour capabilities.
+- [ ] Enter the six-digit counter code and confirm it finds/prints the job even after
+  the student was removed from the advisory line.
+- [ ] Pause new orders from the dashboard: the public storefront must close while
+  already-paid counter codes still work; reopen it after the test.
 
 ### Known free-tier limitations (expected, not bugs)
 
@@ -82,7 +89,7 @@ Work through this once the service is live and secrets are set:
 |---|---|---|
 | 30-60s cold start | Free web services sleep after 15 min idle | First request after a gap is slow — refresh once, it's normal |
 | Postgres expires in 30 days | Render free-tier policy | Fine for a week; upgrade the database before day 30 (one click, no migration) |
-| Redis has no persistence | Free Key Value doesn't persist to disk | A Redis restart loses in-flight no-show timers/scheduled-slot wake-ups and rate-limit counters. Re-test the affected job manually if you notice one stall. **Must fix before real launch** (see below) |
+| Redis has no persistence | Free Key Value doesn't persist to disk | A Redis restart loses conversion/reminder work and rate-limit counters. Prepared-order expiry and refund retry are DB-swept, but the other queues still require persistent Redis for launch. **Must fix before real launch** (see below) |
 | Uploaded files can vanish | Free web services have an ephemeral filesystem (`STORAGE_DRIVER=local`); a spin-down wipes `./storage` | If a test spans an idle gap, a job's file may 404 — just re-upload. **Must fix before real launch** |
 
 ## Phase 2 — upgrading to a real launch
@@ -122,3 +129,16 @@ Do this before onboarding a real shop and real paying students:
    region** once real traffic makes the latency difference to Indian users worth
    feeling — the same `Dockerfile` works there unchanged, only the platform-specific
    config (`render.yaml` → `fly.toml`) would need writing.
+
+### Required launch gate
+
+Before giving the URL to a real student, all of these must be true:
+
+- [ ] `npm run test:launch` passes locally (including the 55-assertion arrival/queue/printer simulator E2E).
+- [ ] Render Postgres, Key Value and web service use production-capable paid instances.
+- [ ] `STORAGE_DRIVER=s3`; an upload survives a web-service restart and expires after retention.
+- [ ] `PAYMENT_PROVIDER=razorpay`; test-mode payment, webhook capture, cancellation and refund pass.
+- [ ] `SMS_PROVIDER=msg91` and `EMAIL_PROVIDER=resend`; OTP/reset messages arrive on real devices.
+- [ ] VAPID keys are configured and an approaching-position notification opens the correct job from an installed PWA.
+- [ ] A real Windows printer passes B/W, colour, duplex and multi-copy tests for every advertised option.
+- [ ] Shop terms, privacy/contact details, Razorpay KYC and a support escalation path are in place.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
@@ -180,59 +180,67 @@ export default function Printers() {
     <div className="page wide">
       <ShopNav />
 
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow-label">Hardware</span>
+          <h1>Printers</h1>
+          <p>Match each physical printer to what it can produce. PrintQ uses these details to prevent impossible orders.</p>
+        </div>
+        <Link className="button-link secondary" to="/dashboard/agents">Connected computers</Link>
+      </div>
+
       {shop && (
-        <div className="card row between">
+        <div className="automation-panel">
           <div style={{ flex: 1, minWidth: 220 }}>
             <strong>Auto-assign printers</strong>
             <p className="dim" style={{ margin: '4px 0 0' }}>
-              On: the OTP sends the job straight to the best printer. Off: you confirm from a dropdown
-              every time.
+              Recommended: after counter-code verification, send each job to the fastest compatible online printer.
             </p>
           </div>
-          <button className={shop.autoAssignEnabled ? '' : 'ghost'} onClick={toggleAutoAssign}>
-            {shop.autoAssignEnabled ? 'ON' : 'OFF'}
+          <button className={`toggle-button ${shop.autoAssignEnabled ? 'on' : ''}`} onClick={toggleAutoAssign}>
+            <span aria-hidden /> {shop.autoAssignEnabled ? 'On' : 'Off'}
           </button>
         </div>
       )}
 
-      <div className="row between">
-        <h2>Printers found on your PCs {unlinkedDetected.length > 0 ? `(${unlinkedDetected.length})` : ''}</h2>
+      <div className="section-heading">
+        <div><h2>Detected printers</h2><p>Printers reported by your connected counter computers.</p></div>
+        {unlinkedDetected.length > 0 && <span className="summary-pill">{unlinkedDetected.length} ready to add</span>}
       </div>
       {unlinkedDetected.length === 0 ? (
-        <div className="card">
-          <p className="dim" style={{ margin: 0 }}>
-            None yet. Start the print agent on a shop PC —{' '}
-            <a href="#agents-hint">see the Agents page</a> — and any printer it can see will show up
-            here automatically, ready to add with one click.
-          </p>
+        <div className="empty-state">
+          <strong>No unlinked printers found</strong>
+          <p>Connect a counter computer first. Any installed printer will appear here automatically.</p>
+          <Link className="button-link secondary" to="/dashboard/agents" style={{ marginTop: 16 }}>Connect a computer</Link>
         </div>
       ) : (
-        <div className="stack">
+        <div className="detected-grid">
           {unlinkedDetected.map((d) => (
-            <div key={d.name} className="card row between">
+            <div key={d.name} className="detected-card">
               <div>
+                <span className="detected-icon" aria-hidden>OS</span>
                 <strong>{d.name}</strong>
-                <p className="dim" style={{ margin: '2px 0 0' }}>Detected on this shop's PC</p>
+                <p>{d.paperSizes.length > 0 ? `Driver reports ${d.paperSizes.join(', ')}` : 'Detected on a connected computer'}</p>
               </div>
-              <button onClick={() => addDetected(d)}>+ Add this printer</button>
+              <button className="small" onClick={() => addDetected(d)}>Add & configure</button>
             </div>
           ))}
         </div>
       )}
 
-      <div className="row between">
-        <h2>Printers ({printers.length})</h2>
+      <div className="section-heading">
+        <div><h2>Configured printers</h2><p>Capability and live availability used for routing.</p></div>
         <button className="small" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Close' : '+ Add manually'}
+          {showForm ? 'Close form' : '+ Add manually'}
         </button>
       </div>
 
       {showForm && (
-        <div className="card stack">
-          <p className="dim" style={{ margin: 0 }}>
+        <div className="printer-form stack">
+          <div className="checkout-card-head"><h2>Add a printer profile</h2><p>
             Only needed for a printer the agent hasn't detected yet (e.g. it's not connected to this PC).
             You can link it to a real printer later once it's detected.
-          </p>
+          </p></div>
           <div>
             <label htmlFor="plabel">Label</label>
             <input
@@ -289,12 +297,15 @@ export default function Printers() {
         </div>
       )}
 
-      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
+      <div className="table-shell printer-table">
         <table>
           <thead>
             <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Status</th></tr>
           </thead>
           <tbody>
+            {printers.length === 0 && (
+              <tr><td colSpan={7}><div className="table-empty"><strong>No printers configured</strong><span>Add a detected printer above to start taking orders.</span></div></td></tr>
+            )}
             {printers.map((p) => (
               <tr key={p.id}>
                 <td>{p.label}</td>
@@ -320,7 +331,7 @@ export default function Printers() {
                   ) : unlinkedDetected.length > 0 ? (
                     <button className="ghost small" onClick={() => setLinking(p.id)}>Link…</button>
                   ) : (
-                    <span className="dim">not linked</span>
+                    <span className="stamp red">Not linked</span>
                   )}
                 </td>
                 <td>
@@ -335,7 +346,7 @@ export default function Printers() {
           </tbody>
         </table>
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && <div className="error-box" role="alert">{error}</div>}
     </div>
   );
 }

@@ -16,25 +16,29 @@ This file records the decisions so future sessions (human or AI) don't undo them
   id then check. Missing and not-owned both return **404**.
 - Login-OTP requests can't write profile data (name updates require a verified session).
 
-## OTPs
+## Login OTPs and counter codes
 
 - 6 digits from `crypto.randomInt`. Login OTPs are argon2id-hashed with a server-side
   pepper (`OTP_PEPPER`), 5 min expiry, 5 attempts, single-use.
-- Release OTPs: single-use, bound to one job, ~10 min expiry (`OTP_WINDOW_MINUTES`),
-  invalidated on no-show. Verification runs against the argon2 hash; the plaintext is
-  additionally kept **only while the job is `notified`** so the owning student's app
-  can display it (their own authenticated channel — deliberate product decision), and
-  is nulled on release/no-show/expiry.
+- Counter release codes are six digits, shop-scoped and bound to one paid job. A
+  peppered HMAC supports constant database lookup; the recoverable value is stored
+  only as AES-256-GCM ciphertext with the shop id as authenticated data. Plaintext is
+  returned only through the owning student's authenticated job route.
+- Counter-code verification is rate-limited. It can release an `awaiting_arrival`,
+  checked-in, or safely skipped legacy job, but optimistic state transitions prevent
+  duplicate dispatch. Codes are deliberately stable through re-check-in so a refresh
+  or missed position does not strand a paid document.
 - Delivery is in-app: the student's authenticated socket room + Web Push to their own
-  subscribed devices. No third-party messaging vendor sees OTPs.
+  subscribed devices. No third-party messaging vendor sees counter codes.
 
 ## Payments
 
 - The client sends **specs only**; price is computed server-side from the shop rate
   card in integer paise (`packages/shared/src/pricing.ts`).
-- A job becomes `queued` only via the Razorpay webhook (HMAC-SHA256 verified on the
-  raw body, constant-time compare) or the mock endpoint which is hard-disabled unless
-  `PAYMENT_PROVIDER=mock`. Client checkout callbacks are never trusted.
+- A verified Razorpay webhook (HMAC-SHA256 over the raw body, constant-time compare)
+  moves a job to `awaiting_arrival`; payment/upload time never reserves a queue place.
+  Only the authenticated arrival endpoint writes `queuedAt`. The mock path is
+  hard-disabled unless `PAYMENT_PROVIDER=mock`; checkout callbacks are never trusted.
 - Webhook idempotency via `PaymentEvent.providerEventId` (unique).
 
 ## Files
@@ -73,16 +77,36 @@ This file records the decisions so future sessions (human or AI) don't undo them
 - **Forgot-password**: reset codes are hashed the same way as login OTPs (argon2id + `OTP_PEPPER`),
   15-minute expiry, 5 attempts, single-use, and the request route always returns `200 {ok:true}`
   regardless of whether the email exists (no account enumeration — same pattern as login).
-- **Refunds**: `refundIfPaid()` only ever acts on a job it can see is `paymentStatus: paid`, and
-  flips that status via a conditional `updateMany` (idempotent — a retry or race is a no-op, not
-  a double refund). Refund amounts always come from the job's own stored `totalPaise`, never a
-  client-supplied value.
+- **Refunds**: `refundIfPaid()` atomically reserves work with `paid → refunding` *before* calling
+  the provider. A retry/race is therefore a no-op rather than a second external refund; provider
+  failure safely returns the job to `paid`. Amounts come from stored `totalPaise`, never the client.
 - **SMS/Email providers** are pluggable (`SmsProvider`, `EmailProvider`) with a `console` default
   that never leaves the server — real delivery only turns on when the founder sets
   `SMS_PROVIDER=msg91` / `EMAIL_PROVIDER=resend` with real credentials (`PLAN.md` §9).
 - **Printer auto-setup**: an agent's reported `detectedPrinters` list only ever links to a
   `Printer` row already scoped to that agent's own shop (`shopId` in every relevant query) — one
   shop's agent can never see or claim another shop's printers or jobs.
+- **Operational availability**: a printer is offered to students and the assignment engine only
+  while an authenticated, online agent reports that it can reach that exact printer. A stale
+  database `online` switch alone cannot accept paid work. Staff can pause new sales without
+  invalidating existing paid codes or preventing pickup work.
+- **Print recovery**: spooler failures are persisted on the job, the agent claim is released, and
+  the shop can retry after fixing the device without regenerating or re-entering the student's OTP.
+- **Retention**: the deletion clock starts at upload (covering abandoned previews/checkouts) and is
+  restarted at every terminal job outcome. Cleanup rechecks for active jobs—including prepared
+  paid orders—before deleting bytes. Prepared orders that never arrive are automatically cancelled
+  and refunded after `PREPARED_ORDER_TTL_HOURS`; an hourly DB sweep also retries terminal refunds
+  after provider outages.
+
+## Arrival and queue integrity
+
+- The live line contains only students who explicitly checked in. It is one shop-wide order,
+  even when several printers are running, so students never see duplicate position numbers.
+- Repeated check-in calls are idempotent. If staff removes an absent student, the paid order and
+  code remain valid but `queuedAt` is cleared; the next check-in uses the new arrival time and
+  therefore goes to the end.
+- Queue order is an organization aid, not an execution lock. Staff can enter the code for the
+  person actually at the counter and dispatch that job without waiting on an absent front entry.
 
 ## Phase 4 additions
 

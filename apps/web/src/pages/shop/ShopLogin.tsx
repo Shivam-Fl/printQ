@@ -1,9 +1,36 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setShopRole, setToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
 
 type Mode = 'password' | 'pin' | 'forgot-request' | 'forgot-confirm';
+
+function ShopAuthLayout({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  return (
+    <main className="auth-page shop-auth-page">
+      <div className="auth-page-main">
+        <Topbar tag="shop counter" />
+        <div className="auth-copy">
+          <span className="eyebrow-label">PrintQ for shops</span>
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+        </div>
+        {children}
+      </div>
+      <aside className="auth-aside shop-auth-aside">
+        <div className="auth-proof">
+          <span className="eyebrow-label">A calmer counter</span>
+          <h2>Every order arrives paid, configured and ready to print.</h2>
+          <ol>
+            <li><span>1</span><div><strong>See who actually arrived</strong><p>Remote paid orders stay separate from the physical walk-in line.</p></div></li>
+            <li><span>2</span><div><strong>Enter one counter code</strong><p>Find and print the correct paid file regardless of advisory position.</p></div></li>
+            <li><span>3</span><div><strong>Hand it over</strong><p>Pickup, history and receipts stay in one place.</p></div></li>
+          </ol>
+        </div>
+      </aside>
+    </main>
+  );
+}
 
 export default function ShopLogin() {
   const navigate = useNavigate();
@@ -71,33 +98,27 @@ export default function ShopLogin() {
 
   if (mode === 'forgot-request') {
     return (
-      <div className="page">
-        <Topbar tag="shop counter" />
-        <h1>Reset password</h1>
-        <div className="card stack">
+      <ShopAuthLayout title="Reset your password" subtitle="We’ll send a six-digit code to the owner email on this account.">
+        <div className="auth-card stack">
           <div>
-            <label htmlFor="remail">Email</label>
-            <input id="remail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+            <label htmlFor="remail">Owner email</label>
+            <input id="remail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" autoFocus />
           </div>
-          <button disabled={busy || !email} onClick={requestReset}>
+          <button className="full-button" disabled={busy || !email} onClick={requestReset}>
             {busy ? 'Sending…' : 'Send reset code'}
           </button>
-          {error && <div className="error">{error}</div>}
+          {error && <div className="error-box" role="alert">{error}</div>}
+          <button className="text-button" onClick={() => setMode('password')}>← Back to sign in</button>
         </div>
-        <p className="dim">
-          <button className="ghost small" onClick={() => setMode('password')}>← Back to sign in</button>
-        </p>
-      </div>
+      </ShopAuthLayout>
     );
   }
 
   if (mode === 'forgot-confirm') {
     return (
-      <div className="page">
-        <Topbar tag="shop counter" />
-        <h1>Enter your code</h1>
-        {message && <p className="dim">{message}</p>}
-        <div className="card stack">
+      <ShopAuthLayout title="Choose a new password" subtitle="Enter the code from your email, then create a password you don’t use elsewhere.">
+        <div className="auth-card stack">
+          {message && <div className="notice success-notice"><span>{message}</span></div>}
           <div>
             <label htmlFor="rotp">6-digit code</label>
             <input
@@ -107,6 +128,8 @@ export default function ShopLogin() {
               maxLength={6}
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+              autoComplete="one-time-code"
+              className="otp-boxes"
               autoFocus
             />
           </div>
@@ -117,29 +140,26 @@ export default function ShopLogin() {
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
             />
           </div>
-          <button disabled={busy || otp.length !== 6 || newPassword.length < 8} onClick={confirmReset}>
+          <button className="full-button" disabled={busy || otp.length !== 6 || newPassword.length < 8} onClick={confirmReset}>
             {busy ? 'Saving…' : 'Reset password'}
           </button>
-          {error && <div className="error">{error}</div>}
+          {error && <div className="error-box" role="alert">{error}</div>}
+          <button className="text-button" onClick={() => setMode('forgot-request')}>← Send a new code</button>
         </div>
-        <p className="dim">
-          <button className="ghost small" onClick={() => setMode('forgot-request')}>← Send a new code</button>
-        </p>
-      </div>
+      </ShopAuthLayout>
     );
   }
 
   return (
-    <div className="page">
-      <Topbar tag="shop counter" />
-      <h1>Sign in</h1>
-      {message && <p className="dim">{message}</p>}
-      <div className="card stack">
+    <ShopAuthLayout title="Run your print queue." subtitle="Sign in to release jobs, watch every printer and keep the counter moving.">
+      <div className="auth-card stack">
+        {message && <div className="notice success-notice"><span>{message}</span></div>}
         <div>
-          <label htmlFor="email">Email</label>
-          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+          <label htmlFor="email">Work email</label>
+          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" autoFocus />
         </div>
         {mode === 'pin' ? (
           <div>
@@ -152,6 +172,7 @@ export default function ShopLogin() {
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               onKeyDown={(e) => e.key === 'Enter' && void login('/api/auth/shop/staff-login', { email, pin })}
+              autoComplete="current-password"
             />
           </div>
         ) : (
@@ -163,10 +184,11 @@ export default function ShopLogin() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void login('/api/auth/shop/login', { email, password })}
+              autoComplete="current-password"
             />
           </div>
         )}
-        <button
+        <button className="full-button"
           disabled={busy || !email || (mode === 'pin' ? pin.length < 4 : !password)}
           onClick={() =>
             mode === 'pin'
@@ -176,19 +198,19 @@ export default function ShopLogin() {
         >
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-        {error && <div className="error">{error}</div>}
-        <div className="row between">
-          <button className="ghost small" onClick={() => setMode(mode === 'pin' ? 'password' : 'pin')}>
+        {error && <div className="error-box" role="alert">{error}</div>}
+        <div className="auth-inline-actions">
+          <button className="text-button" onClick={() => setMode(mode === 'pin' ? 'password' : 'pin')}>
             {mode === 'pin' ? 'Use password instead' : 'Staff? Use your PIN'}
           </button>
           {mode === 'password' && (
-            <button className="ghost small" onClick={() => setMode('forgot-request')}>Forgot password?</button>
+            <button className="text-button" onClick={() => setMode('forgot-request')}>Forgot password?</button>
           )}
         </div>
       </div>
-      <p className="dim">
+      <p className="dim auth-after-card">
         New shop? <Link to="/dashboard/register">Register in 2 minutes →</Link>
       </p>
-    </div>
+    </ShopAuthLayout>
   );
 }

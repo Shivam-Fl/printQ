@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * PrintQ print agent — runs on a shop PC that can reach one or more printers.
  *
@@ -26,7 +27,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { io, type Socket } from 'socket.io-client';
-import printer from 'pdf-to-printer';
+import { detectPrinters, isSimulationMode, sendToPrinter } from './printerRuntime.js';
 
 const API_URL = process.env.PRINTQ_API_URL ?? 'http://localhost:4000';
 const CONFIG_DIR = path.join(homedir(), '.printq-agent');
@@ -79,7 +80,7 @@ async function api(pathname: string, init: RequestInit = {}): Promise<Response> 
 /** Tell the dashboard every printer this PC can see — replaces hand-typed printer-name mapping. */
 async function reportPrinters(): Promise<void> {
   try {
-    const detected = await printer.getPrinters();
+    const detected = await detectPrinters();
     await api('/api/agent/printers', {
       method: 'POST',
       body: JSON.stringify({
@@ -122,11 +123,12 @@ async function printJob(job: DispatchPayload): Promise<void> {
     await writeFile(pdfPath, Buffer.from(await fileRes.arrayBuffer()));
 
     console.log(`Printing job ${job.jobId} on "${osPrinter}" (${job.specs.copies} copies)`);
-    await printer.print(pdfPath, {
+    await sendToPrinter(pdfPath, {
       printer: osPrinter,
       copies: job.specs.copies,
-      side: job.specs.duplex ? 'duplex' : 'simplex',
-      monochrome: !job.specs.color,
+      duplex: job.specs.duplex,
+      color: job.specs.color,
+      jobId: job.jobId,
     });
 
     await api(`/api/agent/jobs/${job.jobId}/complete`, { method: 'POST' });
@@ -183,4 +185,4 @@ setInterval(() => {
   void reportPrinters();
 }, HEARTBEAT_MS);
 
-console.log(`PrintQ agent starting — API: ${API_URL}`);
+console.log(`PrintQ agent starting — API: ${API_URL}${isSimulationMode() ? ' · SIMULATION MODE' : ''}`);

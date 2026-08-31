@@ -19,6 +19,8 @@ export default function Profile() {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pushState, setPushState] = useState(pushPermission());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!getToken('student')) {
@@ -30,17 +32,23 @@ export default function Profile() {
         setMe(r.student);
         setName(r.student.name ?? '');
       })
-      .catch(() => undefined);
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your profile'));
   }, [navigate]);
 
   async function save() {
-    await api('/api/auth/student/me', { method: 'PATCH', role: 'student', body: { name } }).catch(
-      () => undefined,
-    );
-    setMe((m) => (m ? { ...m, name } : m));
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/auth/student/me', { method: 'PATCH', role: 'student', body: { name } });
+      setMe((m) => (m ? { ...m, name } : m));
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your name');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function logout() {
@@ -71,7 +79,7 @@ export default function Profile() {
                 <input id="pname" type="text" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
               </div>
               <div className="row">
-                <button onClick={save} disabled={!name.trim()}>Save</button>
+                <button onClick={save} disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save'}</button>
                 <button className="ghost" onClick={() => { setEditing(false); setName(me?.name ?? ''); }}>Cancel</button>
               </div>
             </div>
@@ -85,6 +93,7 @@ export default function Profile() {
             </div>
           )}
           {saved && <span className="stamp green" style={{ marginTop: 10 }}>saved ✓</span>}
+          {error && <div className="error-box" role="alert">{error}</div>}
         </div>
 
         <div className="card" style={{ padding: 0 }}>
@@ -102,7 +111,7 @@ export default function Profile() {
                 <div>Notifications</div>
                 <div className="dim">
                   {pushState === 'granted'
-                    ? 'On — we\'ll alert you when it\'s your turn'
+                    ? 'On — we\'ll alert you as your checked-in position approaches'
                     : pushState === 'denied'
                       ? 'Blocked in browser settings'
                       : 'Get pinged even when the app is closed'}

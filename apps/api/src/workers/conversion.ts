@@ -151,6 +151,26 @@ export async function cleanupExpiredFiles(): Promise<void> {
   });
   for (const file of expired) {
     try {
+      const activeJobs = await prisma.job.count({
+        where: {
+          fileId: file.id,
+          status: {
+            in: [
+              'pending_payment',
+              'awaiting_arrival',
+              'queued',
+              'notified',
+              'otp_verified',
+              'printing',
+              'ready_for_pickup',
+              'no_show',
+              'requeued',
+            ],
+          },
+        },
+      });
+      if (activeJobs > 0) continue;
+
       const keys = Array.isArray(file.sources)
         ? (file.sources as unknown as Source[]).map((s) => s.key)
         : [file.originalKey];

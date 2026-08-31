@@ -169,3 +169,17 @@ worker carried more integration risk than the offline-caching win was worth this
 - **Shop directory**: `GET /api/public/shops?q=` (name/campus text search, no geo/maps) + a
   "Find a shop" page, since a direct `/s/:slug` link/QR was the only entry point before.
 - **CSV export**: `GET /api/shop/history.csv` for the owner's own bookkeeping.
+# Current operational decision (implemented August 2026)
+
+The original plan below described payment-time/per-printer queuing and expiring
+turn OTPs. The implemented launch model intentionally supersedes that design:
+
+- payment creates `awaiting_arrival`, never a physical position;
+- the student's explicit arrival action writes `queuedAt` and joins one shop-wide line;
+- a stable encrypted counter code can release any paid order at the counter, so queue
+  order organizes people but never blocks a printer;
+- removing an absent student preserves payment/code; a later check-in joins the end;
+- planned times are reminders/check-in windows, not remote capacity reservations.
+
+See `README.md`, `SECURITY.md`, the shared state machine and the 55-assertion simulator
+for the authoritative launch behavior.

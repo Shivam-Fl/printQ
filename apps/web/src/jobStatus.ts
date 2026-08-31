@@ -6,6 +6,7 @@ export interface StatusMeta {
 
 export const STATUS: Record<string, StatusMeta> = {
   pending_payment: { label: 'awaiting payment', tone: 'yellow', active: true },
+  awaiting_arrival: { label: 'ready — check in on arrival', tone: 'yellow', active: true },
   queued: { label: 'in queue', tone: 'blue', active: true },
   notified: { label: 'your turn', tone: 'yellow', active: true },
   otp_verified: { label: 'sending to printer', tone: 'blue', active: true },

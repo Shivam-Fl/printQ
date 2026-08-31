@@ -1,0 +1,3 @@
+ALTER TABLE "Job"
+ADD COLUMN "printError" TEXT,
+ADD COLUMN "printAttempts" INTEGER NOT NULL DEFAULT 0;

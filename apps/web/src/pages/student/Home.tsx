@@ -29,6 +29,7 @@ export default function Home() {
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [pickOpen, setPickOpen] = useState(params.get('pick') === '1');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!getToken('student')) {
@@ -43,7 +44,7 @@ export default function Home() {
         setMe(m.student);
         setJobs(j.jobs);
       })
-      .catch(() => undefined)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your prints'))
       .finally(() => setLoading(false));
   }, [navigate]);
 
@@ -73,13 +74,15 @@ export default function Home() {
 
         <InstallPrompt />
 
+        {error && <div className="error-box" role="alert">{error}</div>}
+
         <button className="cta-print" onClick={startPrint}>
           <span className="ic">
             <IconPlus />
           </span>
           <span style={{ flex: 1 }}>
             <strong>New print</strong>
-            <span>Upload a file and join the queue</span>
+            <span>Prepare it now, check in when you arrive</span>
           </span>
           <IconChevron />
         </button>
@@ -125,7 +128,7 @@ export default function Home() {
                   </div>
                   <div className="dim" style={{ marginTop: 4 }}>
                     {j.shop.name}
-                    {j.status === 'notified' ? ' · tap to show your code' : ''}
+                    {['awaiting_arrival', 'queued', 'notified'].includes(j.status) ? ' · tap for your counter code' : ''}
                   </div>
                 </Link>
               );

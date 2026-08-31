@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "description": "PrintQ shop print agent — receives dispatches and prints via the OS spooler",
+  "files": ["dist"],
+  "bin": { "printq-agent": "dist/index.js" },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:sim": "tsx watch src/index.ts --simulate",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"

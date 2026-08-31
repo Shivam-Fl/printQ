@@ -21,36 +21,21 @@ import { renderReceipt } from '../../lib/receipt.js';
 import { releaseByOtp } from '../queue/release.js';
 import {
   advancePrinterQueue,
+  advanceShopQueues,
   emitQueueUpdate,
-  markNoShow,
+  removeFromLiveQueue,
   recommendPrinter,
+  dispatchJob,
 } from '../queue/engine.js';
 import { applyTransition } from '../jobs/transitions.js';
-import { notifyStudent } from '../../providers/notification/index.js';
 import { env } from '../../config/env.js';
+import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { publishEvent } from '../../realtime/events.js';
+import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 
 export const shopRouter = Router();
 
 const maskPhone = (phone: string) => `•••${phone.slice(-4)}`;
-
-/** Tell everyone waiting on a closed shop that it's taking jobs again, then clear the list. */
-async function notifyShopReopened(shopId: string): Promise<void> {
-  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { name: true, slug: true } });
-  if (!shop) return;
-  const waiting = await prisma.shopOpenInterest.findMany({ where: { shopId }, select: { studentId: true } });
-  if (waiting.length === 0) return;
-
-  await Promise.all(
-    waiting.map((w) =>
-      notifyStudent(w.studentId, {
-        title: `${shop.name} is open again`,
-        body: 'Send your file now — no queue right now.',
-        url: `/s/${shop.slug}`,
-      }),
-    ),
-  );
-  await prisma.shopOpenInterest.deleteMany({ where: { shopId } });
-}
 
 /** Shop settings + profile for the logged-in staff member. */
 shopRouter.get(
@@ -66,6 +51,7 @@ shopRouter.get(
         address: true,
         campusName: true,
         autoAssignEnabled: true,
+        acceptingOrders: true,
         printOptions: true,
         otpWindowMinutes: true,
       },
@@ -76,10 +62,55 @@ shopRouter.get(
   }),
 );
 
+/** Guided-onboarding status derived from real configuration, never a checkbox. */
+shopRouter.get(
+  '/setup-status',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const [shop, printers, agents] = await Promise.all([
+      prisma.shop.findUnique({ where: { id: shopId } }),
+      prisma.printer.findMany({ where: { shopId } }),
+      prisma.agent.findMany({ where: { shopId } }),
+    ]);
+    if (!shop) throw notFound();
+
+    const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
+    const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
+    const onlineAgents = agents.filter((agent) => agent.status === 'online');
+    const options = shopOptions(shop);
+    const pricingReady = options.papers.length > 0;
+    const agentReady = onlineAgents.some((agent) =>
+      agent.connectedPrinterIds.some((id) => readyPrinters.some((printer) => printer.id === id)),
+    );
+
+    res.json({
+      setup: {
+        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
+        pricingReady,
+        printerReady: readyPrinters.length > 0,
+        agentReady,
+        ready: pricingReady && readyPrinters.length > 0 && agentReady,
+        acceptingOrders: shop.acceptingOrders,
+        counts: {
+          printers: printers.length,
+          linkedPrinters: linkedPrinters.length,
+          onlinePrinters: readyPrinters.length,
+          agents: agents.length,
+          onlineAgents: onlineAgents.length,
+        },
+        studentUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, '')}/s/${shop.slug}`,
+      },
+    });
+  }),
+);
+
 const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
+  campusName: z.string().trim().max(120).nullable().optional(),
   autoAssignEnabled: z.boolean().optional(),
+  acceptingOrders: z.boolean().optional(),
   printOptions: printOptionsSchema.optional(),
 });
 
@@ -92,9 +123,27 @@ shopRouter.patch(
     const shop = await prisma.shop.update({
       where: { id: req.shopUser!.shopId },
       data: req.body as object,
-      select: { id: true, name: true, address: true, autoAssignEnabled: true, printOptions: true },
+      select: { id: true, name: true, address: true, campusName: true, autoAssignEnabled: true, acceptingOrders: true, printOptions: true },
     });
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+  }),
+);
+
+/** Staff-accessible operational switch: stop new sales while finishing paid work. */
+shopRouter.patch(
+  '/availability',
+  requireShopUser,
+  validateBody(z.object({ acceptingOrders: z.boolean() })),
+  asyncHandler(async (req, res) => {
+    const { acceptingOrders } = req.body as { acceptingOrders: boolean };
+    const shop = await prisma.shop.update({
+      where: { id: req.shopUser!.shopId },
+      data: { acceptingOrders },
+      select: { id: true, acceptingOrders: true },
+    });
+    publishEvent(`shop:${shop.id}`, 'shop:availability', { acceptingOrders });
+    if (acceptingOrders) await notifyShopReopened(shop.id);
+    res.json({ shop });
   }),
 );
 
@@ -284,24 +333,34 @@ shopRouter.get(
   }),
 );
 
-/** Live queue for the dashboard — jobs arrive fully specified (§2). */
+/** Prepared orders, live arrivals and in-flight work for the counter dashboard. */
 shopRouter.get(
   '/queue',
   requireShopUser,
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const jobs = await prisma.job.findMany({
-      where: { shopId, status: { in: ['queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup'] } },
-      orderBy: { queuedAt: 'asc' },
+      where: {
+        shopId,
+        status: { in: ['awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup'] },
+      },
+      orderBy: [{ queuedAt: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true,
         status: true,
+        mode: true,
+        scheduledTime: true,
         specs: true,
         pagesPerCopy: true,
         totalPaise: true,
         assignedPrinterId: true,
         otpExpiresAt: true,
+        printError: true,
+        printAttempts: true,
         queuedAt: true,
+        arrivedAt: true,
+        checkInCount: true,
+        createdAt: true,
         student: { select: { name: true, phone: true } },
         file: { select: { originalName: true, pages: true } },
       },
@@ -339,13 +398,13 @@ shopRouter.post(
   }),
 );
 
-/** Mark a notified job as no-show without waiting for the window to expire. */
+/** Remove an absent student from the advisory line; their paid order remains usable. */
 shopRouter.post(
   '/jobs/:id/no-show',
   requireShopUser,
   asyncHandler(async (req, res) => {
-    await markNoShow(param(req, 'id'), req.shopUser!.shopId, req.shopUser!.id);
-    res.json({ ok: true });
+    const job = await removeFromLiveQueue(param(req, 'id'), req.shopUser!.shopId, req.shopUser!.id);
+    res.json({ ok: true, job: { id: job.id, status: job.status } });
   }),
 );
 
@@ -363,11 +422,56 @@ shopRouter.post(
     ]);
     if (!job || !printer) throw notFound();
     if (job.status !== 'queued') throw conflict('Only queued jobs can be reassigned');
+    const recommendation = await recommendPrinter(
+      shopId,
+      job.specs as unknown as JobSpecs,
+      job.pagesPerCopy,
+      job.id,
+    );
+    if (!recommendation.eligible.some((entry) => entry.printerId === printer.id)) {
+      throw conflict('That printer is offline or cannot produce this job');
+    }
 
     await prisma.job.update({ where: { id: job.id }, data: { assignedPrinterId: printerId } });
     await advancePrinterQueue(printerId, shopId);
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
+  }),
+);
+
+/** Retry a failed print without asking the student for a second OTP. */
+shopRouter.post(
+  '/jobs/:id/retry-print',
+  requireShopUser,
+  validateBody(z.object({ printerId: z.string().uuid().optional() })),
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!job) throw notFound();
+    if (job.status !== 'otp_verified') throw conflict('This job is not waiting for a print retry');
+
+    const recommendation = await recommendPrinter(
+      shopId,
+      job.specs as unknown as JobSpecs,
+      job.pagesPerCopy,
+      job.id,
+    );
+    const requested = (req.body as { printerId?: string }).printerId;
+    const printerId = requested ??
+      (recommendation.eligible.some((entry) => entry.printerId === job.assignedPrinterId)
+        ? job.assignedPrinterId
+        : recommendation.recommended?.printerId);
+    if (!printerId || !recommendation.eligible.some((entry) => entry.printerId === printerId)) {
+      throw conflict('No compatible online printer is available');
+    }
+
+    const updated = await prisma.job.update({
+      where: { id: job.id },
+      data: { assignedPrinterId: printerId, claimedByAgentId: null, printError: null },
+    });
+    await dispatchJob(updated, { type: 'shop', id: req.shopUser!.id });
+    publishEvent(`shop:${shopId}`, 'queue:retry_dispatched', { jobId: updated.id, printerId });
+    res.json({ ok: true, job: { id: updated.id, status: updated.status, printerId } });
   }),
 );
 
@@ -387,10 +491,7 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
-    await prisma.uploadedFile.update({
-      where: { id: job.fileId },
-      data: { deleteAfter: new Date(Date.now() + env.FILE_RETENTION_HOURS * 3_600_000) },
-    });
+    await scheduleFileDeletion(job.fileId);
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),
@@ -433,9 +534,15 @@ shopRouter.post(
   requireShopOwner,
   validateBody(printerInputSchema),
   asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
     const printer = await prisma.printer.create({
-      data: { ...(req.body as object), shopId: req.shopUser!.shopId } as never,
+      data: { ...(req.body as object), shopId } as never,
     });
+    if (printer.osPrinterName) {
+      await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await advanceShopQueues(shopId);
+      await notifyShopReopened(shopId);
+    }
     res.status(201).json({ printer });
   }),
 );
@@ -465,17 +572,9 @@ shopRouter.patch(
     // linking to an OS printer name: any agent that already sees that name on
     // its PC is reachable from here — auto-add without a manual chip-pick.
     if (printer.osPrinterName) {
-      const agents = await prisma.agent.findMany({ where: { shopId } });
-      for (const agent of agents) {
-        const detected = (agent.detectedPrinters as { name: string }[] | null) ?? [];
-        const sees = detected.some((d) => d.name === printer.osPrinterName);
-        if (sees && !agent.connectedPrinterIds.includes(printer.id)) {
-          await prisma.agent.update({
-            where: { id: agent.id },
-            data: { connectedPrinterIds: [...agent.connectedPrinterIds, printer.id] },
-          });
-        }
-      }
+      await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await advanceShopQueues(shopId);
+      await notifyShopReopened(shopId);
     }
 
     await emitQueueUpdate(shopId);

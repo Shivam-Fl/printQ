@@ -9,6 +9,7 @@ datasource db {
 
 enum JobStatus {
   pending_payment
+  awaiting_arrival
   queued
   notified
   otp_verified
@@ -35,6 +36,7 @@ enum AgentStatus {
 enum PaymentStatus {
   pending
   paid
+  refunding
   refunded
   failed
 }
@@ -64,6 +66,7 @@ model Shop {
   address           String
   campusName        String?
   autoAssignEnabled Boolean  @default(true)
+  acceptingOrders   Boolean  @default(true)
   /// legacy RateCard JSON — superseded by printOptions
   rateCard          Json
   /// PrintOptions JSON (papers[], bindings[], duplexEnabled); null = defaults
@@ -246,15 +249,15 @@ model UploadedFile {
 }
 
 model Job {
-  id                String        @id @default(uuid())
+  id                String       @id @default(uuid())
   shopId            String
-  shop              Shop          @relation(fields: [shopId], references: [id])
+  shop              Shop         @relation(fields: [shopId], references: [id])
   studentId         String
-  student           Student       @relation(fields: [studentId], references: [id])
+  student           Student      @relation(fields: [studentId], references: [id])
   fileId            String
-  file              UploadedFile  @relation(fields: [fileId], references: [id])
+  file              UploadedFile @relation(fields: [fileId], references: [id])
   assignedPrinterId String?
-  assignedPrinter   Printer?      @relation(fields: [assignedPrinterId], references: [id])
+  assignedPrinter   Printer?     @relation(fields: [assignedPrinterId], references: [id])
 
   /// JobSpecs JSON (copies, paperSize, color, duplex, binding, pageRange)
   specs          Json
@@ -279,13 +282,20 @@ model Job {
 
   status JobStatus @default(pending_payment)
 
-  /// release OTP — hash used for verification; plaintext kept only while the
-  /// job is `notified` so the student's own app can display it
+  /// Legacy turn-window OTP fields, retained so pre-arrival-model jobs can
+  /// finish safely during a rolling deploy.
   otpHash        String?
   otpCode        String?
   otpGeneratedAt DateTime?
   otpExpiresAt   DateTime?
   otpAttempts    Int       @default(0)
+
+  /// Stable counter release code. The deterministic HMAC supports an O(1)
+  /// shop lookup; the AES-GCM ciphertext lets only the owning student's API
+  /// response recover the code after a reload. Plaintext is never persisted.
+  releaseCodeDigest      String?
+  releaseCodeEncrypted   String?
+  releaseCodeGeneratedAt DateTime?
 
   /// set once when the "almost your turn" alert has been sent
   nearFrontNotifiedAt DateTime?
@@ -297,9 +307,16 @@ model Job {
   rating     Int?
   reviewText String?
 
-  /// payment-confirmation time; queue order is (queuedAt asc)
+  /// Queue time starts only when the student says they are physically at the
+  /// shop. Payment/upload time never reserves a place in the walk-in line.
   queuedAt         DateTime?
+  arrivedAt        DateTime?
+  queueLeftAt      DateTime?
+  checkInCount     Int       @default(0)
   claimedByAgentId String?
+  /// Persisted spooler failure state so a dashboard refresh never loses the recovery action.
+  printError       String?
+  printAttempts    Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,6 +324,7 @@ model Job {
   events JobEvent[]
 
   @@index([shopId, status])
+  @@index([shopId, releaseCodeDigest])
   @@index([assignedPrinterId, status, queuedAt])
   @@index([studentId, createdAt])
   @@index([status, otpExpiresAt])
