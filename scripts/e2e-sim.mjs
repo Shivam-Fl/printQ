@@ -11,10 +11,12 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import Redis from 'ioredis';
+import { createInterface } from 'node:readline/promises';
 
 const ROOT = process.cwd();
 const PORT = 4010;
-const API = `http://localhost:${PORT}`;
+const remote = Boolean(process.env.PRINTQ_E2E_API_URL);
+const API = process.env.PRINTQ_E2E_API_URL ?? `http://localhost:${PORT}`;
 const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const tempDir = path.join(ROOT, '.tmp', `e2e-sim-${stamp}`);
 const outputDir = path.join(tempDir, 'printed');
@@ -35,13 +37,13 @@ function assert(condition, label) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitFor(label, check, timeoutMs = 40_000) {
+async function waitFor(label, check, timeoutMs = remote ? 120_000 : 40_000) {
   const deadline = Date.now() + timeoutMs;
   let latest;
   while (Date.now() < deadline) {
     latest = await check();
     if (latest) return latest;
-    await sleep(250);
+    await sleep(remote ? 1000 : 250);
   }
   throw new Error(`Timed out waiting for ${label}${latest ? ` (${JSON.stringify(latest)})` : ''}`);
 }
@@ -120,10 +122,12 @@ async function createAndPay(token, fileId, specs) {
 async function main() {
   const apiEntry = path.join(ROOT, 'apps', 'api', 'dist', 'server.js');
   const agentEntry = path.join(ROOT, 'apps', 'agent', 'dist', 'index.js');
-  if (!existsSync(apiEntry) || !existsSync(agentEntry)) {
+  if ((!remote && !existsSync(apiEntry)) || !existsSync(agentEntry)) {
     throw new Error('Built API/agent not found. Run `npm run build` first.');
   }
   await mkdir(outputDir, { recursive: true });
+
+  if (!remote) {
 
   // A dedicated Redis DB prevents a concurrently running development worker
   // from consuming simulator conversion/timer jobs with a different storage
@@ -144,6 +148,8 @@ async function main() {
     REDIS_URL: isolatedRedisUrl,
     STORAGE_LOCAL_DIR: storageDir,
   });
+  }
+  console.log(`Testing ${API}${remote ? ' (remote test deployment; no database/Redis resets)' : ''}`);
   await waitFor('API health', async () => fetch(`${API}/healthz`).then((response) => response.ok).catch(() => false));
   assert(true, 'built API is healthy');
 
@@ -209,7 +215,15 @@ async function main() {
   const phone = `9${String(Date.now()).slice(-9)}`;
   const otpRequested = await request('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
   assert(otpRequested.status === 200, 'student login OTP requested');
-  const loginOtp = await waitFor('console login OTP', async () => latestLoginOtp(phone));
+  let loginOtp;
+  if (remote) {
+    const input = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      loginOtp = (await input.question(`Enter the private backend loginCode for test phone ${phone}: `)).trim();
+    } finally { input.close(); }
+  } else {
+    loginOtp = await waitFor('console login OTP', async () => latestLoginOtp(phone));
+  }
   const verified = await request('/api/auth/student/verify-otp', { method: 'POST', body: { phone, otp: loginOtp } });
   assert(verified.status === 200 && verified.data.token, 'student OTP verified');
   const studentToken = verified.data.token;
@@ -378,8 +392,12 @@ try {
 } finally {
   for (const child of processes.reverse()) child.kill();
   await sleep(300);
+  if (!remote) {
   const cleanupRedis = new Redis(isolatedRedisUrl, { maxRetriesPerRequest: 1 });
   await cleanupRedis.flushdb().catch(() => undefined);
   await cleanupRedis.quit().catch(() => undefined);
   await rm(tempDir, { recursive: true, force: true });
+  } else {
+    console.log(`Remote test print artifacts retained at ${outputDir}`);
+  }
 }
