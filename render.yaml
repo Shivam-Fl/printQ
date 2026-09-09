@@ -48,11 +48,13 @@ services:
           type: keyvalue
           property: connectionString
 
-      # --- required secrets: fill these in the Render dashboard after first deploy ---
+      # Public origins are kept in the Blueprint so future auto-deploys cannot
+      # silently break the split Vercel frontend / Render API connection.
       - key: CORS_ORIGINS
-        sync: false # set to your printq-web onrender.com URL once you know it
+        value: https://printq-three.vercel.app,https://printq-web-lawc.onrender.com
       - key: PUBLIC_WEB_URL
-        sync: false # same URL as CORS_ORIGINS
+        value: https://printq-three.vercel.app
+      # --- required secrets: fill these in the Render dashboard after first deploy ---
       # dummy checkout for now — every job auto-confirms via /api/payments/mock/confirm,
       # no Razorpay account needed yet. Switch to `razorpay` + add RAZORPAY_KEY_ID/
       # KEY_SECRET/WEBHOOK_SECRET (sync: false) once you're ready to take real payments.
