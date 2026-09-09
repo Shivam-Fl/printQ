@@ -97,6 +97,10 @@ webhook (or the mock endpoint in dev) — never from the client redirect.
 
 ## Going to production
 
+Start with [`LAUNCH_PLAN.md`](./LAUNCH_PLAN.md) for the real-student rollout,
+campus-based shop discovery and privacy-safe nearby-search design, then use
+[`DEPLOY.md`](./DEPLOY.md) as the operational runbook.
+
 External accounts you must set up (see PLAN.md §9 for details):
 
 1. **Hosting** — any Node host + managed Postgres + Redis (Railway / Fly.io / VPS).

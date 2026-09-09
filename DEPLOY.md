@@ -41,12 +41,12 @@ deploy.
    LibreOffice). Once it's live, note the assigned URL —
    `https://printq-web-xxxx.onrender.com` (Render appends a random suffix if the
    plain name is taken).
-4. **Fill in the secrets** Render couldn't generate for you — go to `printq-web` →
-   Environment, and set:
-   - `CORS_ORIGINS` and `PUBLIC_WEB_URL` — both to the exact URL from step 3
-     (e.g. `https://printq-web-xxxx.onrender.com`, no trailing slash). **The app will
-     fail to boot without these set** — production refuses a wildcard/empty CORS
-     origin by design (`apps/api/src/config/env.ts`).
+4. **Check the public URLs and fill in secrets** — the current test deployment's
+   `CORS_ORIGINS` and `PUBLIC_WEB_URL` are committed in `render.yaml` so an
+   auto-deploy cannot erase them. If you create another service or add a custom
+   domain, update both values in the Blueprint before deploying. Production refuses
+   a wildcard origin by design (`apps/api/src/config/env.ts`). Then go to
+   `printq-web` → Environment and set:
    - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` — from step 2.
    - `VAPID_SUBJECT` — `mailto:your-real-email@example.com` (Web Push requires a
      contact address; doesn't need to be public-facing, just valid).
@@ -93,6 +93,9 @@ Work through this once the service is live and secrets are set:
 | Uploaded files can vanish | Free web services have an ephemeral filesystem (`STORAGE_DRIVER=local`); a spin-down wipes `./storage` | If a test spans an idle gap, a job's file may 404 — just re-upload. **Must fix before real launch** |
 
 ## Phase 2 — upgrading to a real launch
+
+See `LAUNCH_PLAN.md` for the campus/nearby discovery architecture, verified-shop
+onboarding, staged rollout and full real-student acceptance gates.
 
 Do this before onboarding a real shop and real paying students:
 
