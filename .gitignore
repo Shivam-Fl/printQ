@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.vercel/
 
 # Environment — never commit real secrets
 .env
@@ -33,3 +34,4 @@ Thumbs.db
 
 # Test coverage
 coverage/
+

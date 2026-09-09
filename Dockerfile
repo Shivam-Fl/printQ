@@ -52,11 +52,17 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/packages/shared/package.json packages/shared/package.json
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/api/package.json apps/api/package.json
+COPY --from=build /app/apps/api/node_modules apps/api/node_modules
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/api/prisma apps/api/prisma
 COPY --from=build /app/apps/web/dist apps/web/dist
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
+# Verify every direct API runtime dependency in the final image, including
+# packages npm installs inside the workspace instead of hoisting to the root.
+WORKDIR /app/apps/api
+RUN node --input-type=module -e "import { readFileSync, accessSync } from 'node:fs'; const pkg = JSON.parse(readFileSync('package.json')); for (const name of Object.keys(pkg.dependencies)) accessSync(new URL(import.meta.resolve(name === 'prisma' ? 'prisma/package.json' : name)));"
+WORKDIR /app
 
 EXPOSE 4000
 CMD ["./docker-entrypoint.sh"]

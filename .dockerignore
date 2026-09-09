@@ -10,6 +10,7 @@ dist/
 apps/agent/dist/
 
 .git/
+.vercel/
 .github/
 
 .env

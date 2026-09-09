@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+node_modules
+**/node_modules
+.tmp
+storage
+apps/api/storage
+uploads
+logs
+**/*.log
+coverage
+**/dist
