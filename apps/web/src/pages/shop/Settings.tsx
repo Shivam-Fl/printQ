@@ -24,6 +24,10 @@ interface ShopProfile {
   address: string;
   campusName: string | null;
   slug: string;
+  latitude: number | null;
+  longitude: number | null;
+  checkInRadiusM: number;
+  locationUpdatedAt: string | null;
 }
 
 const slug = (s: string) =>
@@ -39,6 +43,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [locationMessage, setLocationMessage] = useState('');
 
   useEffect(() => {
     if (!getToken('shop')) {
@@ -48,7 +54,16 @@ export default function Settings() {
     api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
       .then((r) => {
         setOpts(r.shop.printOptions);
-        setProfile({ name: r.shop.name, address: r.shop.address, campusName: r.shop.campusName, slug: r.shop.slug });
+        setProfile({
+          name: r.shop.name,
+          address: r.shop.address,
+          campusName: r.shop.campusName,
+          slug: r.shop.slug,
+          latitude: r.shop.latitude,
+          longitude: r.shop.longitude,
+          checkInRadiusM: r.shop.checkInRadiusM,
+          locationUpdatedAt: r.shop.locationUpdatedAt,
+        });
         setAutoAssign(r.shop.autoAssignEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
@@ -67,6 +82,39 @@ export default function Settings() {
     setOpts({ ...opts, papers: opts.papers.map((p, idx) => (idx === i ? { ...p, ...patch } : p)) });
   const setBinding = (i: number, patch: Partial<Binding>) =>
     setOpts({ ...opts, bindings: opts.bindings.map((b, idx) => (idx === i ? { ...b, ...patch } : b)) });
+
+  function captureShopLocation() {
+    if (!navigator.geolocation) {
+      setError('This browser cannot read location. Open Settings on a phone or laptop at the shop.');
+      return;
+    }
+    setLocationBusy(true);
+    setLocationMessage('');
+    setError('');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (position.coords.accuracy > 100) {
+          setError('Location is too imprecise. Enable precise location, move near the entrance, and try again.');
+        } else {
+          setProfile((current) => current ? {
+            ...current,
+            latitude: Number(position.coords.latitude.toFixed(6)),
+            longitude: Number(position.coords.longitude.toFixed(6)),
+            locationUpdatedAt: new Date(position.timestamp).toISOString(),
+          } : current);
+          setLocationMessage(`Location captured with about ${Math.round(position.coords.accuracy)} m accuracy. Save changes to activate it.`);
+        }
+        setLocationBusy(false);
+      },
+      (reason) => {
+        setError(reason.code === reason.PERMISSION_DENIED
+          ? 'Location permission was denied. Allow precise location for PrintQ and try again.'
+          : 'Could not get an accurate location. Move near the shop entrance and retry.');
+        setLocationBusy(false);
+      },
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
+    );
+  }
 
   async function save() {
     if (!opts || !profile) return;
@@ -89,6 +137,9 @@ export default function Settings() {
           name: profile.name,
           address: profile.address,
           campusName: profile.campusName?.trim() || null,
+          latitude: profile.latitude,
+          longitude: profile.longitude,
+          checkInRadiusM: profile.checkInRadiusM,
           printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
           autoAssignEnabled: autoAssign,
         },
@@ -119,6 +170,48 @@ export default function Settings() {
               <div className="field grow"><label htmlFor="profile-campus">Campus</label><input id="profile-campus" placeholder="Optional" value={profile.campusName ?? ''} onChange={(event) => setProfile({ ...profile, campusName: event.target.value })} /></div>
             </div>
             <div className="field"><label htmlFor="profile-address">Counter address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
+          </div>
+        </section>
+      )}
+
+      {profile && (
+        <section className="settings-section">
+          <div className="settings-section-copy">
+            <h2>Secure arrival check-in</h2>
+            <p>Capture this only while physically at the counter. Students must be inside this radius before joining the live line.</p>
+          </div>
+          <div className="settings-surface stack">
+            <div className="row between">
+              <div>
+                <strong>{profile.latitude != null && profile.longitude != null ? 'Counter location captured' : 'Location required before opening'}</strong>
+                <p className="dim" style={{ margin: '4px 0 0' }}>PrintQ checks location once at arrival and does not store the student's coordinates.</p>
+              </div>
+              <span className={`stamp ${profile.latitude != null && profile.longitude != null ? 'green' : 'yellow'}`}>
+                {profile.latitude != null && profile.longitude != null ? 'active' : 'required'}
+              </span>
+            </div>
+            <div className="form-row">
+              <div className="field grow">
+                <label htmlFor="check-in-radius">Allowed distance</label>
+                <select
+                  id="check-in-radius"
+                  value={profile.checkInRadiusM}
+                  onChange={(event) => setProfile({ ...profile, checkInRadiusM: Number(event.target.value) })}
+                >
+                  <option value={100}>100 m · strict</option>
+                  <option value={150}>150 m · recommended</option>
+                  <option value={200}>200 m · easier indoors</option>
+                  <option value={300}>300 m · large campus block</option>
+                </select>
+              </div>
+              <div className="field grow">
+                <label>Counter coordinates</label>
+                <button className="secondary" disabled={locationBusy} onClick={captureShopLocation}>
+                  {locationBusy ? 'Checking location…' : profile.latitude != null ? 'Update at counter' : 'Set current location'}
+                </button>
+              </div>
+            </div>
+            {locationMessage && <p className="dim" style={{ margin: 0 }} role="status">{locationMessage}</p>}
           </div>
         </section>
       )}

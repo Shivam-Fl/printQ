@@ -11,7 +11,7 @@ import {
   verifyLoginOtpSchema,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, unauthorized } from '../../lib/errors.js';
+import { asyncHandler, badRequest, notFound, unauthorized } from '../../lib/errors.js';
 import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
 import { signShopToken, signStudentToken } from '../../lib/tokens.js';
 import { validateBody } from '../../middleware/validate.js';
@@ -21,6 +21,7 @@ import { sendLoginOtp } from '../../providers/notification/index.js';
 import { emailProvider } from '../../providers/email/index.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
+import { verifyFirebasePhoneIdToken } from '../../providers/firebaseAuth/index.js';
 
 export const authRouter = Router();
 
@@ -33,6 +34,7 @@ authRouter.post(
   otpRequestLimiter,
   validateBody(requestLoginOtpSchema),
   asyncHandler(async (req, res) => {
+    if (env.STUDENT_AUTH_PROVIDER !== 'local') throw notFound();
     const { phone } = req.body as { phone: string };
 
     const otp = generateOtp();
@@ -55,6 +57,7 @@ authRouter.post(
   otpVerifyLimiter,
   validateBody(verifyLoginOtpSchema),
   asyncHandler(async (req, res) => {
+    if (env.STUDENT_AUTH_PROVIDER !== 'local') throw notFound();
     const { phone, otp } = req.body as { phone: string; otp: string };
 
     const record = await prisma.loginOtp.findFirst({
@@ -79,6 +82,32 @@ authRouter.post(
       where: { id: record.id },
       data: { consumedAt: new Date() },
     });
+    const student = await prisma.student.upsert({
+      where: { phone },
+      create: { phone },
+      update: {},
+    });
+    res.json({
+      token: signStudentToken(student.id),
+      student: { id: student.id, phone: student.phone, name: student.name },
+    });
+  }),
+);
+
+/**
+ * Production student login: Firebase proves control of the phone number, then
+ * PrintQ creates its own student/session. The browser can never choose which
+ * phone number is attached to the account.
+ */
+authRouter.post(
+  '/student/firebase-login',
+  otpVerifyLimiter,
+  validateBody(z.object({ idToken: z.string().min(100).max(8_000) })),
+  asyncHandler(async (req, res) => {
+    if (env.STUDENT_AUTH_PROVIDER !== 'firebase') throw notFound();
+    const phone = await verifyFirebasePhoneIdToken((req.body as { idToken: string }).idToken);
+    if (!phone) throw unauthorized('Phone verification expired — request a new code');
+
     const student = await prisma.student.upsert({
       where: { phone },
       create: { phone },

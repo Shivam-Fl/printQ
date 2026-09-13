@@ -43,7 +43,7 @@ export default function Insights() {
           <div className="stat-grid">
             <div className="stat accent">
               <div className="n">{rupees(stats.todayRevenuePaise)}</div>
-              <div className="k">Today's revenue</div>
+              <div className="k">Today's shop earnings</div>
             </div>
             <div className="stat">
               <div className="n">{stats.todayJobs}</div>
@@ -51,7 +51,7 @@ export default function Insights() {
             </div>
             <div className="stat">
               <div className="n">{rupees(stats.totalRevenuePaise)}</div>
-              <div className="k">All-time revenue</div>
+              <div className="k">All-time shop earnings</div>
             </div>
             <div className="stat">
               <div className="n">{stats.completedJobs}</div>
@@ -63,7 +63,7 @@ export default function Insights() {
             </div>
           </div>
 
-          <div className="section-head"><h2>Revenue · last 7 days</h2></div>
+          <div className="section-head"><h2>Earnings · last 7 days</h2></div>
           <div className="card">
             <div className="bars">
               {stats.last7Days.map((d) => (

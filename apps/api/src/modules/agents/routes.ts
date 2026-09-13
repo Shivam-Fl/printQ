@@ -12,6 +12,7 @@ import { notifyStudent } from '../../providers/notification/index.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
 import { notifyShopReopened } from '../shops/availability.js';
+import { creditPrintEarning } from '../earnings/service.js';
 
 export const agentRouter = Router();
 agentRouter.use(requireAgent);
@@ -188,6 +189,13 @@ agentRouter.post(
       id: agent.id,
     }, { printError: null });
     if (!updated) throw conflict('Job state changed');
+
+    // Printing is the earning event—not upload, payment, queueing or handover.
+    // The upsert is idempotent; the maintenance reconciler repairs a rare
+    // database interruption without making the physical print fail again.
+    await creditPrintEarning(updated.id).catch((error) => {
+      logger.error({ error, jobId: updated.id }, 'shop_earning_credit_deferred');
+    });
 
     await notifyStudent(job.studentId, {
       title: 'Print ready ✓',

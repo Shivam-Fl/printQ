@@ -29,6 +29,13 @@ let apiOutput = '';
 let agentOutput = '';
 let assertions = 0;
 
+const arrivalProof = () => ({
+  latitude: 28.6139,
+  longitude: 77.209,
+  accuracyM: 8,
+  measuredAt: new Date().toISOString(),
+});
+
 function assert(condition, label) {
   if (!condition) throw new Error(`ASSERT FAILED: ${label}`);
   assertions += 1;
@@ -142,6 +149,9 @@ async function main() {
     PUBLIC_WEB_URL: 'http://localhost:4173',
     CORS_ORIGINS: 'http://localhost:4173',
     PAYMENT_PROVIDER: 'mock',
+    PLATFORM_MARKUP_BPS: '2500',
+    SHOP_PAYOUT_PROVIDER: 'mock',
+    MIN_SHOP_PAYOUT_PAISE: '100',
     SMS_PROVIDER: 'console',
     EMAIL_PROVIDER: 'console',
     LOG_LEVEL: 'info',
@@ -169,6 +179,13 @@ async function main() {
   assert(registered.status === 201 && registered.data.token, 'shop owner registered');
   const shopToken = registered.data.token;
   const shopSlug = registered.data.shop.slug;
+
+  const located = await request('/api/shop/me', {
+    method: 'PATCH',
+    token: shopToken,
+    body: { latitude: 28.6139, longitude: 77.209, checkInRadiusM: 150 },
+  });
+  assert(located.status === 200 && located.data.shop?.locationUpdatedAt, 'secure arrival zone configured');
 
   const printerResult = await request('/api/shop/printers', {
     method: 'POST',
@@ -210,6 +227,10 @@ async function main() {
   assert(setup.data.setup?.ready === true, 'setup checklist reports launch-ready');
   const publicShop = await request(`/api/public/shops/${shopSlug}`);
   assert(publicShop.data.shop?.open === true, 'student storefront opens only with a reachable agent');
+  assert(
+    publicShop.data.shop?.options?.papers?.every((paper) => !('bwPaise' in paper) && !('colorPaise' in paper)),
+    'public storefront never exposes the owner base rate card',
+  );
 
   console.log('\nStudent order, queue and recovery journey');
   const phone = `9${String(Date.now()).slice(-9)}`;
@@ -233,6 +254,11 @@ async function main() {
   const specs = { copies: 2, paperSize: 'A4', color: true, duplex: true, binding: 'stapling', pageRange: '1-2' };
   const quote = await request('/api/jobs/quote', { method: 'POST', token: studentToken, body: { fileId, specs } });
   assert(quote.status === 200 && quote.data.quote.pagesPerCopy === 2, 'server quote honors page range and options');
+  assert(quote.data.quote.totalPaise === 5000, '25% platform markup turns the ₹40 shop base into one ₹50 student price');
+  assert(
+    !('pagesTotalPaise' in quote.data.quote) && !('bindingPaise' in quote.data.quote),
+    'student quote returns only the final payable amount',
+  );
   const jobId = await createAndPay(studentToken, fileId, specs);
 
   const prepared = await waitFor('prepared remote order', async () => {
@@ -241,7 +267,17 @@ async function main() {
   });
   assert(prepared.position === null, 'remote upload does not occupy the physical line');
   assert(/^\d{6}$/.test(prepared.otpCode ?? ''), 'stable counter code appears in the student account');
-  const checkedIn = await request(`/api/jobs/${jobId}/check-in`, { method: 'POST', token: studentToken });
+  const remoteCheckIn = await request(`/api/jobs/${jobId}/check-in`, {
+    method: 'POST',
+    token: studentToken,
+    body: { ...arrivalProof(), latitude: 28.6239 },
+  });
+  assert(remoteCheckIn.status === 409, 'geofence rejects a check-in away from the shop');
+  const checkedIn = await request(`/api/jobs/${jobId}/check-in`, {
+    method: 'POST',
+    token: studentToken,
+    body: arrivalProof(),
+  });
   assert(checkedIn.status === 200 && checkedIn.data.job?.status === 'queued', 'arrival check-in joins the live walk-in line');
   const live = await request(`/api/jobs/${jobId}`, { token: studentToken });
   assert(live.data.job.position === 1 && live.data.job.otpCode === prepared.otpCode, 'check-in assigns a shop-wide position without rotating the code');
@@ -269,10 +305,33 @@ async function main() {
   const printed = await readFile(printedPath);
   assert(printed.subarray(0, 4).toString() === '%PDF', 'simulated spool output is a valid PDF');
 
+  const earned = await waitFor('shop earning credit', async () => {
+    const result = await request('/api/shop/earnings', { token: shopToken });
+    return result.data.earnings?.availablePaise === 4000 ? result : null;
+  });
+  assert(
+    earned.status === 200
+      && earned.data.earnings?.availablePaise === 4000
+      && earned.data.earnings?.pendingPaise === 0
+      && earned.data.earnings?.lifetimeEarnedPaise === 4000,
+    'successful physical print credits exactly the shop-owned ₹40 base',
+  );
+  const payout = await request('/api/shop/earnings/payout', { method: 'POST', token: shopToken });
+  assert(
+    payout.status === 201 && payout.data.payout?.status === 'paid' && payout.data.payout?.amountPaise === 4000,
+    'owner can request one aggregated simulated payout',
+  );
+  const afterPayout = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    afterPayout.data.earnings?.availablePaise === 0 && afterPayout.data.earnings?.lifetimeEarnedPaise === 4000,
+    'payout reservation prevents double payment without erasing lifetime earnings',
+  );
+
   const handedOver = await request(`/api/shop/jobs/${jobId}/handover`, { method: 'POST', token: shopToken });
   assert(handedOver.status === 200, 'shop marked the order collected');
   const completed = await request(`/api/jobs/${jobId}`, { token: studentToken });
   assert(completed.data.job.status === 'completed', 'student history shows a completed order');
+  assert(!('priceBreakdown' in completed.data.job), 'student order API keeps the private pricing split hidden');
 
   console.log('\nLate arrival, skip-safe counter lookup and refund journey');
   const queueFileId = await upload(studentToken, shopSlug, 1, 'arrival-model-test.pdf');
@@ -282,10 +341,10 @@ async function main() {
     const result = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
-  await request(`/api/jobs/${missedJobId}/check-in`, { method: 'POST', token: studentToken });
-  const duplicateCheckIn = await request(`/api/jobs/${missedJobId}/check-in`, { method: 'POST', token: studentToken });
+  await request(`/api/jobs/${missedJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
+  const duplicateCheckIn = await request(`/api/jobs/${missedJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
   assert(duplicateCheckIn.status === 200 && duplicateCheckIn.data.job?.status === 'queued', 'duplicate check-in is idempotent');
-  await request(`/api/jobs/${waitingJobId}/check-in`, { method: 'POST', token: studentToken });
+  await request(`/api/jobs/${waitingJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
   const beforeSkipA = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
   const beforeSkipB = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
   assert(beforeSkipA.data.job.position === 1 && beforeSkipB.data.job.position === 2, 'arrivals receive one unambiguous shop-wide order');
@@ -344,7 +403,11 @@ async function main() {
   assert(paused.status === 200 && paused.data.shop?.acceptingOrders === false, 'staff paused new orders');
   const closedStorefront = await request(`/api/public/shops/${shopSlug}`);
   assert(closedStorefront.data.shop?.open === false, 'paused storefront closes to new purchases');
-  const honoredCheckIn = await request(`/api/jobs/${closingJobId}/check-in`, { method: 'POST', token: studentToken });
+  const honoredCheckIn = await request(`/api/jobs/${closingJobId}/check-in`, {
+    method: 'POST',
+    token: studentToken,
+    body: arrivalProof(),
+  });
   assert(honoredCheckIn.status === 200 && honoredCheckIn.data.job?.status === 'queued', 'already-paid order can still check in after new sales pause');
   const blockedQuote = await request('/api/jobs/quote', {
     method: 'POST',

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   applyCoupon,
+  applyPlatformMarkup,
   computePrice,
   couponCodeSchema,
   createJobSchema,
@@ -28,6 +29,13 @@ import { isShopOperational } from '../shops/availability.js';
 
 export const jobsRouter = Router();
 
+const checkInSchema = z.object({
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  accuracyM: z.number().finite().min(0).max(1_000),
+  measuredAt: z.coerce.date(),
+});
+
 /** Live price quote — server-computed from the shop's rate card, never client math. */
 jobsRouter.post(
   '/quote',
@@ -44,9 +52,14 @@ jobsRouter.post(
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
     }
 
-    let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    let breakdown = applyPlatformMarkup(
+      computePrice(specs, file.pages, shopOptions(file.shop)),
+      env.PLATFORM_MARKUP_BPS,
+    );
     if (couponCode) breakdown = applyCoupon(breakdown, await resolveCoupon(couponCode, file.shopId));
-    res.json({ quote: breakdown, pages: file.pages });
+    // Student-facing pricing is intentionally one final amount. The shop base,
+    // platform markup and line-item split remain private server-side data.
+    res.json({ quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise }, pages: file.pages });
   }),
 );
 
@@ -76,7 +89,9 @@ jobsRouter.post(
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
     }
 
-    let breakdown = computePrice(specs, file.pages, shopOptions(file.shop));
+    const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
+    let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
+    const platformMarkupPaise = breakdown.totalPaise - shopBase.totalPaise;
     let resolvedCouponCode: string | null = null;
     if (couponCode) {
       const resolved = await resolveCoupon(couponCode, file.shopId);
@@ -94,6 +109,9 @@ jobsRouter.post(
         pagesPerCopy: breakdown.pagesPerCopy,
         priceBreakdown: breakdown as unknown as object,
         totalPaise: breakdown.totalPaise,
+        shopBasePaise: shopBase.totalPaise,
+        platformMarkupPaise,
+        platformDiscountPaise: breakdown.discountPaise,
         couponCode: resolvedCouponCode,
         discountPaise: breakdown.discountPaise,
         mode,
@@ -109,7 +127,7 @@ jobsRouter.post(
     });
 
     res.status(201).json({
-      job: { id: job.id, status: job.status, totalPaise: job.totalPaise, breakdown },
+      job: { id: job.id, status: job.status, totalPaise: job.totalPaise },
       checkout: order.checkout,
     });
   }),
@@ -156,7 +174,6 @@ jobsRouter.get(
         shopId: true,
         status: true,
         totalPaise: true,
-        priceBreakdown: true,
         specs: true,
         mode: true,
         scheduledTime: true,
@@ -216,6 +233,7 @@ jobsRouter.get(
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,
       paymentStatus: job.paymentStatus,
+      showPriceBreakdown: false,
     });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="printq-receipt-${job.id.slice(0, 8)}.pdf"`);
@@ -227,8 +245,9 @@ jobsRouter.get(
 jobsRouter.post(
   '/:id/check-in',
   requireStudent,
+  validateBody(checkInSchema),
   asyncHandler(async (req, res) => {
-    const job = await checkInJob(param(req, 'id'), req.student!.id);
+    const job = await checkInJob(param(req, 'id'), req.student!.id, req.body as z.infer<typeof checkInSchema>);
     const live = await getJobLiveMetrics(job.id);
     res.json({ job: { id: job.id, status: job.status, ...live } });
   }),

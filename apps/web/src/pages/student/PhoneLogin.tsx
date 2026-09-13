@@ -1,6 +1,21 @@
 import { useEffect, useState } from 'react';
 import { api, setToken } from '../../api.js';
 
+const firebasePhoneAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase'
+  && Boolean(
+    import.meta.env.VITE_FIREBASE_API_KEY
+    && import.meta.env.VITE_FIREBASE_AUTH_DOMAIN
+    && import.meta.env.VITE_FIREBASE_PROJECT_ID
+    && import.meta.env.VITE_FIREBASE_APP_ID,
+  );
+
+let firebasePhoneAuthPromise: Promise<typeof import('../../firebasePhoneAuth.js')> | null = null;
+
+function loadFirebasePhoneAuth() {
+  firebasePhoneAuthPromise ??= import('../../firebasePhoneAuth.js');
+  return firebasePhoneAuthPromise;
+}
+
 type Stage = 'phone' | 'otp' | 'name';
 
 /** Passwordless login; first verification doubles as account creation. */
@@ -19,11 +34,48 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
     return () => clearTimeout(timer);
   }, [resendIn]);
 
+  useEffect(() => {
+    let active = true;
+    if (firebasePhoneAuthEnabled) {
+      setBusy(true);
+      loadFirebasePhoneAuth()
+        .then(({ resumeFirebasePhoneSession }) => resumeFirebasePhoneSession())
+        .then(async (idToken) => {
+          if (!idToken) return;
+          const result = await api<{ token: string; student: { name: string | null } }>(
+            '/api/auth/student/firebase-login',
+            { method: 'POST', body: { idToken } },
+          );
+          if (!active) return;
+          setToken('student', result.token);
+          if (result.student.name) onDone();
+          else setStage('name');
+        })
+        .catch(() => {
+          // A stale Firebase session is harmless; show the normal phone form.
+        })
+        .finally(() => { if (active) setBusy(false); });
+    }
+    return () => {
+      active = false;
+      void firebasePhoneAuthPromise?.then(({ resetFirebasePhoneAuth }) => resetFirebasePhoneAuth());
+    };
+    // Run once on entry; onDone is intentionally not a dependency because
+    // callers pass an inline navigation callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const phoneE164 = `+91${phone.replace(/\D/g, '')}`;
+
   async function requestOtp() {
     setBusy(true);
     setError('');
     try {
-      await api('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
+      if (firebasePhoneAuthEnabled) {
+        const { requestFirebasePhoneOtp } = await loadFirebasePhoneAuth();
+        await requestFirebasePhoneOtp(phoneE164);
+      }
+      else await api('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
       setStage('otp');
       setResendIn(30);
     } catch (err) {
@@ -37,10 +89,19 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError('');
     try {
-      const result = await api<{ token: string; student: { name: string | null } }>(
-        '/api/auth/student/verify-otp',
-        { method: 'POST', body: { phone, otp } },
-      );
+      let result: { token: string; student: { name: string | null } };
+      if (firebasePhoneAuthEnabled) {
+        const { verifyFirebasePhoneOtp } = await loadFirebasePhoneAuth();
+        result = await api('/api/auth/student/firebase-login', {
+          method: 'POST',
+          body: { idToken: await verifyFirebasePhoneOtp(otp) },
+        });
+      } else {
+        result = await api('/api/auth/student/verify-otp', {
+          method: 'POST',
+          body: { phone, otp },
+        });
+      }
       setToken('student', result.token);
       if (result.student.name) onDone();
       else setStage('name');
@@ -125,7 +186,18 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
             {busy ? 'Checking…' : 'Verify and continue'}
           </button>
           <div className="auth-inline-actions">
-            <button className="text-button" onClick={() => setStage('phone')}>Change number</button>
+            <button
+              className="text-button"
+              onClick={() => {
+                if (firebasePhoneAuthEnabled) {
+                  void loadFirebasePhoneAuth().then(({ resetFirebasePhoneAuth }) => resetFirebasePhoneAuth());
+                }
+                setOtp('');
+                setStage('phone');
+              }}
+            >
+              Change number
+            </button>
             <button className="text-button" disabled={busy || resendIn > 0} onClick={requestOtp}>
               {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
             </button>
@@ -161,6 +233,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       )}
 
       {error && <div className="error-box" role="alert">{error}</div>}
+      {firebasePhoneAuthEnabled && <div id="printq-recaptcha" aria-hidden="true" />}
     </div>
   );
 }

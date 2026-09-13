@@ -70,8 +70,10 @@ Work through this once the service is live and secrets are set:
 - [ ] Upload a PDF, set specs, and pay — checkout auto-confirms immediately
   (`PAYMENT_PROVIDER=mock`), no real payment happens yet.
 - [ ] Confirm the paid order says **awaiting arrival** and has no queue position. Tap
-  **I'm at the shop**, confirm it becomes position 1, then remove it from the line in
-  the dashboard and confirm a re-check-in goes to the end.
+  **I'm at the shop** while physically inside the owner-configured arrival radius,
+  confirm it becomes position 1, then remove it from the line in the dashboard and
+  confirm a re-check-in goes to the end. Also verify a check-in from outside the
+  radius is rejected while the permanent counter-code fallback still works.
 - [ ] Upload a **DOCX** file specifically — this is the one path that needs
   LibreOffice; confirm it converts instead of failing.
 - [ ] Register a shop, open **Setup**, connect a computer in **Simulation** mode, and run
@@ -112,19 +114,35 @@ Do this before onboarding a real shop and real paying students:
    the free tier's single-instance constraint anyway.
 3. **Upgrade `printq-web` off the free plan** (removes cold starts and the 512MB
    ceiling — more headroom for LibreOffice under real load).
-4. **Wire real SMS delivery**: get an MSG91 account, set `SMS_PROVIDER=msg91` +
-   `MSG91_AUTH_KEY` / `MSG91_SENDER_ID` / `MSG91_TEMPLATE_ID`. Without this, real
-   students have no way to receive their login OTP outside of your Render logs.
+4. **Wire student phone authentication**: the production flow uses Firebase Phone
+   Auth, matching Packkar. In Render set `STUDENT_AUTH_PROVIDER=firebase` and
+   `FIREBASE_AUTH_API_KEY`. In Vercel set `VITE_STUDENT_AUTH_PROVIDER=firebase` plus
+   the four public `VITE_FIREBASE_*` web-app values. Add every production frontend
+   hostname to Firebase Authentication → Settings → Authorized domains. Keep
+   `STUDENT_AUTH_PROVIDER=local` only for local development; that fallback can use
+   `SMS_PROVIDER=msg91` or the API console.
 5. **Wire real email delivery** (forgot-password): get a Resend account, set
    `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` / `EMAIL_FROM`.
-6. **Wire real payments** (replacing mock checkout): from your Razorpay account,
+6. **Wire real payments and shop payouts** (replacing both simulators): from your Razorpay account,
    Dashboard → Settings → API Keys → generate a key pair (start in **Test Mode** to
    dry-run the real checkout flow with fake money first, without needing a fully
    KYC-activated Live account). Add a webhook — Dashboard → Webhooks → Add New
    Webhook — pointing at `https://<your-url>/api/payments/webhook/razorpay`,
-   subscribed to the `payment.captured` event; copy the secret it shows you. Then in
+   subscribed to `payment.captured`, `transfer.processed`, `transfer.failed`, and
+   `transfer.reversed`; copy the secret it shows you. Then in
    Render, set `PAYMENT_PROVIDER=razorpay` + `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`
-   / `RAZORPAY_WEBHOOK_SECRET`. When you're ready for real money, switch the
+   / `RAZORPAY_WEBHOOK_SECRET`.
+
+   Ask Razorpay to activate **Route Direct Transfers**, then onboard and KYC each
+   print shop as a Route Linked Account. Store the returned account id on the
+   corresponding shop and set `SHOP_PAYOUT_PROVIDER=razorpay_route`. New linked
+   accounts can have a cooling period before transfers are allowed. PrintQ credits
+   a shop only after successful printing, then sends one aggregate daily or
+   owner-requested transfer; it never creates one transfer per student payment.
+   Keep `SHOP_PAYOUT_PROVIDER=mock` until test checkout, transfer webhooks, failed
+   transfer balance restoration, and reconciliation have all passed. Route/Direct
+   Transfer pricing is account-specific—confirm it with Razorpay before setting the
+   platform margin. When you're ready for real money, switch the
    dashboard to Live Mode, generate a live key pair and a live-mode webhook, and swap
    those three values for the live ones.
 7. **Optional: a custom domain** instead of `*.onrender.com` (Render supports this
@@ -137,11 +155,14 @@ Do this before onboarding a real shop and real paying students:
 
 Before giving the URL to a real student, all of these must be true:
 
-- [ ] `npm run test:launch` passes locally (including the 55-assertion arrival/queue/printer simulator E2E).
+- [ ] `npm run test:launch` passes locally (including the 64-assertion pricing/arrival/queue/printer/payout simulator E2E).
 - [ ] Render Postgres, Key Value and web service use production-capable paid instances.
 - [ ] `STORAGE_DRIVER=s3`; an upload survives a web-service restart and expires after retention.
 - [ ] `PAYMENT_PROVIDER=razorpay`; test-mode payment, webhook capture, cancellation and refund pass.
-- [ ] `SMS_PROVIDER=msg91` and `EMAIL_PROVIDER=resend`; OTP/reset messages arrive on real devices.
+- [ ] `SHOP_PAYOUT_PROVIDER=razorpay_route`; every live shop has a verified Linked
+  Account and test transfer success/failure webhooks reconcile its private ledger.
+- [ ] `STUDENT_AUTH_PROVIDER=firebase`; a real phone completes OTP login from every production domain.
+- [ ] `EMAIL_PROVIDER=resend`; shop-owner reset messages arrive on real devices.
 - [ ] VAPID keys are configured and an approaching-position notification opens the correct job from an installed PWA.
 - [ ] A real Windows printer passes B/W, colour, duplex and multi-copy tests for every advertised option.
 - [ ] Shop terms, privacy/contact details, Razorpay KYC and a support escalation path are in place.

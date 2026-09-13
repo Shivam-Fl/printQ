@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { publishEvent } from '../realtime/events.js';
 import { convertFile, cleanupExpiredFiles } from './conversion.js';
 import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
+import { reconcilePrintEarnings, runPayoutSweep } from '../modules/earnings/service.js';
 
 const STALE_AGENT_MS = 2 * 60_000;
 
@@ -53,14 +54,17 @@ export async function startWorkers(): Promise<void> {
       if (job.name === 'cleanup') {
         await expireStalePreparedOrders();
         await cleanupExpiredFiles();
+        await reconcilePrintEarnings();
       }
       else if (job.name === 'staleAgents') await detectStaleAgents();
+      else if (job.name === 'payoutSweep') await runPayoutSweep();
     },
     { connection: bullConnection(), concurrency: 1 },
   );
 
   await maintenanceQueue.upsertJobScheduler('cleanup-hourly', { every: 3_600_000 }, { name: 'cleanup' });
   await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 60_000 }, { name: 'staleAgents' });
+  await maintenanceQueue.upsertJobScheduler('payout-sweep', { every: 3_600_000 }, { name: 'payoutSweep' });
 
   logger.info('workers_started');
 }

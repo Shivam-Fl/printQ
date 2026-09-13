@@ -18,6 +18,7 @@ import Settings from './pages/shop/Settings.js';
 import Insights from './pages/shop/Insights.js';
 import History from './pages/shop/History.js';
 import ShopSetup from './pages/shop/ShopSetup.js';
+import Earnings from './pages/shop/Earnings.js';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="/dashboard/register" element={<ShopRegister />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/dashboard/insights" element={<Insights />} />
+        <Route path="/dashboard/earnings" element={<Earnings />} />
         <Route path="/dashboard/history" element={<History />} />
         <Route path="/dashboard/setup" element={<ShopSetup />} />
         <Route path="/dashboard/printers" element={<Printers />} />

@@ -7,21 +7,12 @@ import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 
-interface Breakdown {
-  pagesPerCopy: number;
-  copies: number;
-  perPagePaise: number;
-  pagesTotalPaise: number;
-  bindingPaise: number;
-  totalPaise: number;
-}
 interface JobDetail {
   id: string;
   status: string;
   mode: 'instant' | 'scheduled';
   scheduledTime: string | null;
   totalPaise: number;
-  priceBreakdown: Breakdown;
   specs: SpecsLite;
   createdAt: string;
   otpCode: string | null;
@@ -52,6 +43,21 @@ const MILESTONES = [
   { key: 'completed', label: 'Collected' },
 ];
 const ORDER = ['pending_payment', 'awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup', 'completed'];
+
+function currentLocation(): Promise<GeolocationPosition> {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error('This browser cannot verify your location. Show your counter code to staff.'));
+  }
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      (reason) => reject(new Error(reason.code === reason.PERMISSION_DENIED
+        ? 'Allow precise location to join the queue, or show your counter code to staff.'
+        : 'Could not verify that you are at the shop. Move near the entrance and retry.')),
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
+    );
+  });
+}
 
 export default function JobStatus() {
   const { id = '' } = useParams();
@@ -111,7 +117,17 @@ export default function JobStatus() {
     setCheckingIn(true);
     setError('');
     try {
-      await api(`/api/jobs/${id}/check-in`, { method: 'POST', role: 'student' });
+      const position = await currentLocation();
+      await api(`/api/jobs/${id}/check-in`, {
+        method: 'POST',
+        role: 'student',
+        body: {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyM: position.coords.accuracy,
+          measuredAt: new Date(position.timestamp).toISOString(),
+        },
+      });
       setConfirmingArrival(false);
       await refresh();
     } catch (err) {
@@ -152,7 +168,6 @@ export default function JobStatus() {
   }
 
   const m = statusMeta(job.status);
-  const b = job.priceBreakdown;
   const checkInOpen = !job.checkInOpensAt || new Date(job.checkInOpensAt).getTime() <= Date.now();
   const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
@@ -264,9 +279,7 @@ export default function JobStatus() {
 
         {/* ---- receipt ---- */}
         <div className="card receipt">
-          <div className="line"><span>{b.pagesPerCopy} pages × {b.copies} {b.copies === 1 ? 'copy' : 'copies'}</span><span>{rupees(b.pagesTotalPaise)}</span></div>
-          {b.bindingPaise > 0 && <div className="line"><span>binding</span><span>{rupees(b.bindingPaise)}</span></div>}
-          <div className="line total"><span>Paid</span><span>{rupees(b.totalPaise)}</span></div>
+          <div className="line total"><span>Amount paid</span><span>{rupees(job.totalPaise)}</span></div>
           <button
             className="ghost small"
             style={{ marginTop: 10 }}

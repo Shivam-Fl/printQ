@@ -25,6 +25,8 @@ publicRouter.get(
         name: true,
         campusName: true,
         address: true,
+        latitude: true,
+        longitude: true,
         acceptingOrders: true,
         printers: { select: { id: true, status: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
@@ -40,7 +42,10 @@ publicRouter.get(
           name: shop.name,
           campusName: shop.campusName,
           address: shop.address,
-          open: shop.acceptingOrders && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
+          open: shop.acceptingOrders
+            && shop.latitude != null
+            && shop.longitude != null
+            && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
         };
       }),
     });
@@ -48,7 +53,8 @@ publicRouter.get(
 );
 
 /**
- * Public shop landing data (QR code target): name, prices, capabilities.
+ * Public shop landing data (QR code target): name and capabilities.
+ * The owner's private base rate card is deliberately never returned here.
  * No auth — contains nothing user-scoped.
  */
 publicRouter.get(
@@ -62,6 +68,8 @@ publicRouter.get(
         name: true,
         address: true,
         campusName: true,
+        latitude: true,
+        longitude: true,
         acceptingOrders: true,
         printOptions: true,
         printers: {
@@ -97,7 +105,7 @@ publicRouter.get(
         name: shop.name,
         address: shop.address,
         campusName: shop.campusName,
-        open: shop.acceptingOrders && online.length > 0,
+        open: shop.acceptingOrders && shop.latitude != null && shop.longitude != null && online.length > 0,
         colorAvailable,
         rating: {
           average: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 10) / 10 : null,
@@ -106,8 +114,14 @@ publicRouter.get(
         options: {
           papers: options.papers
             .filter((p) => loadedPapers.size === 0 || loadedPapers.has(p.id))
-            .map((p) => ({ ...p, colorPaise: colorAvailable ? p.colorPaise : null })),
-          bindings: options.bindings.filter((b) => loadedBindings.size === 0 || loadedBindings.has(b.id)),
+            .map((p) => ({
+              id: p.id,
+              label: p.label,
+              colorAvailable: colorAvailable && p.colorPaise != null,
+            })),
+          bindings: options.bindings
+            .filter((b) => loadedBindings.size === 0 || loadedBindings.has(b.id))
+            .map((b) => ({ id: b.id, label: b.label })),
           duplexEnabled: options.duplexEnabled,
         },
       },

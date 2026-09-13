@@ -56,7 +56,9 @@ Everything is in-app first:
 Students can choose a flexible arrival or save a planned time (15 min–72 h ahead).
 This is a reminder, not a remote queue reservation. Check-in opens
 `SCHEDULE_LEAD_MINUTES` (default 10) before the planned time and always records the
-student's real arrival time.
+student's real arrival time. A fresh one-time browser location reading must also be
+inside the shop's owner-configured geofence; PrintQ stores the result, not the
+student's raw coordinates.
 
 ### Print agent (on the shop PC)
 
@@ -95,6 +97,23 @@ Every transition goes through one function (`packages/shared/src/stateMachine.ts
 writes an append-only `JobEvent` audit row. Payment truth comes only from the verified
 webhook (or the mock endpoint in dev) — never from the client redirect.
 
+## Pricing, earnings and payouts
+
+The shop owner controls the private base rate card by paper, B/W or colour, and
+finishing option. PrintQ applies `PLATFORM_MARKUP_BPS` server-side (2500 = 25%)
+and snapshots both amounts on the order, so later rate changes never rewrite old
+orders. Students see only one final payable amount—not the shop base, PrintQ
+markup, gateway fee, or an itemized price split—in the storefront, checkout,
+order API and student receipt.
+
+A paid order does not become shop earnings until the print agent confirms that
+the physical print succeeded. The append-only owner ledger credits the original
+shop-base snapshot exactly once. Owners can choose daily aggregate payouts or
+request their full available balance on demand; payout reservations prevent the
+same earnings being sent twice. `SHOP_PAYOUT_PROVIDER=mock` exercises this whole
+flow safely. Production uses Razorpay Route Direct Transfers to KYC-verified
+Linked Accounts and authenticated transfer webhooks.
+
 ## Going to production
 
 Start with [`LAUNCH_PLAN.md`](./LAUNCH_PLAN.md) for the real-student rollout,
@@ -103,14 +122,22 @@ campus-based shop discovery and privacy-safe nearby-search design, then use
 
 External accounts you must set up (see PLAN.md §9 for details):
 
+See [`COST_MODEL.md`](./COST_MODEL.md) for the dated Firebase-versus-Render
+recommendation and volume-based monthly estimates.
+
 1. **Hosting** — any Node host + managed Postgres + Redis (Railway / Fly.io / VPS).
    Build: `npm run build`, run `node apps/api/dist/server.js` — in production it also
    **serves the built web app** from the same origin (PWA + push + API on one domain).
    Workers run in-process; set `RUN_WORKERS=false` and run `dist/worker.js` separately
    to scale out. Apply migrations with `npm run db:deploy -w apps/api`.
-2. **Razorpay** — set `PAYMENT_PROVIDER=razorpay` + keys + webhook secret; point the
-   webhook at `POST /api/payments/webhook/razorpay` (event: `payment.captured`).
-3. **SMS for login codes** — set `SMS_PROVIDER=msg91` and the three `MSG91_*` values.
+2. **Razorpay** — set `PAYMENT_PROVIDER=razorpay` plus the keys and webhook secret.
+   For owner payouts, activate Route/Direct Transfers, onboard each shop as a
+   Linked Account, and set `SHOP_PAYOUT_PROVIDER=razorpay_route`. Point the webhook
+   at `POST /api/payments/webhook/razorpay` for payment and transfer events.
+3. **Student login codes** — production uses Firebase Phone Auth. Set
+   `STUDENT_AUTH_PROVIDER=firebase` + `FIREBASE_AUTH_API_KEY` on the API and the
+   matching public `VITE_FIREBASE_*` values on the web build. The local server-OTP
+   fallback can still use MSG91 via the three `MSG91_*` values.
    All other notifications are in-app + Web Push, no messaging vendor needed.
 4. **Object storage** — `STORAGE_DRIVER=s3` + any S3-compatible bucket (R2/S3/MinIO).
 5. **TLS + CORS** — HTTPS is required for PWA install + push; set `CORS_ORIGINS` and
@@ -124,7 +151,8 @@ npm run typecheck # all four workspaces
 npm run test:launch # production build + unit suites + real API/agent simulator E2E
 ```
 
-The 55-assertion launch E2E covers remote preparation, arrival check-in, shop-wide
+The 64-assertion launch E2E covers private marketplace pricing and payout accounting,
+remote preparation, geofence rejection, arrival check-in, shop-wide
 positions, duplicate check-in, skipped students, out-of-order counter-code release,
 storefront pause/reopen with existing-order protection, virtual printer jams/retry,
 pickup, cancellation and exactly-once refunds.

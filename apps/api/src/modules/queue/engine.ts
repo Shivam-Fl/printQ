@@ -17,9 +17,17 @@ import { conflict, notFound } from '../../lib/errors.js';
 import { applyTransition, type ActorType } from '../jobs/transitions.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { distanceMeters, type Coordinates } from '../../lib/geo.js';
 import { reachablePrinterIds } from '../shops/availability.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
+const MAX_LOCATION_AGE_MS = 90_000;
+const MAX_LOCATION_ACCURACY_M = 100;
+
+export interface ArrivalProof extends Coordinates {
+  accuracyM: number;
+  measuredAt: Date;
+}
 
 function toProfile(p: Printer): PrinterProfile {
   return {
@@ -269,7 +277,7 @@ export async function advancePrinterQueue(printerId: string, shopId: string): Pr
  * Join the physical walk-in line. Repeated taps are idempotent, and printer
  * eligibility is checked at arrival rather than hours earlier at upload time.
  */
-export async function checkInJob(jobId: string, studentId: string): Promise<Job> {
+export async function checkInJob(jobId: string, studentId: string, arrival: ArrivalProof): Promise<Job> {
   const job = await prisma.job.findFirst({ where: { id: jobId, studentId } });
   if (!job) throw notFound();
   if (job.status === 'queued') return job;
@@ -277,6 +285,29 @@ export async function checkInJob(jobId: string, studentId: string): Promise<Job>
     throw conflict('This order cannot join the live line in its current state');
   }
   if (job.paymentStatus !== 'paid') throw conflict('Payment must be confirmed before check-in');
+
+  const locationAge = Date.now() - arrival.measuredAt.getTime();
+  if (locationAge < -10_000 || locationAge > MAX_LOCATION_AGE_MS) {
+    throw conflict('Your location reading is stale. Check your location again at the shop entrance.');
+  }
+  if (arrival.accuracyM > MAX_LOCATION_ACCURACY_M) {
+    throw conflict('Location is not accurate enough. Move near the shop entrance, enable precise location, and retry.');
+  }
+
+  const shop = await prisma.shop.findUnique({
+    where: { id: job.shopId },
+    select: { latitude: true, longitude: true, checkInRadiusM: true },
+  });
+  if (shop?.latitude == null || shop.longitude == null) {
+    throw conflict('This shop has not enabled secure arrival check-in. Show your counter code to staff.');
+  }
+  const arrivalDistanceM = distanceMeters(arrival, {
+    latitude: shop.latitude,
+    longitude: shop.longitude,
+  });
+  if (arrivalDistanceM > shop.checkInRadiusM) {
+    throw conflict(`You need to be within ${shop.checkInRadiusM} m of the shop to join its live line.`);
+  }
 
   if (job.mode === 'scheduled' && job.scheduledTime) {
     const opensAt = job.scheduledTime.getTime() - leadMs();

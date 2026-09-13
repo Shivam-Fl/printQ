@@ -12,6 +12,8 @@ export interface ReceiptData {
   breakdown: PriceBreakdown;
   totalPaise: number;
   paymentStatus: string;
+  /** Student receipts show a single final charge; owner copies may be itemized. */
+  showPriceBreakdown?: boolean;
 }
 
 const rupees = (paise: number) => `Rs ${(paise / 100).toFixed(2)}`;
@@ -54,8 +56,10 @@ export async function renderReceipt(data: ReceiptData): Promise<Uint8Array> {
   y -= 4;
   rule();
 
-  draw(`Pages x copies: ${rupees(data.breakdown.pagesTotalPaise)}`);
-  if (data.breakdown.bindingPaise > 0) draw(`Binding: ${rupees(data.breakdown.bindingPaise)}`);
+  if (data.showPriceBreakdown !== false) {
+    draw(`Pages x copies: ${rupees(data.breakdown.pagesTotalPaise)}`);
+    if (data.breakdown.bindingPaise > 0) draw(`Binding: ${rupees(data.breakdown.bindingPaise)}`);
+  }
   draw(`Total: ${rupees(data.totalPaise)}`, { size: 12, f: bold, gap: 20 });
   draw(`Payment: ${data.paymentStatus}`, { size: 9 });
 

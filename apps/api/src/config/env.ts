@@ -27,6 +27,12 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
   OTP_PEPPER: z.string().min(16, 'OTP_PEPPER must be at least 16 chars'),
 
+  // Firebase sends/verifies the student's phone OTP in production. After the
+  // Firebase ID token is verified, PrintQ still issues its own scoped JWT so
+  // the rest of the platform remains independent of Firebase.
+  STUDENT_AUTH_PROVIDER: z.enum(['local', 'firebase']).default('local'),
+  FIREBASE_AUTH_API_KEY: z.string().optional(),
+
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
   S3_ENDPOINT: z.string().optional(),
@@ -37,6 +43,9 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
 
   PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+  PLATFORM_MARKUP_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
+  SHOP_PAYOUT_PROVIDER: z.enum(['mock', 'razorpay_route']).default('mock'),
+  MIN_SHOP_PAYOUT_PAISE: z.coerce.number().int().min(100).default(50_000),
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
@@ -94,6 +103,18 @@ if (env.PAYMENT_PROVIDER === 'razorpay') {
     console.error('PAYMENT_PROVIDER=razorpay requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET');
     process.exit(1);
   }
+}
+if (env.SHOP_PAYOUT_PROVIDER === 'razorpay_route') {
+  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
+    // eslint-disable-next-line no-console
+    console.error('SHOP_PAYOUT_PROVIDER=razorpay_route requires RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET');
+    process.exit(1);
+  }
+}
+if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
+  // eslint-disable-next-line no-console
+  console.error('STUDENT_AUTH_PROVIDER=firebase requires FIREBASE_AUTH_API_KEY');
+  process.exit(1);
 }
 if (env.SMS_PROVIDER === 'msg91') {
   if (!env.MSG91_AUTH_KEY || !env.MSG91_SENDER_ID || !env.MSG91_TEMPLATE_ID) {

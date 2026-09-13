@@ -32,6 +32,7 @@ import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
+import { getShopEarnings, requestShopPayout } from '../earnings/service.js';
 
 export const shopRouter = Router();
 
@@ -50,6 +51,10 @@ shopRouter.get(
         name: true,
         address: true,
         campusName: true,
+        latitude: true,
+        longitude: true,
+        checkInRadiusM: true,
+        locationUpdatedAt: true,
         autoAssignEnabled: true,
         acceptingOrders: true,
         printOptions: true,
@@ -58,7 +63,10 @@ shopRouter.get(
     });
     if (!shop) throw notFound();
     // always return a concrete menu (defaults when the shop hasn't customised)
-    res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+    res.json({
+      shop: { ...shop, printOptions: shopOptions(shop) },
+      user: { role: req.shopUser!.role },
+    });
   }),
 );
 
@@ -80,6 +88,7 @@ shopRouter.get(
     const onlineAgents = agents.filter((agent) => agent.status === 'online');
     const options = shopOptions(shop);
     const pricingReady = options.papers.length > 0;
+    const locationReady = shop.latitude != null && shop.longitude != null;
     const agentReady = onlineAgents.some((agent) =>
       agent.connectedPrinterIds.some((id) => readyPrinters.some((printer) => printer.id === id)),
     );
@@ -87,10 +96,11 @@ shopRouter.get(
     res.json({
       setup: {
         profileReady: Boolean(shop.name.trim() && shop.address.trim()),
+        locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
         agentReady,
-        ready: pricingReady && readyPrinters.length > 0 && agentReady,
+        ready: locationReady && pricingReady && readyPrinters.length > 0 && agentReady,
         acceptingOrders: shop.acceptingOrders,
         counts: {
           printers: printers.length,
@@ -109,9 +119,22 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
+  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
+  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  checkInRadiusM: z.number().int().min(75).max(500).optional(),
   autoAssignEnabled: z.boolean().optional(),
   acceptingOrders: z.boolean().optional(),
   printOptions: printOptionsSchema.optional(),
+}).superRefine((value, context) => {
+  const latitudeProvided = value.latitude !== undefined;
+  const longitudeProvided = value.longitude !== undefined;
+  if (latitudeProvided !== longitudeProvided || (latitudeProvided && ((value.latitude == null) !== (value.longitude == null)))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['latitude'],
+      message: 'Latitude and longitude must be updated together',
+    });
+  }
 });
 
 /** Owner-only settings updates (details, auto-assign, print menu + pricing). */
@@ -122,8 +145,27 @@ shopRouter.patch(
   asyncHandler(async (req, res) => {
     const shop = await prisma.shop.update({
       where: { id: req.shopUser!.shopId },
-      data: req.body as object,
-      select: { id: true, name: true, address: true, campusName: true, autoAssignEnabled: true, acceptingOrders: true, printOptions: true },
+      data: {
+        ...(req.body as object),
+        ...('latitude' in req.body ? {
+          locationUpdatedAt: typeof req.body.latitude === 'number' && typeof req.body.longitude === 'number'
+            ? new Date()
+            : null,
+        } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        campusName: true,
+        latitude: true,
+        longitude: true,
+        checkInRadiusM: true,
+        locationUpdatedAt: true,
+        autoAssignEnabled: true,
+        acceptingOrders: true,
+        printOptions: true,
+      },
     });
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
   }),
@@ -147,10 +189,43 @@ shopRouter.patch(
   }),
 );
 
-/** Analytics: revenue, prints and pages for the owner dashboard. */
+/** Private owner ledger. Never mounted on any student/public route. */
+shopRouter.get(
+  '/earnings',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    res.json({ earnings: await getShopEarnings(req.shopUser!.shopId) });
+  }),
+);
+
+shopRouter.patch(
+  '/earnings/settings',
+  requireShopOwner,
+  validateBody(z.object({ payoutSchedule: z.enum(['daily', 'on_demand']) })),
+  asyncHandler(async (req, res) => {
+    const { payoutSchedule } = req.body as { payoutSchedule: 'daily' | 'on_demand' };
+    const shop = await prisma.shop.update({
+      where: { id: req.shopUser!.shopId },
+      data: { payoutSchedule },
+      select: { payoutSchedule: true },
+    });
+    res.json({ settings: shop });
+  }),
+);
+
+shopRouter.post(
+  '/earnings/payout',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const payout = await requestShopPayout(req.shopUser!.shopId, req.shopUser!.id);
+    res.status(201).json({ payout });
+  }),
+);
+
+/** Analytics: the shop's private base earnings, prints and pages. */
 shopRouter.get(
   '/stats',
-  requireShopUser,
+  requireShopOwner,
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const startOfToday = new Date();
@@ -158,12 +233,16 @@ shopRouter.get(
     const since = new Date(Date.now() - 30 * 86_400_000);
 
     const [allTime, completedCount, printers, recentCompleted] = await Promise.all([
-      prisma.job.aggregate({ where: { shopId, paymentStatus: 'paid' }, _sum: { totalPaise: true }, _count: true }),
+      prisma.job.aggregate({
+        where: { shopId, paymentStatus: 'paid', status: { in: ['ready_for_pickup', 'completed'] } },
+        _sum: { shopBasePaise: true },
+        _count: true,
+      }),
       prisma.job.count({ where: { shopId, status: 'completed' } }),
       prisma.printer.findMany({ where: { shopId }, select: { id: true, label: true } }),
       prisma.job.findMany({
         where: { shopId, status: 'completed', updatedAt: { gte: since } },
-        select: { pagesPerCopy: true, specs: true, totalPaise: true, assignedPrinterId: true, updatedAt: true },
+        select: { pagesPerCopy: true, specs: true, shopBasePaise: true, assignedPrinterId: true, updatedAt: true },
       }),
     ]);
 
@@ -179,7 +258,7 @@ shopRouter.get(
       const sheets = j.pagesPerCopy * copies;
       pagesPrinted += sheets;
       if (j.updatedAt >= startOfToday) {
-        todayRevenue += j.totalPaise;
+        todayRevenue += j.shopBasePaise;
         todayJobs += 1;
       }
       const pid = j.assignedPrinterId ?? 'unassigned';
@@ -188,7 +267,7 @@ shopRouter.get(
       row.pages += sheets;
       byPrinter.set(pid, row);
       const day = j.updatedAt.toISOString().slice(0, 10);
-      byDay.set(day, (byDay.get(day) ?? 0) + j.totalPaise);
+      byDay.set(day, (byDay.get(day) ?? 0) + j.shopBasePaise);
     }
 
     const days = [...Array(7)].map((_, i) => {
@@ -198,7 +277,7 @@ shopRouter.get(
 
     res.json({
       stats: {
-        totalRevenuePaise: allTime._sum.totalPaise ?? 0,
+        totalRevenuePaise: allTime._sum.shopBasePaise ?? 0,
         totalPaidJobs: allTime._count,
         completedJobs: completedCount,
         pagesPrinted30d: pagesPrinted,

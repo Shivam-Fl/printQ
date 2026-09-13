@@ -58,6 +58,29 @@ export function computePrice(
   };
 }
 
+/**
+ * Convert the shop's private base rate into the only price students see.
+ * Markup is applied to each sellable unit in integer paise so the displayed
+ * per-page price always multiplies exactly to the displayed subtotal.
+ */
+export function applyPlatformMarkup(base: PriceBreakdown, markupBps: number): PriceBreakdown {
+  if (!Number.isInteger(markupBps) || markupBps < 0 || markupBps > 10_000) {
+    throw new PricingError('Platform markup must be between 0% and 100%');
+  }
+  const multiplier = (10_000 + markupBps) / 10_000;
+  const perPagePaise = Math.round(base.perPagePaise * multiplier);
+  const pagesTotalPaise = perPagePaise * base.pagesPerCopy * base.copies;
+  const bindingPaise = Math.round(base.bindingPaise * multiplier);
+  return {
+    ...base,
+    perPagePaise,
+    pagesTotalPaise,
+    bindingPaise,
+    discountPaise: 0,
+    totalPaise: pagesTotalPaise + bindingPaise,
+  };
+}
+
 /** Minimum a job can cost after any discount — matches the platform's ₹1 order floor. */
 const MIN_ORDER_PAISE = 100;
 

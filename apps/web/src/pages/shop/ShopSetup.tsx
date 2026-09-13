@@ -6,6 +6,7 @@ import ShopNav from '../../components/ShopNav.js';
 
 interface SetupStatus {
   profileReady: boolean;
+  locationReady: boolean;
   pricingReady: boolean;
   printerReady: boolean;
   agentReady: boolean;
@@ -30,8 +31,16 @@ const STEPS = [
     action: 'Review profile',
   },
   {
-    key: 'pricingReady' as const,
+    key: 'locationReady' as const,
     number: '02',
+    title: 'Secure the arrival zone',
+    body: 'While at the counter, capture its location so remote users cannot take live queue positions.',
+    to: '/dashboard/settings',
+    action: 'Set counter location',
+  },
+  {
+    key: 'pricingReady' as const,
+    number: '03',
     title: 'Set services and prices',
     body: 'Configure paper, colour, duplex and binding prices once. Orders arrive fully specified.',
     to: '/dashboard/settings',
@@ -39,7 +48,7 @@ const STEPS = [
   },
   {
     key: 'agentReady' as const,
-    number: '03',
+    number: '04',
     title: 'Connect a shop computer',
     body: 'Run the PrintQ agent on the Windows PC that can already print to your devices.',
     to: '/dashboard/agents',
@@ -47,7 +56,7 @@ const STEPS = [
   },
   {
     key: 'printerReady' as const,
-    number: '04',
+    number: '05',
     title: 'Review printer capabilities',
     body: 'Confirm loaded paper, colour support, finishing and speed so routing stays accurate.',
     to: '/dashboard/printers',
@@ -109,7 +118,7 @@ export default function ShopSetup() {
         <div>
           <span className="eyebrow-label">Launch checklist</span>
           <h1>Get your counter ready</h1>
-          <p>Four practical steps. Most shops finish this in under ten minutes.</p>
+          <p>Five practical steps. Most shops finish this in under ten minutes.</p>
         </div>
         <div className="setup-score" aria-label={`${completeCount} of ${STEPS.length} setup steps complete`}>
           <strong>{completeCount}/{STEPS.length}</strong>

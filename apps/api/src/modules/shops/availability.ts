@@ -11,8 +11,11 @@ export async function reachablePrinterIds(shopId: string): Promise<Set<string>> 
 }
 
 export async function isShopOperational(shopId: string): Promise<boolean> {
-  const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { acceptingOrders: true } });
-  if (!shop?.acceptingOrders) return false;
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { acceptingOrders: true, latitude: true, longitude: true },
+  });
+  if (!shop?.acceptingOrders || shop.latitude == null || shop.longitude == null) return false;
   const reachable = await reachablePrinterIds(shopId);
   if (reachable.size === 0) return false;
   return (

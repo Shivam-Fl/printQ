@@ -956,6 +956,21 @@ tr:last-child td { border-bottom: none; }
 .settings-surface { margin: 14px 0; padding: 22px; border: 1px solid var(--rule); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); }
 .settings-section .settings-surface { margin: 0; }
 
+/* ---------- private owner earnings ---------- */
+
+.earnings-stats { margin: 22px 0 18px; }
+.earnings-layout { display: grid; grid-template-columns: minmax(320px, .8fr) minmax(420px, 1.2fr); gap: 18px; align-items: start; }
+.payout-control { padding: 24px; }
+.payout-control h2 { margin: 8px 0 20px; font-size: 1.25rem; }
+.payout-account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 17px 0; }
+.simulator-inline { margin: 14px 0; padding: 11px 12px; border-radius: 9px; color: #695d21; background: var(--highlight-soft); font-size: .78rem; }
+.payout-hint { margin: 9px 0 0; text-align: center; font-size: .76rem; }
+.earnings-success { border-color: #a8d8bd; background: #effaf3; }
+.section-head.compact { margin-top: 0; }
+.table-shell.flat { border: 0; border-radius: 0; box-shadow: none; }
+.ledger-amount { color: var(--pencil); font-weight: 700; }
+.ledger-amount.positive { color: var(--ok); }
+
 /* ---------- live shop queue ---------- */
 
 .dashboard-heading { align-items: center; }
@@ -1110,6 +1125,7 @@ tr:last-child td { border-bottom: none; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-aside { min-height: auto; padding: 56px 32px; }
   .checkout-grid { grid-template-columns: 1fr; }
+  .earnings-layout { grid-template-columns: 1fr; }
   .checkout-sidebar { position: static; grid-row: 1; }
   .preview-card .preview-frame { height: 310px; }
 }

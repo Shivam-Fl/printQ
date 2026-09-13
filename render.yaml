@@ -54,12 +54,25 @@ services:
         value: https://printq-three.vercel.app,https://printq-web-lawc.onrender.com
       - key: PUBLIC_WEB_URL
         value: https://printq-three.vercel.app
+
+      # Firebase handles the student's phone OTP. Keep the public web API key
+      # in Render's environment instead of committing one project's value.
+      - key: STUDENT_AUTH_PROVIDER
+        value: firebase
+      - key: FIREBASE_AUTH_API_KEY
+        sync: false
       # --- required secrets: fill these in the Render dashboard after first deploy ---
       # dummy checkout for now — every job auto-confirms via /api/payments/mock/confirm,
       # no Razorpay account needed yet. Switch to `razorpay` + add RAZORPAY_KEY_ID/
       # KEY_SECRET/WEBHOOK_SECRET (sync: false) once you're ready to take real payments.
       - key: PAYMENT_PROVIDER
         value: mock
+      - key: PLATFORM_MARKUP_BPS
+        value: "2500"
+      - key: SHOP_PAYOUT_PROVIDER
+        value: mock
+      - key: MIN_SHOP_PAYOUT_PAISE
+        value: "50000"
       - key: VAPID_PUBLIC_KEY
         sync: false # npx web-push generate-vapid-keys
       - key: VAPID_PRIVATE_KEY

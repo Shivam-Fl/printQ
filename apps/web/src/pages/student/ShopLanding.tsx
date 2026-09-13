@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, getToken, rememberShop, rupees } from '../../api.js';
+import { api, getToken, rememberShop } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
@@ -8,8 +8,7 @@ import PhoneLogin from './PhoneLogin.js';
 interface Paper {
   id: string;
   label: string;
-  bwPaise: number;
-  colorPaise: number | null;
+  colorAvailable: boolean;
 }
 interface PublicShop {
   slug: string;
@@ -19,7 +18,7 @@ interface PublicShop {
   open: boolean;
   colorAvailable: boolean;
   rating: { average: number | null; count: number };
-  options: { papers: Paper[]; bindings: { id: string; label: string; paise: number }[]; duplexEnabled: boolean };
+  options: { papers: Paper[]; bindings: { id: string; label: string }[]; duplexEnabled: boolean };
 }
 
 /** Redirects to the specs page once `fileId` finishes converting (socket, with a polling fallback). */
@@ -159,8 +158,6 @@ export default function ShopLanding() {
     );
   }
 
-  const cheapest = shop.options.papers[0];
-
   return (
     <div className="page">
       <Topbar right={loggedIn ? <Link to="/home">Home</Link> : undefined} />
@@ -173,7 +170,7 @@ export default function ShopLanding() {
             {shop.campusName ? ` · ${shop.campusName}` : ''}
           </p>
           <div className="shop-facts">
-            {cheapest && <span>{cheapest.label} from {rupees(cheapest.bwPaise)}/page</span>}
+            {shop.options.papers.length > 0 && <span>{shop.options.papers.map((paper) => paper.label).join(' · ')}</span>}
             {shop.colorAvailable && <span>Colour available</span>}
             {shop.rating.average != null && (
               <span>★ {shop.rating.average} from {shop.rating.count} rating{shop.rating.count === 1 ? '' : 's'}</span>

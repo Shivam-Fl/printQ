@@ -51,7 +51,11 @@ export default function Profile() {
     }
   }
 
-  function logout() {
+  async function logout() {
+    if (import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase') {
+      const { signOutFirebasePhoneAuth } = await import('../../firebasePhoneAuth.js');
+      await signOutFirebasePhoneAuth().catch(() => undefined);
+    }
     clearToken('student');
     resetSockets();
     navigate('/', { replace: true });
@@ -123,7 +127,7 @@ export default function Profile() {
             </span>
           </button>
 
-          <button className="list-row" style={{ width: '100%', background: 'none', color: 'var(--danger)' }} onClick={logout}>
+          <button className="list-row" style={{ width: '100%', background: 'none', color: 'var(--danger)' }} onClick={() => void logout()}>
             <span className="lead">
               <span className="ic" style={{ color: 'var(--danger)' }}><IconLogout /></span>
               <span>Log out</span>

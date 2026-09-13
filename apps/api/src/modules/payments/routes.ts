@@ -8,6 +8,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { verifyRazorpayWebhookSignature } from '../../providers/payment/index.js';
 import { onPaymentConfirmed } from '../queue/engine.js';
+import { applyPayoutProviderStatus } from '../earnings/service.js';
 
 export const paymentsRouter = Router();
 
@@ -37,18 +38,61 @@ webhookRouter.post(
       event: string;
       payload?: {
         payment?: {
-          entity?: { id?: string; order_id?: string; amount?: number; currency?: string; status?: string };
+          entity?: {
+            id?: string;
+            order_id?: string;
+            amount?: number;
+            currency?: string;
+            status?: string;
+            fee?: number;
+            tax?: number;
+          };
+        };
+        transfer?: {
+          entity?: {
+            id?: string;
+            status?: string;
+            error_description?: string;
+            notes?: { printqPayoutId?: string };
+          };
         };
       };
     };
 
-    // idempotency: a webhook can fire more than once for the same event
-    if (typeof eventId === 'string') {
-      const existing = await prisma.paymentEvent.findUnique({ where: { providerEventId: eventId } });
-      if (existing) {
-        res.json({ ok: true, duplicate: true });
-        return;
+    // Every effect below is idempotent as well as the event insert. We still
+    // replay the effect for duplicate deliveries so a crash after recording an
+    // event can be repaired by the provider's normal webhook retry.
+
+    if (['transfer.processed', 'transfer.failed', 'transfer.reversed'].includes(payload.event)) {
+      const transfer = payload.payload?.transfer?.entity;
+      const transferId = transfer?.id;
+      const payoutId = transfer?.notes?.printqPayoutId;
+      const providerEventId = typeof eventId === 'string'
+        ? eventId
+        : `rzp_route_${transferId ?? payoutId ?? 'unknown'}_${payload.event}`;
+
+      await prisma.paymentEvent.upsert({
+        where: { providerEventId },
+        create: { provider: 'razorpay_route', providerEventId, jobId: null, payload: payload as object },
+        update: {},
+      });
+
+      // If the original API response was lost after Razorpay accepted it, the
+      // idempotency note lets the webhook attach the provider transfer safely.
+      if (transferId && payoutId) {
+        await prisma.shopPayout.updateMany({
+          where: { id: payoutId, providerTransferId: null },
+          data: { providerTransferId: transferId },
+        });
       }
+      if (transferId) {
+        const status = payload.event.slice('transfer.'.length) as 'processed' | 'failed' | 'reversed';
+        await applyPayoutProviderStatus(transferId, status, transfer?.error_description);
+      } else {
+        logger.warn({ event: payload.event }, 'razorpay_transfer_webhook_missing_id');
+      }
+      res.json({ ok: true });
+      return;
     }
 
     if (payload.event === 'payment.captured') {
@@ -90,7 +134,14 @@ webhookRouter.post(
       });
 
       if (job) {
-        await prisma.job.update({ where: { id: job.id }, data: { paymentId: payment?.id ?? null } });
+        await prisma.job.update({
+          where: { id: job.id },
+          data: {
+            paymentId: payment?.id ?? null,
+            gatewayFeePaise: typeof payment?.fee === 'number' ? payment.fee : null,
+            gatewayTaxPaise: typeof payment?.tax === 'number' ? payment.tax : null,
+          },
+        });
         await onPaymentConfirmed(job.id);
       } else {
         logger.warn({ orderId }, 'razorpay_payment_for_unknown_order');

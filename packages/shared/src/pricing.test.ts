@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PRINT_OPTIONS, PricingError, applyCoupon, computePrice } from './pricing.js';
+import { DEFAULT_PRINT_OPTIONS, PricingError, applyCoupon, applyPlatformMarkup, computePrice } from './pricing.js';
 import type { JobSpecs, PrintOptions } from './types.js';
 
 const base: JobSpecs = {
@@ -87,5 +87,22 @@ describe('applyCoupon', () => {
     const p = computePrice(base, 1, DEFAULT_PRINT_OPTIONS); // 200 paise
     const discounted = applyCoupon(p, { code: 'HUGE', percentOff: null, paiseOff: 10_000 });
     expect(discounted.totalPaise).toBe(100);
+  });
+});
+
+describe('applyPlatformMarkup', () => {
+  it('turns a shop base rate of ₹2 into a ₹2.50 student rate at 25%', () => {
+    const basePrice = computePrice(base, 3, DEFAULT_PRINT_OPTIONS);
+    const studentPrice = applyPlatformMarkup(basePrice, 2_500);
+    expect(basePrice.perPagePaise).toBe(200);
+    expect(studentPrice.perPagePaise).toBe(250);
+    expect(studentPrice.totalPaise).toBe(750);
+  });
+
+  it('marks up finishing while preserving exact integer totals', () => {
+    const basePrice = computePrice({ ...base, binding: 'spiral_binding' }, 1, DEFAULT_PRINT_OPTIONS);
+    const studentPrice = applyPlatformMarkup(basePrice, 2_500);
+    expect(studentPrice.bindingPaise).toBe(3_750);
+    expect(studentPrice.totalPaise).toBe(4_000);
   });
 });

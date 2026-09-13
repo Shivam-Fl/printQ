@@ -16,6 +16,7 @@ export function setToken(role: Role, token: string): void {
 }
 export function clearToken(role: Role): void {
   localStorage.removeItem(tokenKey(role));
+  if (role === 'shop') localStorage.removeItem('printq:shop:role');
 }
 
 /** 'owner' | 'staff' for the logged-in shop user — gates owner-only UI (e.g. Staff management). */

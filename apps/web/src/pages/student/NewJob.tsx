@@ -8,13 +8,11 @@ import Topbar from '../../components/Topbar.js';
 interface Paper {
   id: string;
   label: string;
-  bwPaise: number;
-  colorPaise: number | null;
+  colorAvailable: boolean;
 }
 interface Binding {
   id: string;
   label: string;
-  paise: number;
 }
 interface ShopOptions {
   papers: Paper[];
@@ -31,9 +29,6 @@ interface Specs {
 }
 interface Quote {
   pagesPerCopy: number;
-  pagesTotalPaise: number;
-  bindingPaise: number;
-  discountPaise: number;
   totalPaise: number;
 }
 
@@ -138,7 +133,7 @@ export default function NewJob() {
   }
 
   const paper = opts?.papers.find((p) => p.id === specs?.paperSize);
-  const colorAvailable = paper?.colorPaise != null;
+  const colorAvailable = Boolean(paper?.colorAvailable);
 
   // if the chosen paper can't do colour, force B/W
   useEffect(() => {
@@ -250,7 +245,7 @@ export default function NewJob() {
               <div className="field grow">
                 <label htmlFor="paper">Paper</label>
                 <select id="paper" value={specs.paperSize} onChange={(e) => set('paperSize', e.target.value)}>
-                  {opts.papers.map((p) => <option key={p.id} value={p.id}>{p.label} — {rupees(p.bwPaise)}/page</option>)}
+                  {opts.papers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </div>
             </div>
@@ -259,7 +254,7 @@ export default function NewJob() {
                 <label htmlFor="color">Ink</label>
                 <select id="color" value={specs.color ? 'color' : 'bw'} disabled={!colorAvailable} onChange={(e) => set('color', e.target.value === 'color')}>
                   <option value="bw">Black &amp; white</option>
-                  {colorAvailable && <option value="color">Colour — {rupees(paper!.colorPaise!)}/page</option>}
+                  {colorAvailable && <option value="color">Colour</option>}
                 </select>
               </div>
               {opts.duplexEnabled && (
@@ -276,7 +271,7 @@ export default function NewJob() {
                 <label htmlFor="binding">Binding or finishing</label>
                 <select id="binding" value={specs.binding ?? 'none'} onChange={(e) => set('binding', e.target.value === 'none' ? null : e.target.value)}>
                   <option value="none">None</option>
-                  {opts.bindings.map((b) => <option key={b.id} value={b.id}>{b.label}{b.paise > 0 ? ` — ${rupees(b.paise)}` : ''}</option>)}
+                  {opts.bindings.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
                 </select>
               </div>
             )}
@@ -319,7 +314,7 @@ export default function NewJob() {
               <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>Flexible arrival</button>
               <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>Reserve a time</button>
             </div>
-            {mode === 'instant' ? <p className="dim" style={{ marginBottom: 0 }}>Your position appears as soon as payment is confirmed.</p> : (
+            {mode === 'instant' ? <p className="dim" style={{ marginBottom: 0 }}>Payment prepares the order; your position appears only after you arrive and check in.</p> : (
               <div style={{ marginTop: 14 }}><label htmlFor="slot">Planned arrival</label><input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} /><p className="dim" style={{ marginBottom: 0 }}>We’ll remind you near this time. Check-in still starts only when you are physically there.</p></div>
             )}
           </section>
@@ -333,10 +328,8 @@ export default function NewJob() {
           <div className="checkout-total">
             {quote ? (
               <div className="receipt">
-                <div className="line"><span>{quote.pagesPerCopy} pages × {specs.copies}</span><span>{rupees(quote.pagesTotalPaise)}</span></div>
-                {quote.bindingPaise > 0 && <div className="line"><span>Finishing</span><span>{rupees(quote.bindingPaise)}</span></div>}
-                {quote.discountPaise > 0 && <div className="line"><span>Coupon ({appliedCoupon})</span><span>−{rupees(quote.discountPaise)}</span></div>}
-                <div className="line total"><span>Total</span><span>{rupees(quote.totalPaise)}</span></div>
+                <div className="line"><span>Selected print</span><span>{quote.pagesPerCopy * specs.copies} pages</span></div>
+                <div className="line total"><span>Total to pay</span><span>{rupees(quote.totalPaise)}</span></div>
               </div>
             ) : <p style={{ margin: 0 }}>Updating total…</p>}
 

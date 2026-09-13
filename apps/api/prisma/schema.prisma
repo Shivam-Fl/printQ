@@ -41,6 +41,26 @@ enum PaymentStatus {
   failed
 }
 
+enum PayoutSchedule {
+  daily
+  on_demand
+}
+
+enum ShopPayoutStatus {
+  requested
+  processing
+  paid
+  failed
+  cancelled
+}
+
+enum ShopLedgerType {
+  print_earning
+  payout_reserved
+  payout_released
+  adjustment
+}
+
 enum JobMode {
   instant
   scheduled
@@ -65,6 +85,14 @@ model Shop {
   name              String
   address           String
   campusName        String?
+  /// Owner-captured counter coordinates. Used for one-time arrival checks and
+  /// nearby discovery; students' coordinates are never persisted.
+  latitude          Float?
+  longitude         Float?
+  checkInRadiusM    Int      @default(150)
+  locationUpdatedAt DateTime?
+  payoutSchedule    PayoutSchedule @default(daily)
+  razorpayLinkedAccountId String?  @unique
   autoAssignEnabled Boolean  @default(true)
   acceptingOrders   Boolean  @default(true)
   /// legacy RateCard JSON — superseded by printOptions
@@ -81,6 +109,8 @@ model Shop {
   files         UploadedFile[]
   openInterests ShopOpenInterest[]
   coupons       Coupon[]
+  ledgerEntries ShopLedgerEntry[]
+  payouts       ShopPayout[]
 }
 
 /// A discount code — platform-wide (shopId null) or scoped to one shop.
@@ -266,6 +296,12 @@ model Job {
   /// PriceBreakdown JSON — computed server-side only
   priceBreakdown Json
   totalPaise     Int
+  /// Private settlement snapshot. Student APIs never expose this split.
+  shopBasePaise         Int @default(0)
+  platformMarkupPaise   Int @default(0)
+  platformDiscountPaise Int @default(0)
+  gatewayFeePaise       Int?
+  gatewayTaxPaise       Int?
 
   paymentStatus   PaymentStatus @default(pending)
   paymentProvider String?
@@ -322,6 +358,7 @@ model Job {
   updatedAt DateTime @updatedAt
 
   events JobEvent[]
+  ledgerEntries ShopLedgerEntry[]
 
   @@index([shopId, status])
   @@index([shopId, releaseCodeDigest])
@@ -354,4 +391,45 @@ model PaymentEvent {
   jobId           String?
   payload         Json
   createdAt       DateTime @default(now())
+}
+
+model ShopPayout {
+  id                 String           @id @default(uuid())
+  shopId             String
+  shop               Shop             @relation(fields: [shopId], references: [id])
+  amountPaise        Int
+  status             ShopPayoutStatus @default(requested)
+  provider           String
+  providerTransferId String?          @unique
+  requestedById      String?
+  attempts           Int              @default(0)
+  lastAttemptAt      DateTime?
+  lastError          String?
+  paidAt             DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  ledgerEntries      ShopLedgerEntry[]
+
+  @@index([shopId, createdAt])
+  @@index([status, lastAttemptAt])
+}
+
+/// Append-only private money ledger. Positive amounts increase the shop's
+/// payable balance; payout reservations are negative.
+model ShopLedgerEntry {
+  id          String         @id @default(uuid())
+  shopId      String
+  shop        Shop           @relation(fields: [shopId], references: [id])
+  jobId       String?
+  job         Job?           @relation(fields: [jobId], references: [id])
+  payoutId    String?
+  payout      ShopPayout?    @relation(fields: [payoutId], references: [id])
+  type        ShopLedgerType
+  amountPaise Int
+  description String
+  createdAt   DateTime       @default(now())
+
+  @@unique([jobId, type])
+  @@unique([payoutId, type])
+  @@index([shopId, createdAt])
 }
