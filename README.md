@@ -1,5 +1,8 @@
 # PrintQ
 
+Production domain: **PrintQs.com**, pronounced “print queues.” The interface
+keeps the concise **PrintQ** mark; the domain/PWA identity uses **PrintQs**.
+
 Campus printing platform: students prepare and pay for fully specified jobs from
 anywhere, then join the shop's walk-in line only after they physically arrive. The
 shop owner's main action is *"enter the counter code, hand over the print."*

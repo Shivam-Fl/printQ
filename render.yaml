@@ -51,9 +51,9 @@ services:
       # Public origins are kept in the Blueprint so future auto-deploys cannot
       # silently break the split Vercel frontend / Render API connection.
       - key: CORS_ORIGINS
-        value: https://printq-three.vercel.app,https://printq-web-lawc.onrender.com
+        value: https://printqs.com,https://www.printqs.com,https://printq-three.vercel.app,https://printq-web-lawc.onrender.com,https://api.printqs.com
       - key: PUBLIC_WEB_URL
-        value: https://printq-three.vercel.app
+        value: https://printqs.com
 
       # Firebase handles the student's phone OTP. Keep the public web API key
       # in Render's environment instead of committing one project's value.

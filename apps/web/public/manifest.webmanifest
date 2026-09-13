@@ -1,7 +1,7 @@
 {
-  "name": "PrintQ — skip the print shop line",
+  "name": "PrintQs — skip the print shop line",
   "short_name": "PrintQ",
-  "description": "Send your print from anywhere, pay, and walk in when it's your turn.",
+  "description": "Print queues without the counter rush. Upload, pay, arrive, and collect.",
   "id": "/",
   "start_url": "/jobs",
   "scope": "/",

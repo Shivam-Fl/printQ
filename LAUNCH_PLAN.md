@@ -8,7 +8,8 @@ describes the implemented product architecture.
 
 ## Current status
 
-- The test PWA is live at `https://printq-three.vercel.app`.
+- The production PWA is served from `https://printqs.com` (with the existing
+  `printq-three.vercel.app` URL retained as a deployment fallback).
 - The API, workers, PostgreSQL and Key Value service are live on Render.
 - CI is green, the production dependency audit is clean, and the remote printer
   simulator passes 55 assertions against the deployed backend.
