@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, getShopRole, getToken } from '../../api.js';
 import { useNavigate } from 'react-router-dom';
 import ShopNav from '../../components/ShopNav.js';
+import ShopLocationPicker from '../../components/ShopLocationPicker.js';
 
 interface Paper {
   id: string;
@@ -45,6 +46,8 @@ export default function Settings() {
   const [error, setError] = useState('');
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationMessage, setLocationMessage] = useState('');
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locationCenter, setLocationCenter] = useState<{ latitude: number; longitude: number } | null>(null);
 
   useEffect(() => {
     if (!getToken('shop')) {
@@ -85,7 +88,8 @@ export default function Settings() {
 
   function captureShopLocation() {
     if (!navigator.geolocation) {
-      setError('This browser cannot read location. Open Settings on a phone or laptop at the shop.');
+      setLocationPickerOpen(true);
+      setLocationMessage('This device cannot provide location. Place the entrance pin on the map instead.');
       return;
     }
     setLocationBusy(true);
@@ -93,13 +97,17 @@ export default function Settings() {
     setError('');
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        setLocationCenter({ latitude, longitude });
         if (position.coords.accuracy > 100) {
-          setError('Location is too imprecise. Enable precise location, move near the entrance, and try again.');
+          setLocationPickerOpen(true);
+          setLocationMessage(`This device is only accurate to about ${Math.round(position.coords.accuracy)} m. It has centred the map nearby—click the exact shop entrance.`);
         } else {
           setProfile((current) => current ? {
             ...current,
-            latitude: Number(position.coords.latitude.toFixed(6)),
-            longitude: Number(position.coords.longitude.toFixed(6)),
+            latitude,
+            longitude,
             locationUpdatedAt: new Date(position.timestamp).toISOString(),
           } : current);
           setLocationMessage(`Location captured with about ${Math.round(position.coords.accuracy)} m accuracy. Save changes to activate it.`);
@@ -107,17 +115,33 @@ export default function Settings() {
         setLocationBusy(false);
       },
       (reason) => {
-        setError(reason.code === reason.PERMISSION_DENIED
-          ? 'Location permission was denied. Allow precise location for PrintQ and try again.'
-          : 'Could not get an accurate location. Move near the shop entrance and retry.');
+        setLocationPickerOpen(true);
+        setLocationMessage(reason.code === reason.PERMISSION_DENIED
+          ? 'Location access is off. You can still set the exact entrance safely on the map.'
+          : 'This device could not provide a reliable location. Place the exact entrance pin on the map instead.');
         setLocationBusy(false);
       },
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
     );
   }
 
+  function selectShopLocation(latitude: number, longitude: number) {
+    setProfile((current) => current ? {
+      ...current,
+      latitude,
+      longitude,
+      locationUpdatedAt: new Date().toISOString(),
+    } : current);
+    setLocationMessage('Entrance pin selected. Save all changes to activate it.');
+    setError('');
+  }
+
   async function save() {
     if (!opts || !profile) return;
+    if ((profile.latitude == null) !== (profile.longitude == null)) {
+      setError('Enter both latitude and longitude, or choose the entrance on the map.');
+      return;
+    }
     // clean up: drop empty-label rows, ensure ids
     const papers = opts.papers
       .filter((p) => p.label.trim())
@@ -178,13 +202,13 @@ export default function Settings() {
         <section className="settings-section">
           <div className="settings-section-copy">
             <h2>Secure arrival check-in</h2>
-            <p>Capture this only while physically at the counter. Students must be inside this radius before joining the live line.</p>
+            <p>Set the exact shop entrance once. Students must be inside this radius before joining the live line.</p>
           </div>
           <div className="settings-surface stack">
             <div className="row between">
               <div>
                 <strong>{profile.latitude != null && profile.longitude != null ? 'Counter location captured' : 'Location required before opening'}</strong>
-                <p className="dim" style={{ margin: '4px 0 0' }}>PrintQ checks location once at arrival and does not store the student's coordinates.</p>
+                <p className="dim" style={{ margin: '4px 0 0' }}>PrintQs checks location once at arrival and does not store the student's coordinates.</p>
               </div>
               <span className={`stamp ${profile.latitude != null && profile.longitude != null ? 'green' : 'yellow'}`}>
                 {profile.latitude != null && profile.longitude != null ? 'active' : 'required'}
@@ -198,20 +222,68 @@ export default function Settings() {
                   value={profile.checkInRadiusM}
                   onChange={(event) => setProfile({ ...profile, checkInRadiusM: Number(event.target.value) })}
                 >
-                  <option value={100}>100 m · strict</option>
-                  <option value={150}>150 m · recommended</option>
-                  <option value={200}>200 m · easier indoors</option>
-                  <option value={300}>300 m · large campus block</option>
+                  {![20, 50, 100].includes(profile.checkInRadiusM) && (
+                    <option value={profile.checkInRadiusM}>{profile.checkInRadiusM} m · current setting</option>
+                  )}
+                  <option value={20}>20 m · strict, best near an entrance</option>
+                  <option value={50}>50 m · recommended</option>
+                  <option value={100}>100 m · indoor GPS fallback</option>
                 </select>
+                <span className="field-help">Smaller zones reduce remote check-ins but need a more accurate phone location.</span>
               </div>
               <div className="field grow">
                 <label>Counter coordinates</label>
-                <button className="secondary" disabled={locationBusy} onClick={captureShopLocation}>
-                  {locationBusy ? 'Checking location…' : profile.latitude != null ? 'Update at counter' : 'Set current location'}
-                </button>
+                <div className="location-actions">
+                  <button className="secondary" disabled={locationBusy} onClick={captureShopLocation}>
+                    {locationBusy ? 'Checking location…' : 'Use this device'}
+                  </button>
+                  <button className="ghost" onClick={() => setLocationPickerOpen((open) => !open)}>
+                    {locationPickerOpen ? 'Close map' : 'Choose on map'}
+                  </button>
+                </div>
               </div>
             </div>
             {locationMessage && <p className="dim" style={{ margin: 0 }} role="status">{locationMessage}</p>}
+            {locationPickerOpen && (
+              <ShopLocationPicker
+                latitude={profile.latitude}
+                longitude={profile.longitude}
+                center={locationCenter}
+                onChange={selectShopLocation}
+              />
+            )}
+            <details className="location-coordinates">
+              <summary>Enter coordinates manually</summary>
+              <p className="dim">Optional fallback: paste a latitude and longitude from Google Maps.</p>
+              <div className="form-row">
+                <div className="field grow">
+                  <label htmlFor="shop-latitude">Latitude</label>
+                  <input
+                    id="shop-latitude"
+                    type="number"
+                    min={-90}
+                    max={90}
+                    step="any"
+                    placeholder="e.g. 28.613939"
+                    value={profile.latitude ?? ''}
+                    onChange={(event) => setProfile({ ...profile, latitude: event.target.value === '' ? null : Number(event.target.value) })}
+                  />
+                </div>
+                <div className="field grow">
+                  <label htmlFor="shop-longitude">Longitude</label>
+                  <input
+                    id="shop-longitude"
+                    type="number"
+                    min={-180}
+                    max={180}
+                    step="any"
+                    placeholder="e.g. 77.209021"
+                    value={profile.longitude ?? ''}
+                    onChange={(event) => setProfile({ ...profile, longitude: event.target.value === '' ? null : Number(event.target.value) })}
+                  />
+                </div>
+              </div>
+            </details>
           </div>
         </section>
       )}

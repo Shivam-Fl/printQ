@@ -90,7 +90,7 @@ model Shop {
   /// nearby discovery; students' coordinates are never persisted.
   latitude          Float?
   longitude         Float?
-  checkInRadiusM    Int      @default(150)
+  checkInRadiusM    Int      @default(50)
   locationUpdatedAt DateTime?
   payoutSchedule    PayoutSchedule @default(daily)
   razorpayLinkedAccountId String?  @unique

@@ -298,16 +298,18 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
   if (locationAge < -10_000 || locationAge > MAX_LOCATION_AGE_MS) {
     throw conflict('Your location reading is stale. Check your location again at the shop entrance.');
   }
-  if (arrival.accuracyM > MAX_LOCATION_ACCURACY_M) {
-    throw conflict('Location is not accurate enough. Move near the shop entrance, enable precise location, and retry.');
-  }
-
   const shop = await prisma.shop.findUnique({
     where: { id: job.shopId },
     select: { latitude: true, longitude: true, checkInRadiusM: true },
   });
   if (shop?.latitude == null || shop.longitude == null) {
     throw conflict('This shop has not enabled secure arrival check-in. Show your counter code to staff.');
+  }
+  const requiredAccuracyM = Math.min(MAX_LOCATION_ACCURACY_M, shop.checkInRadiusM);
+  if (arrival.accuracyM > requiredAccuracyM) {
+    throw conflict(
+      `Your phone location is accurate to about ${Math.round(arrival.accuracyM)} m, but this shop uses a ${shop.checkInRadiusM} m check-in zone. Enable precise location near the entrance and retry.`,
+    );
   }
   const arrivalDistanceM = distanceMeters(arrival, {
     latitude: shop.latitude,

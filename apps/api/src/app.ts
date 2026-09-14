@@ -34,7 +34,7 @@ export function createApp(): express.Express {
           scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
           scriptSrcAttr: ["'none'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", 'data:', 'https://cdn.razorpay.com', 'https://*.razorpay.com'],
+          imgSrc: ["'self'", 'data:', 'https://cdn.razorpay.com', 'https://*.razorpay.com', 'https://*.tile.openstreetmap.org'],
           connectSrc: ["'self'", 'https://api.razorpay.com', 'https://*.razorpay.com'],
           frameSrc: ["'self'", 'https://api.razorpay.com', 'https://checkout.razorpay.com', 'https://*.razorpay.com'],
           fontSrc: ["'self'", 'data:'],
