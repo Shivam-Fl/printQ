@@ -55,12 +55,14 @@ services:
       - key: PUBLIC_WEB_URL
         value: https://printqs.com
 
-      # Firebase handles the student's phone OTP. Keep the public web API key
-      # in Render's environment instead of committing one project's value.
+      # Firebase handles the student's phone OTP. Firebase web API keys are
+      # public client identifiers (the browser bundle contains the same key),
+      # so pin the dedicated PrintQs project here to prevent a future Blueprint
+      # sync from ever falling back to Packkar.
       - key: STUDENT_AUTH_PROVIDER
         value: firebase
       - key: FIREBASE_AUTH_API_KEY
-        sync: false
+        value: AIzaSyAPhZhm0j_AkxfoLjqG03vIaQKlnfGGsOU
       # --- required secrets: fill these in the Render dashboard after first deploy ---
       # dummy checkout for now — every job auto-confirms via /api/payments/mock/confirm,
       # no Razorpay account needed yet. Switch to `razorpay` + add RAZORPAY_KEY_ID/

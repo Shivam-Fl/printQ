@@ -115,7 +115,9 @@ Do this before onboarding a real shop and real paying students:
 3. **Upgrade `printq-web` off the free plan** (removes cold starts and the 512MB
    ceiling — more headroom for LibreOffice under real load).
 4. **Wire student phone authentication**: the production flow uses Firebase Phone
-   Auth, matching Packkar. In Render set `STUDENT_AUTH_PROVIDER=firebase` and
+   Auth from the dedicated `printqs-production` project. Do not reuse Packkar's
+   Firebase project, API key, users, or authorized-domain settings. In Render set
+   `STUDENT_AUTH_PROVIDER=firebase` and
    `FIREBASE_AUTH_API_KEY`. In Vercel set `VITE_STUDENT_AUTH_PROVIDER=firebase` plus
    the four public `VITE_FIREBASE_*` web-app values. Add every production frontend
    hostname to Firebase Authentication → Settings → Authorized domains. Keep
