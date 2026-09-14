@@ -32,7 +32,8 @@ import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
-import { getShopEarnings, requestShopPayout } from '../earnings/service.js';
+import { creditPrintEarning, getShopEarnings, requestShopPayout } from '../earnings/service.js';
+import { notifyStudent } from '../../providers/notification/index.js';
 
 export const shopRouter = Router();
 
@@ -421,7 +422,7 @@ shopRouter.get(
     const jobs = await prisma.job.findMany({
       where: {
         shopId,
-        status: { in: ['awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup'] },
+        status: { in: ['awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup'] },
       },
       orderBy: [{ queuedAt: 'asc' }, { createdAt: 'asc' }],
       select: {
@@ -463,11 +464,24 @@ shopRouter.post(
   otpVerifyLimiter,
   validateBody(releaseOtpSchema),
   asyncHandler(async (req, res) => {
-    const { otp, printerId } = req.body as { otp: string; printerId?: string };
-    const result = await releaseByOtp(req.shopUser!.shopId, otp, req.shopUser!.id, printerId);
+    const { otp, printerId, overrideQueue } = req.body as {
+      otp: string;
+      printerId?: string;
+      overrideQueue: boolean;
+    };
+    const result = await releaseByOtp(
+      req.shopUser!.shopId,
+      otp,
+      req.shopUser!.id,
+      printerId,
+      overrideQueue,
+    );
     if (!result.ok) {
       res.status(200).json({
-        requiresManualAssignment: true,
+        requiresManualAssignment: result.requiresManualAssignment,
+        requiresQueueOverride: result.requiresQueueOverride,
+        position: result.position,
+        queueStatus: result.queueStatus,
         jobId: result.job?.id,
         eligiblePrinters: result.eligiblePrinters,
       });
@@ -551,6 +565,34 @@ shopRouter.post(
     await dispatchJob(updated, { type: 'shop', id: req.shopUser!.id });
     publishEvent(`shop:${shopId}`, 'queue:retry_dispatched', { jobId: updated.id, printerId });
     res.json({ ok: true, job: { id: updated.id, status: updated.status, printerId } });
+  }),
+);
+
+/** Confirm hand-finished binding/stapling before telling the student to collect. */
+shopRouter.post(
+  '/jobs/:id/finishing-complete',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!job) throw notFound();
+    if (job.status !== 'finishing') throw conflict('This job is not waiting for manual finishing');
+
+    const updated = await applyTransition(job.id, 'finishing', 'FINISHING_COMPLETED', {
+      type: 'shop',
+      id: req.shopUser!.id,
+    });
+    if (!updated) throw conflict('Job state changed, try again');
+
+    await creditPrintEarning(updated.id);
+    await notifyStudent(job.studentId, {
+      title: 'Print ready ✓',
+      body: 'Printing and finishing are complete. Collect it at the counter.',
+      url: `/jobs/${job.id}`,
+    });
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
+    publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
+    res.json({ ok: true, job: { id: updated.id, status: updated.status } });
   }),
 );
 
@@ -669,7 +711,7 @@ shopRouter.delete(
     const existing = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!existing) throw notFound();
     const activeJobs = await prisma.job.count({
-      where: { assignedPrinterId: existing.id, status: { in: ['queued', 'notified', 'otp_verified', 'printing'] } },
+      where: { assignedPrinterId: existing.id, status: { in: ['queued', 'notified', 'otp_verified', 'printing', 'finishing'] } },
     });
     if (activeJobs > 0) throw conflict('Printer has active jobs — reassign them first');
     await prisma.printer.delete({ where: { id: existing.id } });

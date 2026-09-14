@@ -6,6 +6,7 @@ export const JOB_STATUSES = [
   'notified',
   'otp_verified',
   'printing',
+  'finishing',
   'ready_for_pickup',
   'completed',
   'no_show',

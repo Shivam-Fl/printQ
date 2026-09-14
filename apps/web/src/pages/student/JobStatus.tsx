@@ -16,6 +16,8 @@ interface JobDetail {
   specs: SpecsLite;
   createdAt: string;
   otpCode: string | null;
+  counterCodeAvailable: boolean;
+  counterCodeThreshold: number;
   otpExpiresAt: string | null;
   noShowCount: number;
   paymentStatus: 'pending' | 'paid' | 'refunding' | 'refunded' | 'failed';
@@ -39,10 +41,11 @@ const MILESTONES = [
   { key: 'awaiting_arrival', label: 'Prepared' },
   { key: 'queued', label: 'Checked in' },
   { key: 'printing', label: 'Printing' },
+  { key: 'finishing', label: 'Finishing' },
   { key: 'ready_for_pickup', label: 'Ready to collect' },
   { key: 'completed', label: 'Collected' },
 ];
-const ORDER = ['pending_payment', 'awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'ready_for_pickup', 'completed'];
+const ORDER = ['pending_payment', 'awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup', 'completed'];
 
 function currentLocation(): Promise<GeolocationPosition> {
   if (!navigator.geolocation) {
@@ -101,11 +104,18 @@ export default function JobStatus() {
   useEffect(() => {
     const socket = getStudentSocket();
     if (!socket) return;
-    const onUpdate = (p: { jobId: string; status?: string; position?: number | null; etaMinutes?: number | null; canRequeue?: boolean }) => {
+    const onUpdate = (p: {
+      jobId: string;
+      status?: string;
+      position?: number | null;
+      etaMinutes?: number | null;
+      counterCodeAvailable?: boolean;
+      canRequeue?: boolean;
+    }) => {
       if (p.jobId !== id) return;
       if (p.position !== undefined) setPosition(p.position);
       if (p.etaMinutes !== undefined) setEta(p.etaMinutes);
-      if (p.status) void refresh();
+      if (p.status || p.counterCodeAvailable) void refresh();
     };
     socket.on('job:update', onUpdate);
     return () => {
@@ -216,14 +226,22 @@ export default function JobStatus() {
             )}
           </div>
         )}
-        {job.status === 'queued' && !pendingSlot && (
+        {['queued', 'notified'].includes(job.status) && !pendingSlot && (
           <div className="ticket">
             <div className="eyebrow">live walk-in position</div>
-            <div className="ticket-num">{position ?? '·'}</div>
+            <div className="ticket-num">{position === null ? '·' : `#${position}`}</div>
             <div className="sub">{eta !== null ? `roughly ${eta} min · stay near the counter` : 'position is advisory · stay near the counter'}</div>
           </div>
         )}
-        {otp && ['awaiting_arrival', 'queued', 'notified', 'ready_for_pickup'].includes(job.status) && (
+        {['queued', 'notified'].includes(job.status) && !otp && (
+          <div className="card code-wait-card">
+            <strong>Counter code unlocks automatically near your turn</strong>
+            <p style={{ margin: 0 }}>
+              It will appear here when you enter the first {job.counterCodeThreshold}. Keep watching your live position—there is nothing else to tap.
+            </p>
+          </div>
+        )}
+        {otp && ['queued', 'notified', 'no_show', 'ready_for_pickup'].includes(job.status) && (
           <div className="ticket turn">
             <div className="eyebrow">your permanent counter code</div>
             <div className="otp-band">{otp}</div>
@@ -241,10 +259,17 @@ export default function JobStatus() {
             <div><strong>The printer needs attention</strong><p>The shop has your verified order and can retry it without another OTP. You don’t need to rejoin the queue.</p></div>
           </div>
         )}
+        {job.status === 'finishing' && (
+          <div className="notice setup-notice">
+            <div><strong>Printing is done</strong><p>The shop is completing your requested {job.specs.binding?.replace('_', ' ')} by hand. We’ll notify you as soon as collection is ready.</p></div>
+          </div>
+        )}
         {job.status === 'no_show' && (
           <div className="card stack">
             <strong>Your paid order is still available</strong>
-            <p style={{ margin: 0 }}>This order left the line. Checking in again puts you at the end of the current line; your counter code still identifies the document.</p>
+            <p style={{ margin: 0 }}>{otp
+              ? 'This order left the line. Your permanent counter code still identifies the document, or you can check in again at the end.'
+              : 'This order left the line before its counter code unlocked. Check in again to join at the end of the current line.'}</p>
             <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'I’m here — join live line'}</button>
           </div>
         )}

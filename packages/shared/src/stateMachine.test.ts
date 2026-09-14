@@ -32,6 +32,11 @@ describe('job state machine', () => {
     expect(transition('printing', 'PRINT_FAILED')).toBe('otp_verified');
   });
 
+  it('waits for staff to complete manual finishing before pickup', () => {
+    expect(transition('printing', 'FINISHING_REQUIRED')).toBe('finishing');
+    expect(transition('finishing', 'FINISHING_COMPLETED')).toBe('ready_for_pickup');
+  });
+
   it('allows cancel only before release', () => {
     expect(transition('awaiting_arrival', 'CANCEL')).toBe('cancelled');
     expect(transition('queued', 'CANCEL')).toBe('cancelled');

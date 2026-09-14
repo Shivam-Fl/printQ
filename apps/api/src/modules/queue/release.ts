@@ -5,13 +5,19 @@ import { digestReleaseCode, verifyOtpHash } from '../../lib/otp.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
-import { dispatchJob, emitQueueUpdate, recommendPrinter } from './engine.js';
+import { dispatchJob, emitQueueUpdate, getJobLiveMetrics, recommendPrinter } from './engine.js';
+import { env } from '../../config/env.js';
+import { isCounterCodeAvailable } from './visibility.js';
 
 export interface ReleaseResult {
   ok: boolean;
   job?: Job;
   /** auto-assign found no eligible printer — dashboard must show manual dropdown */
   requiresManualAssignment?: boolean;
+  /** paid order exists, but staff must explicitly confirm serving it out of turn */
+  requiresQueueOverride?: boolean;
+  position?: number | null;
+  queueStatus?: string;
   eligiblePrinters?: { printerId: string; estimatedWaitMinutes: number }[];
 }
 
@@ -25,6 +31,7 @@ export async function releaseByOtp(
   otp: string,
   shopUserId: string,
   manualPrinterId?: string,
+  overrideQueue = false,
 ): Promise<ReleaseResult> {
   const shop = await prisma.shop.findUnique({ where: { id: shopId } });
   if (!shop) throw notFound();
@@ -36,7 +43,7 @@ export async function releaseByOtp(
       releaseCodeDigest: digest,
       paymentStatus: 'paid',
       status: {
-        in: ['awaiting_arrival', 'queued', 'notified', 'no_show', 'otp_verified', 'printing', 'ready_for_pickup'],
+        in: ['awaiting_arrival', 'queued', 'notified', 'no_show', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup'],
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -59,11 +66,28 @@ export async function releaseByOtp(
   if (!matched.releaseCodeDigest && matched.otpExpiresAt && matched.otpExpiresAt.getTime() < Date.now()) {
     throw conflict('This OTP has expired');
   }
-  if (matched.status === 'otp_verified' || matched.status === 'printing') {
+  if (matched.status === 'otp_verified' || matched.status === 'printing' || matched.status === 'finishing') {
     throw conflict('This order has already been released to a printer');
   }
   if (matched.status === 'ready_for_pickup') {
     throw conflict('This order is already printed and ready for pickup');
+  }
+
+  const live = await getJobLiveMetrics(matched.id);
+  const inNormalReleaseWindow = isCounterCodeAvailable(
+    matched.status,
+    live.position,
+    env.NEAR_FRONT_THRESHOLD,
+    matched.nearFrontNotifiedAt !== null,
+  );
+  if (!inNormalReleaseWindow && !overrideQueue) {
+    return {
+      ok: false,
+      requiresQueueOverride: true,
+      position: live.position,
+      queueStatus: matched.status,
+      job: matched,
+    };
   }
 
   const specs = matched.specs as unknown as JobSpecs;

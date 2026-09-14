@@ -162,6 +162,7 @@ export async function cleanupExpiredFiles(): Promise<void> {
               'notified',
               'otp_verified',
               'printing',
+              'finishing',
               'ready_for_pickup',
               'no_show',
               'requeued',

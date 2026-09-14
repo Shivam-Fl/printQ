@@ -1,0 +1,2 @@
+ALTER TABLE "Printer"
+ADD COLUMN "mediaConfig" JSONB NOT NULL DEFAULT '{}';

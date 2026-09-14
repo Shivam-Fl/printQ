@@ -198,6 +198,10 @@ async function main() {
       avgPagesPerMinute: 24,
       status: 'online',
       osPrinterName: 'PrintQ Simulator',
+      mediaConfig: {
+        A4: { paperSize: 'A4', bin: 'Tray 1' },
+        A3: { paperSize: 'A3', bin: null },
+      },
     },
   });
   assert(printerResult.status === 201, 'printer capability profile created');
@@ -266,7 +270,7 @@ async function main() {
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
   assert(prepared.position === null, 'remote upload does not occupy the physical line');
-  assert(/^\d{6}$/.test(prepared.otpCode ?? ''), 'stable counter code appears in the student account');
+  assert(prepared.otpCode === null, 'counter code stays hidden before physical check-in');
   const remoteCheckIn = await request(`/api/jobs/${jobId}/check-in`, {
     method: 'POST',
     token: studentToken,
@@ -280,11 +284,11 @@ async function main() {
   });
   assert(checkedIn.status === 200 && checkedIn.data.job?.status === 'queued', 'arrival check-in joins the live walk-in line');
   const live = await request(`/api/jobs/${jobId}`, { token: studentToken });
-  assert(live.data.job.position === 1 && live.data.job.otpCode === prepared.otpCode, 'check-in assigns a shop-wide position without rotating the code');
+  assert(live.data.job.position === 1 && /^\d{6}$/.test(live.data.job.otpCode ?? ''), 'check-in assigns a shop-wide position and automatically reveals the near-front code');
   const released = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: prepared.otpCode },
+    body: { otp: live.data.job.otpCode },
   });
   assert(released.status === 200 && released.data.ok, 'counter code dispatches the checked-in job');
 
@@ -296,14 +300,27 @@ async function main() {
   const retried = await request(`/api/shop/jobs/${jobId}/retry-print`, { method: 'POST', token: shopToken, body: {} });
   assert(retried.status === 200, 'shop retried without asking the student for another OTP');
 
-  await waitFor('successful retry', async () => {
+  await waitFor('successful retry awaiting manual finishing', async () => {
     const result = await request(`/api/jobs/${jobId}`, { token: studentToken });
-    return result.data.job?.status === 'ready_for_pickup';
+    return result.data.job?.status === 'finishing';
   });
-  assert(true, 'simulator completed the retried print');
+  assert(true, 'simulator completed printing without falsely marking a bound job ready');
   const printedPath = path.join(outputDir, `${jobId}.pdf`);
   const printed = await readFile(printedPath);
   assert(printed.subarray(0, 4).toString() === '%PDF', 'simulated spool output is a valid PDF');
+  const printedPdf = await PDFDocument.load(printed);
+  assert(printedPdf.getPageCount() === 2, 'spooled PDF contains only the student-selected page range');
+  const printOptions = JSON.parse(await readFile(path.join(outputDir, `${jobId}.print-options.json`), 'utf8'));
+  assert(
+    printOptions.copies === 2
+      && printOptions.color === true
+      && printOptions.duplex === true
+      && printOptions.paperSize === 'A4'
+      && printOptions.bin === 'Tray 1',
+    'simulator receives copies, colour, duplex, physical paper size and tray automatically',
+  );
+  const finished = await request(`/api/shop/jobs/${jobId}/finishing-complete`, { method: 'POST', token: shopToken });
+  assert(finished.status === 200 && finished.data.job?.status === 'ready_for_pickup', 'staff confirms manual binding before student pickup notification');
 
   const earned = await waitFor('shop earning credit', async () => {
     const result = await request('/api/shop/earnings', { token: shopToken });
@@ -337,7 +354,7 @@ async function main() {
   const queueFileId = await upload(studentToken, shopSlug, 1, 'arrival-model-test.pdf');
   const missedJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   const waitingJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
-  const missedPrepared = await waitFor('first prepared arrival order', async () => {
+  await waitFor('first prepared arrival order', async () => {
     const result = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
@@ -353,13 +370,13 @@ async function main() {
   assert(skipped.status === 200 && skipped.data.job?.status === 'awaiting_arrival', 'shop removes an absent student without cancelling the paid order');
   const afterSkipA = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
   const afterSkipB = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
-  assert(afterSkipA.data.job.position === null && afterSkipA.data.job.otpCode === missedPrepared.otpCode, 'skipped order keeps its stable counter code outside the line');
+  assert(afterSkipA.data.job.position === null && afterSkipA.data.job.otpCode === beforeSkipA.data.job.otpCode, 'skipped order keeps its stable counter code outside the line');
   assert(afterSkipB.data.job.position === 1, 'remaining physical line closes the gap immediately');
 
   const outOfOrderRelease = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: missedPrepared.otpCode },
+    body: { otp: beforeSkipA.data.job.otpCode },
   });
   assert(outOfOrderRelease.status === 200 && outOfOrderRelease.data.ok, 'counter code prints a skipped order without rejoining or blocking anyone');
   await waitFor('second simulated first-attempt failure', async () => {
@@ -391,7 +408,7 @@ async function main() {
 
   console.log('\nShop closing and existing-order protection');
   const closingJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
-  const closingPrepared = await waitFor('existing paid order before pause', async () => {
+  await waitFor('existing paid order before pause', async () => {
     const result = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
@@ -409,6 +426,7 @@ async function main() {
     body: arrivalProof(),
   });
   assert(honoredCheckIn.status === 200 && honoredCheckIn.data.job?.status === 'queued', 'already-paid order can still check in after new sales pause');
+  const closingLive = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
   const blockedQuote = await request('/api/jobs/quote', {
     method: 'POST',
     token: studentToken,
@@ -418,7 +436,7 @@ async function main() {
   const honoredRelease = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: closingPrepared.otpCode },
+    body: { otp: closingLive.data.job.otpCode },
   });
   assert(honoredRelease.status === 200 && honoredRelease.data.ok, 'existing counter code still prints while new sales are paused');
   await waitFor('paused-storefront simulated jam', async () => {

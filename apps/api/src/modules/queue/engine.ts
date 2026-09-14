@@ -19,6 +19,7 @@ import { refundIfPaid } from '../payments/refund.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { distanceMeters, type Coordinates } from '../../lib/geo.js';
 import { reachablePrinterIds } from '../shops/availability.js';
+import { isCounterCodeAvailable } from './visibility.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
 const MAX_LOCATION_AGE_MS = 90_000;
@@ -156,11 +157,18 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
 
   for (const job of jobs) {
     const live = positionByJob.get(job.id);
+    const counterCodeAvailable = isCounterCodeAvailable(
+      job.status as JobStatus,
+      live?.position ?? null,
+      env.NEAR_FRONT_THRESHOLD,
+      job.nearFrontNotifiedAt !== null,
+    );
     publishEvent(`student:${job.studentId}`, 'job:update', {
       jobId: job.id,
       status: job.status,
       position: live?.position ?? null,
       etaMinutes: live?.etaMinutes ?? null,
+      counterCodeAvailable,
     });
 
     // "almost your turn" — once per job, only while still waiting in line
@@ -177,8 +185,8 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
       await notifyStudent(job.studentId, {
         title: live.position === 1 ? 'You are next at the counter' : 'Your turn is getting close',
         body: live.position === 1
-          ? 'Have your six-digit PrintQ code ready. The counter can serve any present student without blocking the line.'
-          : `${live.position - 1} ${live.position - 1 === 1 ? 'person is' : 'people are'} ahead of you. Stay near the shop.`,
+          ? 'Your six-digit PrintQ code is ready. Show it at the counter.'
+          : `${live.position - 1} ${live.position - 1 === 1 ? 'person is' : 'people are'} ahead of you. Your counter code is now available.`,
         url: `/jobs/${job.id}`,
       });
     }
@@ -355,7 +363,7 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
 
   await notifyStudent(job.studentId, {
     title: 'Checked in at the shop ✓',
-    body: 'You are in the live walk-in line. Keep your six-digit counter code ready.',
+    body: `You are in the live walk-in line. Your counter code will appear automatically when you reach the first ${env.NEAR_FRONT_THRESHOLD}.`,
     url: `/jobs/${job.id}`,
   });
   publishEvent(`shop:${job.shopId}`, 'queue:arrival', { jobId: job.id });
@@ -383,7 +391,9 @@ export async function removeFromLiveQueue(jobId: string, shopId: string, actorId
     {
       queuedAt: null,
       queueLeftAt: new Date(),
-      nearFrontNotifiedAt: null,
+      // Once a student has reached the near-front window, keep their code
+      // available after an absence. The paid job remains directly recoverable
+      // without holding up, or re-entering, the physical line.
       otpHash: null,
       otpCode: null,
       otpExpiresAt: null,

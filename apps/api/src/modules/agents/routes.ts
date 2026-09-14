@@ -13,6 +13,8 @@ import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
 import { notifyShopReopened } from '../shops/availability.js';
 import { creditPrintEarning } from '../earnings/service.js';
+import type { JobSpecs } from '@printq/shared';
+import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
 
 export const agentRouter = Router();
 agentRouter.use(requireAgent);
@@ -134,7 +136,7 @@ agentRouter.post(
     const printer = job.assignedPrinterId
       ? await prisma.printer.findUnique({
           where: { id: job.assignedPrinterId },
-          select: { osPrinterName: true },
+          select: { osPrinterName: true, mediaConfig: true },
         })
       : null;
 
@@ -146,6 +148,7 @@ agentRouter.post(
         printerId: job.assignedPrinterId,
         specs: job.specs,
         osPrinterName: printer?.osPrinterName ?? null,
+        mediaConfig: printer?.mediaConfig ?? {},
       },
     });
   }),
@@ -167,7 +170,9 @@ agentRouter.get(
     });
     if (!job || !job.file.convertedKey) throw notFound();
 
-    const bytes = await storage.get(job.file.convertedKey);
+    const source = await storage.get(job.file.convertedKey);
+    const specs = job.specs as unknown as JobSpecs;
+    const bytes = await preparePrintPdf(source, specs.pageRange);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${job.id}.pdf"`);
     res.send(bytes);
@@ -184,11 +189,28 @@ agentRouter.post(
     if (!job) throw notFound();
     if (job.status !== 'printing') throw conflict('Job is not printing');
 
-    const updated = await applyTransition(job.id, 'printing', 'PRINT_COMPLETED', {
+    const specs = job.specs as unknown as JobSpecs;
+    const needsManualFinishing = Boolean(specs.binding);
+    const updated = await applyTransition(job.id, 'printing', needsManualFinishing ? 'FINISHING_REQUIRED' : 'PRINT_COMPLETED', {
       type: 'agent',
       id: agent.id,
     }, { printError: null });
     if (!updated) throw conflict('Job state changed');
+
+    if (needsManualFinishing) {
+      await notifyStudent(job.studentId, {
+        title: 'Printing complete — finishing in progress',
+        body: 'The shop is completing the requested binding. We’ll tell you when it is ready to collect.',
+        url: `/jobs/${job.id}`,
+      });
+      publishEvent(`student:${job.studentId}`, 'job:update', {
+        jobId: job.id,
+        status: 'finishing',
+      });
+      publishEvent(`shop:${job.shopId}`, 'queue:finishing_required', { jobId: job.id, binding: specs.binding });
+      res.json({ ok: true, finishingRequired: true });
+      return;
+    }
 
     // Printing is the earning event—not upload, payment, queueing or handover.
     // The upsert is idempotent; the maintenance reconciler repairs a rare

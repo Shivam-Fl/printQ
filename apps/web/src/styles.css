@@ -662,6 +662,10 @@ tr:last-child td { border-bottom: none; }
 }
 .shopnav .links a:hover { background: var(--paper); }
 .shopnav .links a.active { background: var(--stamp-soft); color: var(--stamp); }
+.desktop-nav-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--pencil); font-size: .75rem; font-weight: 700; text-decoration: none; }
+.desktop-nav-status > span { width: 8px; height: 8px; border-radius: 50%; background: #c4cad5; }
+.desktop-nav-status.online { color: var(--ok); }
+.desktop-nav-status.online > span { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
 
 /* ---------- stat tiles ---------- */
 

@@ -11,6 +11,7 @@ node_modules/
 # Builds
 dist/
 build/
+apps/agent/release/
 *.tsbuildinfo
 
 # Prisma generated client lives in node_modules; keep migrations tracked

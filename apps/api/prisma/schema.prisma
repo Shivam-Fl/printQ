@@ -14,6 +14,7 @@ enum JobStatus {
   notified
   otp_verified
   printing
+  finishing
   ready_for_pickup
   completed
   no_show
@@ -222,6 +223,8 @@ model Printer {
   /// exact OS/spooler printer name an agent should dispatch to; null = not yet
   /// linked to real hardware (falls back to the manual-assign safety net)
   osPrinterName        String?
+  /// shop paper id -> { paperSize: Windows driver paper size, bin?: tray name }
+  mediaConfig          Json          @default("{}")
   createdAt            DateTime      @default(now())
 
   jobs Job[]

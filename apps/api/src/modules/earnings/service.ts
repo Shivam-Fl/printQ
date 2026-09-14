@@ -13,6 +13,7 @@ const PRE_PRINT_STATUSES = [
   'requeued',
   'otp_verified',
   'printing',
+  'finishing',
 ] as const;
 
 /** Credit the private shop ledger exactly once, after physical printing succeeds. */

@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperational } from '../shops/availability.js';
+import { isCounterCodeAvailable } from '../queue/visibility.js';
 
 export const jobsRouter = Router();
 
@@ -179,6 +180,7 @@ jobsRouter.get(
         scheduledTime: true,
         createdAt: true,
         releaseCodeEncrypted: true,
+        nearFrontNotifiedAt: true,
         otpExpiresAt: true,
         noShowCount: true,
         arrivedAt: true,
@@ -194,8 +196,13 @@ jobsRouter.get(
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, ...safeJob } = job;
-    const codeVisible = !['completed', 'expired', 'cancelled'].includes(job.status);
+    const { releaseCodeEncrypted, shopId, nearFrontNotifiedAt, ...safeJob } = job;
+    const codeVisible = isCounterCodeAvailable(
+      job.status,
+      live.position,
+      env.NEAR_FRONT_THRESHOLD,
+      nearFrontNotifiedAt !== null,
+    );
     const checkInOpensAt = job.mode === 'scheduled' && job.scheduledTime
       ? new Date(job.scheduledTime.getTime() - env.SCHEDULE_LEAD_MINUTES * 60_000).toISOString()
       : null;
@@ -204,6 +211,8 @@ jobsRouter.get(
         ...safeJob,
         ...live,
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
+        counterCodeAvailable: codeVisible,
+        counterCodeThreshold: env.NEAR_FRONT_THRESHOLD,
         canCheckIn: job.paymentStatus === 'paid' && ['awaiting_arrival', 'no_show'].includes(job.status),
         checkInOpensAt,
       },

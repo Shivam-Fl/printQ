@@ -2,15 +2,20 @@
   "name": "@printq/agent",
   "version": "0.1.0",
   "private": true,
+  "author": "PrintQs",
   "type": "module",
-  "description": "PrintQ shop print agent — receives dispatches and prints via the OS spooler",
-  "files": ["dist"],
+  "description": "PrintQs Shop desktop dashboard and Windows printer engine",
+  "main": "dist/desktop.js",
+  "files": ["dist", "desktop.html", "desktopPreload.cjs"],
   "bin": { "printq-agent": "dist/index.js" },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:sim": "tsx watch src/index.ts --simulate",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "desktop": "electron dist/desktop.js",
+    "test:desktop": "node ../../scripts/desktop-smoke.mjs",
+    "package:windows": "npm run build && electron-builder --win nsis --x64 --publish never",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,7 +24,32 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "build": {
+    "appId": "com.printqs.shop",
+    "productName": "PrintQs Shop",
+    "artifactName": "PrintQs-Shop-Setup.${ext}",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "desktop.html", "desktopPreload.cjs", "package.json"],
+    "extraResources": [
+      { "from": "../web/public/icons/icon-512.png", "to": "printqs-icon.png" }
+    ],
+    "asarUnpack": ["node_modules/pdf-to-printer/**/*"],
+    "win": {
+      "target": "nsis",
+      "icon": "../web/public/icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PrintQs Shop"
+    }
   }
 }

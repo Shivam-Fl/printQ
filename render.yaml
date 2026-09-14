@@ -63,12 +63,16 @@ services:
         value: firebase
       - key: FIREBASE_AUTH_API_KEY
         value: AIzaSyAPhZhm0j_AkxfoLjqG03vIaQKlnfGGsOU
-      # --- required secrets: fill these in the Render dashboard after first deploy ---
-      # dummy checkout for now — every job auto-confirms via /api/payments/mock/confirm,
-      # no Razorpay account needed yet. Switch to `razorpay` + add RAZORPAY_KEY_ID/
-      # KEY_SECRET/WEBHOOK_SECRET (sync: false) once you're ready to take real payments.
+      # Razorpay test mode is used for the current production pilot. Secrets stay
+      # in Render and are never committed to this Blueprint.
       - key: PAYMENT_PROVIDER
-        value: mock
+        value: razorpay
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
       - key: PLATFORM_MARKUP_BPS
         value: "2500"
       - key: SHOP_PAYOUT_PROVIDER

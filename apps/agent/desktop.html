@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PrintQs Shop</title>
+    <style>
+      :root { font-family: "Segoe UI", system-ui, sans-serif; color: #172033; background: #f4f6fb; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      main { width: min(520px, 100%); background: white; border: 1px solid #dfe4ef; border-radius: 20px; padding: 28px; box-shadow: 0 12px 36px rgba(31, 47, 90, .08); }
+      header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+      .logo { width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; background: #2242c8; color: white; font-weight: 800; font-size: 21px; }
+      h1 { font-size: 22px; margin: 0; letter-spacing: -.02em; }
+      p { color: #647087; line-height: 1.5; }
+      button { border: 0; border-radius: 11px; padding: 11px 16px; background: #2242c8; color: white; font: inherit; font-weight: 650; cursor: pointer; }
+      .status { padding: 12px 14px; border-radius: 12px; background: #fff5df; color: #7a5000; font-size: 13px; margin: 18px 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div class="logo">Qs</div><div><h1>PrintQs Shop</h1><p style="margin:3px 0 0">Dashboard and printer control</p></div></header>
+      <h2>Dashboard is temporarily unavailable</h2>
+      <p>Check this computer’s internet connection. The printer engine remains in the system tray and will reconnect automatically.</p>
+      <div class="status" id="status">Checking the local printer engine…</div>
+      <button id="retry">Retry dashboard</button>
+    </main>
+    <script>
+      const api = window.printqsDesktop;
+      api.load().then(({ status }) => { document.getElementById('status').textContent = status.detail; });
+      api.onStatus((status) => { document.getElementById('status').textContent = status.detail; });
+      document.getElementById('retry').addEventListener('click', () => api.openDashboard());
+    </script>
+  </body>
+</html>

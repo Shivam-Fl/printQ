@@ -1,4 +1,4 @@
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface DetectedPrinter {
@@ -11,6 +11,8 @@ export interface PrintOptions {
   copies: number;
   duplex: boolean;
   color: boolean;
+  paperSize: string;
+  bin: string | null;
   jobId: string;
 }
 
@@ -55,6 +57,9 @@ export async function sendToPrinter(pdfPath: string, options: PrintOptions): Pro
       copies: options.copies,
       side: options.duplex ? 'duplex' : 'simplex',
       monochrome: !options.color,
+      paperSize: options.paperSize,
+      ...(options.bin ? { bin: options.bin } : {}),
+      scale: 'fit',
     });
     return;
   }
@@ -63,6 +68,11 @@ export async function sendToPrinter(pdfPath: string, options: PrintOptions): Pro
   if (outputDir) {
     await mkdir(outputDir, { recursive: true });
     await copyFile(pdfPath, path.join(outputDir, `${options.jobId}.pdf`));
+    await writeFile(
+      path.join(outputDir, `${options.jobId}.print-options.json`),
+      JSON.stringify(options, null, 2),
+      'utf8',
+    );
   }
 
   const delayMs = Math.max(0, Math.min(30_000, Number(process.env.PRINTQ_SIM_DELAY_MS ?? 800)));

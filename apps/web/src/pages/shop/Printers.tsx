@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
@@ -13,6 +13,12 @@ interface Printer {
   avgPagesPerMinute: number;
   status: 'online' | 'offline' | 'jammed';
   osPrinterName: string | null;
+  mediaConfig: Record<string, DriverMedia>;
+}
+
+interface DriverMedia {
+  paperSize: string;
+  bin?: string | null;
 }
 
 interface DetectedPrinter {
@@ -57,6 +63,8 @@ export default function Printers() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [showForm, setShowForm] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+  const [editingMedia, setEditingMedia] = useState<string | null>(null);
+  const [mediaDraft, setMediaDraft] = useState<Record<string, DriverMedia>>({});
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
@@ -121,13 +129,15 @@ export default function Printers() {
 
   async function addDetected(d: DetectedPrinter) {
     try {
+      const paperSizesLoaded = guessPaperSizes(d.paperSizes);
       await api('/api/shop/printers', {
         method: 'POST',
         role: 'shop',
         body: {
           label: d.name,
           osPrinterName: d.name,
-          paperSizesLoaded: guessPaperSizes(d.paperSizes),
+          paperSizesLoaded,
+          mediaConfig: Object.fromEntries(paperSizesLoaded.map((size) => [size, { paperSize: size, bin: null }])),
           colorSupport: false,
           finishingOptions: [],
           avgPagesPerMinute: 15,
@@ -141,7 +151,14 @@ export default function Printers() {
 
   async function addPrinter() {
     try {
-      await api('/api/shop/printers', { method: 'POST', role: 'shop', body: form });
+      await api('/api/shop/printers', {
+        method: 'POST',
+        role: 'shop',
+        body: {
+          ...form,
+          mediaConfig: Object.fromEntries(form.paperSizesLoaded.map((size) => [size, { paperSize: size, bin: null }])),
+        },
+      });
       setForm(EMPTY_FORM);
       setShowForm(false);
       await refresh();
@@ -166,6 +183,35 @@ export default function Printers() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');
+    }
+  }
+
+  function beginMediaEdit(printer: Printer) {
+    setEditingMedia(printer.id);
+    setMediaDraft(Object.fromEntries(printer.paperSizesLoaded.map((paper) => [
+      paper,
+      printer.mediaConfig?.[paper] ?? { paperSize: paper, bin: null },
+    ])));
+  }
+
+  function updateMedia(paper: string, patch: Partial<DriverMedia>) {
+    setMediaDraft((current) => ({
+      ...current,
+      [paper]: { ...(current[paper] ?? { paperSize: paper, bin: null }), ...patch },
+    }));
+  }
+
+  async function saveMedia(id: string) {
+    try {
+      await api(`/api/shop/printers/${id}`, {
+        method: 'PATCH',
+        role: 'shop',
+        body: { mediaConfig: mediaDraft },
+      });
+      setEditingMedia(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save paper and tray mapping');
     }
   }
 
@@ -300,48 +346,80 @@ export default function Printers() {
       <div className="table-shell printer-table">
         <table>
           <thead>
-            <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Status</th></tr>
+            <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Driver media</th><th>Status</th></tr>
           </thead>
           <tbody>
             {printers.length === 0 && (
-              <tr><td colSpan={7}><div className="table-empty"><strong>No printers configured</strong><span>Add a detected printer above to start taking orders.</span></div></td></tr>
+              <tr><td colSpan={8}><div className="table-empty"><strong>No printers configured</strong><span>Add a detected printer above to start taking orders.</span></div></td></tr>
             )}
             {printers.map((p) => (
-              <tr key={p.id}>
-                <td>{p.label}</td>
-                <td className="mono">{p.paperSizesLoaded.join(', ')}</td>
-                <td>{p.colorSupport ? 'Yes' : 'B/W'}</td>
-                <td>{p.finishingOptions.map((f) => f.replace('_', ' ')).join(', ') || '—'}</td>
-                <td className="mono">{p.avgPagesPerMinute} ppm</td>
-                <td>
-                  {p.osPrinterName ? (
-                    <span className="mono">{p.osPrinterName}</span>
-                  ) : linking === p.id ? (
-                    <select
-                      autoFocus
-                      value=""
-                      onChange={(e) => e.target.value && void linkPrinter(p.id, e.target.value)}
-                      onBlur={() => setLinking(null)}
-                    >
-                      <option value="">Pick a detected printer…</option>
-                      {unlinkedDetected.map((d) => (
-                        <option key={d.name} value={d.name}>{d.name}</option>
-                      ))}
+              <Fragment key={p.id}>
+                <tr>
+                  <td>{p.label}</td>
+                  <td className="mono">{p.paperSizesLoaded.join(', ')}</td>
+                  <td>{p.colorSupport ? 'Yes' : 'B/W'}</td>
+                  <td>{p.finishingOptions.map((f) => f.replace('_', ' ')).join(', ') || 'Manual'}</td>
+                  <td className="mono">{p.avgPagesPerMinute} ppm</td>
+                  <td>
+                    {p.osPrinterName ? (
+                      <span className="mono">{p.osPrinterName}</span>
+                    ) : linking === p.id ? (
+                      <select
+                        autoFocus
+                        value=""
+                        onChange={(e) => e.target.value && void linkPrinter(p.id, e.target.value)}
+                        onBlur={() => setLinking(null)}
+                      >
+                        <option value="">Pick a detected printer…</option>
+                        {unlinkedDetected.map((d) => (
+                          <option key={d.name} value={d.name}>{d.name}</option>
+                        ))}
+                      </select>
+                    ) : unlinkedDetected.length > 0 ? (
+                      <button className="ghost small" onClick={() => setLinking(p.id)}>Link…</button>
+                    ) : (
+                      <span className="stamp red">Not linked</span>
+                    )}
+                  </td>
+                  <td><button className="ghost small" onClick={() => beginMediaEdit(p)}>Configure</button></td>
+                  <td>
+                    <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
+                      <option value="online">online</option>
+                      <option value="offline">offline</option>
+                      <option value="jammed">jammed</option>
                     </select>
-                  ) : unlinkedDetected.length > 0 ? (
-                    <button className="ghost small" onClick={() => setLinking(p.id)}>Link…</button>
-                  ) : (
-                    <span className="stamp red">Not linked</span>
-                  )}
-                </td>
-                <td>
-                  <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
-                    <option value="online">online</option>
-                    <option value="offline">offline</option>
-                    <option value="jammed">jammed</option>
-                  </select>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+                {editingMedia === p.id && (
+                  <tr className="media-config-row">
+                    <td colSpan={8}>
+                      <div className="manual-picker">
+                        <strong>Windows paper and tray mapping</strong>
+                        <p>Map each shop paper option to the exact size and optional tray name shown by this printer’s Windows driver.</p>
+                        <div className="stack">
+                          {p.paperSizesLoaded.map((paper) => (
+                            <div className="form-row align-end" key={paper}>
+                              <div className="field" style={{ minWidth: 130 }}><label>Shop option</label><strong>{paper}</strong></div>
+                              <div className="field grow">
+                                <label htmlFor={`paper-size-${p.id}-${paper}`}>Driver paper size</label>
+                                <input id={`paper-size-${p.id}-${paper}`} value={mediaDraft[paper]?.paperSize ?? paper} onChange={(e) => updateMedia(paper, { paperSize: e.target.value })} placeholder="A4" />
+                              </div>
+                              <div className="field grow">
+                                <label htmlFor={`paper-bin-${p.id}-${paper}`}>Tray / bin (optional)</label>
+                                <input id={`paper-bin-${p.id}-${paper}`} value={mediaDraft[paper]?.bin ?? ''} onChange={(e) => updateMedia(paper, { bin: e.target.value || null })} placeholder="Tray 2" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="row">
+                          <button disabled={Object.values(mediaDraft).some((media) => !media.paperSize.trim())} onClick={() => saveMedia(p.id)}>Save mapping</button>
+                          <button className="ghost" onClick={() => setEditingMedia(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

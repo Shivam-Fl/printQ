@@ -1,0 +1,23 @@
+name: Windows shop app build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['shop-v*']
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w packages/shared
+      - run: npm run package:windows -w apps/agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PrintQs-Shop-Windows
+          path: apps/agent/release/PrintQs-Shop-Setup.exe

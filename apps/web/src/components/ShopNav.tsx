@@ -10,7 +10,7 @@ const LINKS = [
   { to: '/dashboard/earnings', label: 'Earnings', ownerOnly: true },
   { to: '/dashboard/history', label: 'History' },
   { to: '/dashboard/printers', label: 'Printers' },
-  { to: '/dashboard/agents', label: 'Agents' },
+  { to: '/dashboard/agents', label: 'Computers' },
   { to: '/dashboard/settings', label: 'Settings' },
 ];
 
@@ -19,6 +19,7 @@ export default function ShopNav() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [role, setRole] = useState<'owner' | 'staff' | null>(getShopRole());
+  const [desktopStatus, setDesktopStatus] = useState<PrintQsDesktopStatus | null>(null);
 
   useEffect(() => {
     if (!getToken('shop')) {
@@ -33,6 +34,22 @@ export default function ShopNav() {
       })
       .catch(() => navigate('/dashboard/login'));
   }, [navigate]);
+
+  useEffect(() => {
+    const desktop = window.printqsDesktop;
+    if (!desktop) return;
+    let mounted = true;
+    void desktop.load().then((result) => {
+      if (mounted) setDesktopStatus(result.status);
+    }).catch(() => undefined);
+    const unsubscribe = desktop.onStatus((status) => {
+      if (mounted) setDesktopStatus(status);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   function signOut() {
     clearToken('shop');
@@ -53,6 +70,11 @@ export default function ShopNav() {
           </NavLink>
         ))}
       </div>
+      {desktopStatus && (
+        <NavLink to="/dashboard/agents" className={`desktop-nav-status ${desktopStatus.state === 'online' ? 'online' : ''}`}>
+          <span />{desktopStatus.state === 'online' ? 'Printers ready' : 'Printer setup'}
+        </NavLink>
+      )}
       <button className="ghost small" onClick={signOut}>Sign out</button>
     </div>
   );

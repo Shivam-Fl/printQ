@@ -37,7 +37,12 @@ const HEARTBEAT_MS = 30_000;
 interface DispatchPayload {
   jobId: string;
   printerId: string;
-  specs: { copies: number; duplex: boolean; color: boolean };
+  specs: { copies: number; duplex: boolean; color: boolean; paperSize: string };
+}
+
+interface DriverMedia {
+  paperSize: string;
+  bin?: string | null;
 }
 
 /** First run: prompt once for the token and remember it; every run after, just read it. */
@@ -101,8 +106,11 @@ async function printJob(job: DispatchPayload): Promise<void> {
     console.log(`Job ${job.jobId}: not claimed (${claim.status})`);
     return;
   }
-  const { job: claimed } = (await claim.json()) as { job: { osPrinterName: string | null } };
+  const { job: claimed } = (await claim.json()) as {
+    job: { osPrinterName: string | null; mediaConfig: Record<string, DriverMedia> | null };
+  };
   const osPrinter = claimed.osPrinterName;
+  const media = claimed.mediaConfig?.[job.specs.paperSize] ?? { paperSize: job.specs.paperSize };
 
   if (!osPrinter) {
     console.warn(
@@ -128,6 +136,8 @@ async function printJob(job: DispatchPayload): Promise<void> {
       copies: job.specs.copies,
       duplex: job.specs.duplex,
       color: job.specs.color,
+      paperSize: media.paperSize,
+      bin: media.bin ?? null,
       jobId: job.jobId,
     });
 

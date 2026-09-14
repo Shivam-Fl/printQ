@@ -11,6 +11,7 @@ export const STATUS: Record<string, StatusMeta> = {
   notified: { label: 'your turn', tone: 'yellow', active: true },
   otp_verified: { label: 'sending to printer', tone: 'blue', active: true },
   printing: { label: 'printing', tone: 'blue', active: true },
+  finishing: { label: 'finishing', tone: 'blue', active: true },
   ready_for_pickup: { label: 'ready to collect', tone: 'green', active: true },
   completed: { label: 'completed', tone: 'green', active: false },
   no_show: { label: 'missed turn', tone: 'red', active: true },

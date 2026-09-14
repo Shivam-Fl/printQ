@@ -41,6 +41,13 @@ interface Printer {
 interface ManualAssign {
   jobId?: string;
   eligiblePrinters: { printerId: string; estimatedWaitMinutes: number }[];
+  overrideQueue: boolean;
+}
+
+interface QueueOverride {
+  jobId?: string;
+  position: number | null;
+  queueStatus: string;
 }
 
 interface SetupStatus {
@@ -59,6 +66,7 @@ export default function Dashboard() {
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [otp, setOtp] = useState('');
   const [manual, setManual] = useState<ManualAssign | null>(null);
+  const [queueOverride, setQueueOverride] = useState<QueueOverride | null>(null);
   const [manualPrinter, setManualPrinter] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -115,6 +123,7 @@ export default function Dashboard() {
     };
     socket.on('queue:update', onAny);
     socket.on('queue:job_printing', onAny);
+    socket.on('queue:finishing_required', onAny);
     socket.on('queue:job_ready', onAny);
     socket.on('queue:manual_assign_needed', onAny);
     socket.on('agent:offline', onAny);
@@ -123,6 +132,7 @@ export default function Dashboard() {
     return () => {
       socket.off('queue:update', onAny);
       socket.off('queue:job_printing', onAny);
+      socket.off('queue:finishing_required', onAny);
       socket.off('queue:job_ready', onAny);
       socket.off('queue:manual_assign_needed', onAny);
       socket.off('agent:offline', onAny);
@@ -131,28 +141,44 @@ export default function Dashboard() {
     };
   }, [refresh]);
 
-  async function release(printerId?: string) {
+  async function release(printerId?: string, overrideQueue = false) {
     setError('');
     setMessage('');
     try {
       const res = await api<{
         ok?: boolean;
         requiresManualAssignment?: boolean;
+        requiresQueueOverride?: boolean;
         jobId?: string;
+        position?: number | null;
+        queueStatus?: string;
         eligiblePrinters?: { printerId: string; estimatedWaitMinutes: number }[];
       }>('/api/shop/release', {
         method: 'POST',
         role: 'shop',
-        body: printerId ? { otp, printerId } : { otp },
+        body: {
+          otp,
+          ...(printerId ? { printerId } : {}),
+          overrideQueue,
+        },
       });
+      if (res.requiresQueueOverride) {
+        setQueueOverride({
+          jobId: res.jobId,
+          position: res.position ?? null,
+          queueStatus: res.queueStatus ?? 'outside_queue',
+        });
+        return;
+      }
       if (res.requiresManualAssignment) {
-        setManual({ jobId: res.jobId, eligiblePrinters: res.eligiblePrinters ?? [] });
+        setManual({ jobId: res.jobId, eligiblePrinters: res.eligiblePrinters ?? [], overrideQueue });
         setManualPrinter(res.eligiblePrinters?.[0]?.printerId ?? '');
         return;
       }
       setMessage('Sent to printer ✓');
       setOtp('');
       setManual(null);
+      setQueueOverride(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Release failed');
@@ -179,6 +205,18 @@ export default function Dashboard() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not retry this print');
+    }
+  }
+
+  async function completeFinishing(id: string) {
+    setError('');
+    setMessage('');
+    try {
+      await api(`/api/shop/jobs/${id}/finishing-complete`, { method: 'POST', role: 'shop' });
+      setMessage('Finishing complete — student notified ✓');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not complete finishing');
     }
   }
 
@@ -211,7 +249,7 @@ export default function Dashboard() {
 
   const prepared = jobs.filter((j) => j.status === 'awaiting_arrival');
   const waiting = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
-  const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'ready_for_pickup'].includes(j.status));
+  const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'finishing', 'ready_for_pickup'].includes(j.status));
 
   return (
     <div className="page wide shop-page">
@@ -253,7 +291,7 @@ export default function Dashboard() {
           <span className="eyebrow-label">Counter action</span>
           <h2>Find order by counter code</h2>
           <p>
-            Enter the student’s six-digit code to find and print the correct paid document. Their advisory queue position never blocks this action.
+            Enter the student’s six-digit code to find the correct paid document. Codes unlock automatically near the front; staff can explicitly override the advisory line when a real counter situation requires it.
           </p>
         </div>
         <div className="release-controls">
@@ -265,7 +303,11 @@ export default function Dashboard() {
             placeholder="······"
             aria-label="Student's counter code"
             value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+            onChange={(e) => {
+              setOtp(e.target.value.replace(/\D/g, ''));
+              setQueueOverride(null);
+              setManual(null);
+            }}
             onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && void release()}
           />
           <button disabled={otp.length !== 6} onClick={() => release()}>
@@ -273,6 +315,22 @@ export default function Dashboard() {
           </button>
           {message && <span className="stamp green">{message}</span>}
         </div>
+        {queueOverride && (
+          <div className="manual-picker queue-override-panel" role="alert">
+            <strong>This student is not currently called</strong>
+            <p>
+              {queueOverride.position !== null
+                ? `Their live position is #${queueOverride.position}. Printing now will serve them out of turn.`
+                : queueOverride.queueStatus === 'awaiting_arrival'
+                  ? 'They have not checked in to the physical line.'
+                  : 'They are not currently in the live line.'}
+            </p>
+            <div className="row">
+              <button onClick={() => release(undefined, true)}>Print anyway</button>
+              <button className="ghost" onClick={() => setQueueOverride(null)}>Keep queue order</button>
+            </div>
+          </div>
+        )}
         {manual && (
           <div className="manual-picker">
             <strong>Choose a compatible printer</strong>
@@ -290,7 +348,7 @@ export default function Dashboard() {
                   </option>
                 ))}
               </select>
-              <button disabled={!manualPrinter} onClick={() => release(manualPrinter)}>
+              <button disabled={!manualPrinter} onClick={() => release(manualPrinter, manual.overrideQueue)}>
                 Confirm &amp; print
               </button>
               <button className="ghost" onClick={() => setManual(null)}>
@@ -393,8 +451,8 @@ export default function Dashboard() {
                 </td>
                 <td>{printerLabel(j.assignedPrinterId)}</td>
                 <td>
-                  <span className={`stamp ${j.status === 'ready_for_pickup' ? 'green' : 'blue'}`}>
-                    {j.printError ? 'Needs attention' : j.status.replace(/_/g, ' ')}
+                  <span className={`stamp ${j.status === 'ready_for_pickup' ? 'green' : j.status === 'finishing' ? 'yellow' : 'blue'}`}>
+                    {j.printError ? 'Needs attention' : j.status === 'finishing' ? 'manual finishing' : j.status.replace(/_/g, ' ')}
                   </span>
                   {j.printError && <div className="print-error-detail">{j.printError}</div>}
                 </td>
@@ -402,6 +460,11 @@ export default function Dashboard() {
                   {j.status === 'otp_verified' && j.printError && (
                     <button className="small" onClick={() => retryPrint(j.id)}>
                       Retry print
+                    </button>
+                  )}
+                  {j.status === 'finishing' && (
+                    <button className="small" onClick={() => completeFinishing(j.id)}>
+                      Mark {j.specs.binding?.replace('_', ' ') ?? 'finishing'} complete
                     </button>
                   )}
                   {j.status === 'ready_for_pickup' && (

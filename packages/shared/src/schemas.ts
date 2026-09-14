@@ -67,6 +67,17 @@ export const printerInputSchema = z.object({
   status: z.enum(PRINTER_STATUSES).default('online'),
   /** exact OS/spooler printer name to dispatch to — set via the detected-printer picker */
   osPrinterName: z.string().trim().min(1).max(200).nullable().optional(),
+  /**
+   * Per shop-paper mapping to the Windows driver's physical paper size and
+   * optional tray/bin name. Example: `college` -> A4 from "Tray 2".
+   */
+  mediaConfig: z.record(
+    optionId,
+    z.object({
+      paperSize: z.string().trim().min(1).max(80),
+      bin: z.string().trim().min(1).max(120).nullable().optional(),
+    }),
+  ).optional(),
 });
 export type PrinterInput = z.infer<typeof printerInputSchema>;
 
@@ -112,6 +123,8 @@ export const releaseOtpSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
   /** manual-mode: shop picks the printer; auto-mode: omitted */
   printerId: z.string().uuid().optional(),
+  /** Explicit staff confirmation for a paid order outside the near-front window. */
+  overrideQueue: z.boolean().default(false),
 });
 
 export const couponCodeSchema = z.string().trim().min(1).max(40);

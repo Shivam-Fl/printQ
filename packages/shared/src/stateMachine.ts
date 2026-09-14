@@ -13,6 +13,8 @@ export const JOB_EVENTS = [
   'REJOINED',
   'PRINT_STARTED',
   'PRINT_COMPLETED',
+  'FINISHING_REQUIRED',
+  'FINISHING_COMPLETED',
   'PRINT_FAILED',
   'HANDED_OVER',
   'CANCEL',
@@ -43,7 +45,12 @@ const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
   requeued: { REJOINED: 'queued' },
   otp_verified: { PRINT_STARTED: 'printing' },
   // PRINT_FAILED returns to otp_verified so the shop can re-dispatch without a new OTP
-  printing: { PRINT_COMPLETED: 'ready_for_pickup', PRINT_FAILED: 'otp_verified' },
+  printing: {
+    PRINT_COMPLETED: 'ready_for_pickup',
+    FINISHING_REQUIRED: 'finishing',
+    PRINT_FAILED: 'otp_verified',
+  },
+  finishing: { FINISHING_COMPLETED: 'ready_for_pickup' },
   ready_for_pickup: { HANDED_OVER: 'completed' },
   completed: {},
   expired: {},
