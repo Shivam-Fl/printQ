@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 interface ShopLocationPickerProps {
   latitude: number | null;
   longitude: number | null;
-  center: { latitude: number; longitude: number } | null;
+  center: { latitude: number; longitude: number; zoom?: number } | null;
   onChange: (latitude: number, longitude: number) => void;
 }
 
@@ -37,7 +37,7 @@ export default function ShopLocationPicker({
     const map = L.map(containerRef.current, {
       zoomControl: true,
       attributionControl: true,
-    }).setView(initial, latitude != null ? 18 : center ? 16 : 5);
+    }).setView(initial, latitude != null ? 18 : center?.zoom ?? 16);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -63,6 +63,11 @@ export default function ShopLocationPicker({
     // The opening coordinates intentionally define the initial viewport only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!center || !mapRef.current) return;
+    mapRef.current.setView([center.latitude, center.longitude], center.zoom ?? 16);
+  }, [center]);
 
   useEffect(() => {
     const map = mapRef.current;

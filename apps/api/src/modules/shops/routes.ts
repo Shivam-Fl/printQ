@@ -10,7 +10,7 @@ import {
   type PriceBreakdown,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
+import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
 import { otpVerifyLimiter } from '../../middleware/rateLimit.js';
@@ -34,6 +34,7 @@ import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { creditPrintEarning, getShopEarnings, requestShopPayout } from '../earnings/service.js';
 import { notifyStudent } from '../../providers/notification/index.js';
+import { searchIndianLocations } from '../../providers/geocoding/index.js';
 
 export const shopRouter = Router();
 
@@ -68,6 +69,21 @@ shopRouter.get(
       shop: { ...shop, printOptions: shopOptions(shop) },
       user: { role: req.shopUser!.role },
     });
+  }),
+);
+
+/** One-time shop setup search; server-side so provider throttling/caching is centralized. */
+shopRouter.get(
+  '/location-search',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
+    if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
+    try {
+      res.json({ results: await searchIndianLocations(query) });
+    } catch {
+      throw new HttpError(503, 'Address search is temporarily unavailable. Use device location or manual coordinates.');
+    }
   }),
 );
 

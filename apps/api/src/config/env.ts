@@ -20,6 +20,7 @@ const envSchema = z.object({
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)),
   PUBLIC_WEB_URL: z.string().url().default('http://localhost:5173'),
+  GEOCODING_BASE_URL: z.string().url().default('https://nominatim.openstreetmap.org'),
 
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),

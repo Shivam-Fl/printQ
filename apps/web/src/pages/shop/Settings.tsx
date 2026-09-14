@@ -30,6 +30,12 @@ interface ShopProfile {
   checkInRadiusM: number;
   locationUpdatedAt: string | null;
 }
+interface LocationSearchResult {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+}
 
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || `opt-${Date.now()}`;
@@ -47,7 +53,10 @@ export default function Settings() {
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationMessage, setLocationMessage] = useState('');
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [locationCenter, setLocationCenter] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationCenter, setLocationCenter] = useState<{ latitude: number; longitude: number; zoom?: number } | null>(null);
+  const [locationQuery, setLocationQuery] = useState('');
+  const [locationSearchBusy, setLocationSearchBusy] = useState(false);
+  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
 
   useEffect(() => {
     if (!getToken('shop')) {
@@ -67,6 +76,7 @@ export default function Settings() {
           checkInRadiusM: r.shop.checkInRadiusM,
           locationUpdatedAt: r.shop.locationUpdatedAt,
         });
+        setLocationQuery([r.shop.address, r.shop.campusName].filter(Boolean).join(', '));
         setAutoAssign(r.shop.autoAssignEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
@@ -95,34 +105,80 @@ export default function Settings() {
     setLocationBusy(true);
     setLocationMessage('');
     setError('');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = Number(position.coords.latitude.toFixed(6));
-        const longitude = Number(position.coords.longitude.toFixed(6));
-        setLocationCenter({ latitude, longitude });
-        if (position.coords.accuracy > 100) {
-          setLocationPickerOpen(true);
-          setLocationMessage(`This device is only accurate to about ${Math.round(position.coords.accuracy)} m. It has centred the map nearby—click the exact shop entrance.`);
-        } else {
-          setProfile((current) => current ? {
-            ...current,
-            latitude,
-            longitude,
-            locationUpdatedAt: new Date(position.timestamp).toISOString(),
-          } : current);
-          setLocationMessage(`Location captured with about ${Math.round(position.coords.accuracy)} m accuracy. Save changes to activate it.`);
-        }
-        setLocationBusy(false);
-      },
-      (reason) => {
+    const applyPosition = (position: GeolocationPosition, approximate: boolean) => {
+      const latitude = Number(position.coords.latitude.toFixed(6));
+      const longitude = Number(position.coords.longitude.toFixed(6));
+      const accuracy = position.coords.accuracy;
+      const zoom = accuracy <= 250 ? 17 : accuracy <= 2_000 ? 14 : accuracy <= 10_000 ? 12 : 10;
+      setLocationCenter({ latitude, longitude, zoom });
+      if (accuracy > 100 || approximate) {
         setLocationPickerOpen(true);
-        setLocationMessage(reason.code === reason.PERMISSION_DENIED
-          ? 'Location access is off. You can still set the exact entrance safely on the map.'
-          : 'This device could not provide a reliable location. Place the exact entrance pin on the map instead.');
-        setLocationBusy(false);
+        setLocationMessage(`The PC found your area with about ${Math.round(accuracy)} m accuracy. Click the exact shop entrance on the map.`);
+      } else {
+        setProfile((current) => current ? {
+          ...current,
+          latitude,
+          longitude,
+          locationUpdatedAt: new Date(position.timestamp).toISOString(),
+        } : current);
+        setLocationMessage(`Location captured with about ${Math.round(accuracy)} m accuracy. Save changes to activate it.`);
+      }
+      setLocationBusy(false);
+    };
+    const openSearchFallback = (permissionDenied: boolean) => {
+      setLocationPickerOpen(true);
+      setLocationMessage(permissionDenied
+        ? 'Location access is off. Search your college or address below, then click the exact entrance.'
+        : 'The PC could not provide a location. Search your college or address below, then click the exact entrance.');
+      setLocationBusy(false);
+    };
+    navigator.geolocation.getCurrentPosition(
+      (position) => applyPosition(position, false),
+      (reason) => {
+        if (reason.code === reason.PERMISSION_DENIED) {
+          openSearchFallback(true);
+          return;
+        }
+        setLocationMessage('Precise location was unavailable. Trying the PC’s approximate network location…');
+        navigator.geolocation.getCurrentPosition(
+          (position) => applyPosition(position, true),
+          () => openSearchFallback(false),
+          { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+        );
       },
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
     );
+  }
+
+  async function searchLocation() {
+    const query = locationQuery.trim();
+    if (query.length < 3) {
+      setLocationMessage('Enter a college, shop address, area or city to search.');
+      return;
+    }
+    setLocationSearchBusy(true);
+    setLocationResults([]);
+    setError('');
+    try {
+      const response = await api<{ results: LocationSearchResult[] }>(
+        `/api/shop/location-search?q=${encodeURIComponent(query)}`,
+        { role: 'shop' },
+      );
+      setLocationResults(response.results);
+      setLocationMessage(response.results.length
+        ? 'Select the closest result, then click the exact shop entrance on the map.'
+        : 'No matching place found. Add the city or PIN code and search again.');
+    } catch (err) {
+      setLocationMessage(err instanceof Error ? err.message : 'Could not search this address.');
+    } finally {
+      setLocationSearchBusy(false);
+    }
+  }
+
+  function chooseLocationResult(result: LocationSearchResult) {
+    setLocationCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 17 });
+    setLocationResults([]);
+    setLocationMessage(`Showing ${result.label}. Now click the exact shop entrance.`);
   }
 
   function selectShopLocation(latitude: number, longitude: number) {
@@ -245,12 +301,41 @@ export default function Settings() {
             </div>
             {locationMessage && <p className="dim" style={{ margin: 0 }} role="status">{locationMessage}</p>}
             {locationPickerOpen && (
-              <ShopLocationPicker
-                latitude={profile.latitude}
-                longitude={profile.longitude}
-                center={locationCenter}
-                onChange={selectShopLocation}
-              />
+              <>
+                <form className="location-search" onSubmit={(event) => { event.preventDefault(); void searchLocation(); }}>
+                  <div className="field grow">
+                    <label htmlFor="location-search">Find your shop area</label>
+                    <input
+                      id="location-search"
+                      type="text"
+                      value={locationQuery}
+                      onChange={(event) => setLocationQuery(event.target.value)}
+                      placeholder="College, shop address, area or PIN code"
+                      autoComplete="street-address"
+                    />
+                  </div>
+                  <button type="submit" disabled={locationSearchBusy || locationQuery.trim().length < 3}>
+                    {locationSearchBusy ? 'Searching…' : 'Find address'}
+                  </button>
+                </form>
+                {locationResults.length > 0 && (
+                  <div className="location-search-results" role="list" aria-label="Address matches">
+                    {locationResults.map((result) => (
+                      <button type="button" key={result.id} onClick={() => chooseLocationResult(result)} role="listitem">
+                        <span className="location-result-pin">PIN</span>
+                        <span>{result.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <ShopLocationPicker
+                  latitude={profile.latitude}
+                  longitude={profile.longitude}
+                  center={locationCenter}
+                  onChange={selectShopLocation}
+                />
+                <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
+              </>
             )}
             <details className="location-coordinates">
               <summary>Enter coordinates manually</summary>
