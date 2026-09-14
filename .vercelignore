@@ -13,3 +13,4 @@ logs
 **/*.log
 coverage
 **/dist
+apps/agent/release
