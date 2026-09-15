@@ -114,15 +114,26 @@ Do this before onboarding a real shop and real paying students:
    the free tier's single-instance constraint anyway.
 3. **Upgrade `printq-web` off the free plan** (removes cold starts and the 512MB
    ceiling — more headroom for LibreOffice under real load).
-4. **Wire student phone authentication**: the production flow uses Firebase Phone
+4. **Wire student authentication**: the pilot production flow uses Firebase Phone
    Auth from the dedicated `printqs-production` project. Do not reuse Packkar's
    Firebase project, API key, users, or authorized-domain settings. In Render set
-   `STUDENT_AUTH_PROVIDER=firebase` and
-   `FIREBASE_AUTH_API_KEY`. In Vercel set `VITE_STUDENT_AUTH_PROVIDER=firebase` plus
-   the four public `VITE_FIREBASE_*` web-app values. Add every production frontend
-   hostname to Firebase Authentication → Settings → Authorized domains. Keep
-   `STUDENT_AUTH_PROVIDER=local` only for local development; that fallback can use
-   `SMS_PROVIDER=msg91` or the API console.
+   `STUDENT_AUTH_PROVIDER=firebase` and `FIREBASE_AUTH_API_KEY`. In Vercel set
+   `VITE_STUDENT_AUTH_PROVIDER=firebase` plus the four public `VITE_FIREBASE_*`
+   web-app values. Add every production frontend hostname to Firebase Authentication
+   → Settings → Authorized domains, and use an India-only SMS region allowlist.
+
+   PrintQ explicitly uses Firebase local persistence. The one-hour Firebase ID token
+   refreshes silently, and an expired PrintQ access token is automatically exchanged
+   and retried; returning students must not receive another SMS unless they log out,
+   clear app/browser data, change devices, or their Firebase session is revoked.
+
+   **Before volume rollout, move OTP delivery to a PrintQ-branded Indian route.**
+   Firebase's India phone-auth rate is far more expensive than domestic OTP vendors.
+   The API already supports `STUDENT_AUTH_PROVIDER=local`, `SMS_PROVIDER=msg91`,
+   `MSG91_AUTH_KEY`, `MSG91_SENDER_ID` and `MSG91_TEMPLATE_ID`, including per-IP,
+   per-phone resend and daily abuse limits. Use a PrintQ-approved DLT sender/template;
+   never reuse Packkar's sender or template because its branding and DLT registration
+   belong to a different product.
 5. **Wire real email delivery** (forgot-password): get a Resend account, set
    `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` / `EMAIL_FROM`.
 6. **Wire real payments and shop payouts** (replacing both simulators): from your Razorpay account,

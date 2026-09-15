@@ -22,6 +22,8 @@ export const firebasePhoneAuthEnabled =
 
 let verifier: RecaptchaVerifier | null = null;
 let confirmation: ConfirmationResult | null = null;
+const OTP_SEND_COOLDOWN_MS = 60_000;
+const OTP_SEND_KEY = 'printq:student:otp-sent-at';
 
 function auth() {
   if (!firebasePhoneAuthEnabled) throw new Error('Phone verification is not configured');
@@ -33,11 +35,11 @@ function auth() {
 
 /** Reuse Firebase's trusted-device session so returning students do not need
  * another paid SMS only because the PrintQ JWT reached its 30-day expiry. */
-export async function resumeFirebasePhoneSession(): Promise<string | null> {
+export async function resumeFirebasePhoneSession(forceRefresh = false): Promise<string | null> {
   if (!firebasePhoneAuthEnabled) return null;
   const authInstance = auth();
   await authInstance.authStateReady();
-  return authInstance.currentUser?.getIdToken() ?? null;
+  return authInstance.currentUser?.getIdToken(forceRefresh) ?? null;
 }
 
 export async function signOutFirebasePhoneAuth(): Promise<void> {
@@ -58,6 +60,12 @@ export function resetFirebasePhoneAuth(): void {
 }
 
 export async function requestFirebasePhoneOtp(phoneE164: string): Promise<void> {
+  const lastSentAt = Number(localStorage.getItem(OTP_SEND_KEY) ?? '0');
+  const waitMs = OTP_SEND_COOLDOWN_MS - (Date.now() - lastSentAt);
+  if (waitMs > 0) {
+    throw new Error(`Please wait ${Math.ceil(waitMs / 1000)} seconds before requesting another code.`);
+  }
+
   resetFirebasePhoneAuth();
   const authInstance = auth();
   // A trusted-device Firebase session lets us refresh a returning student's
@@ -70,6 +78,7 @@ export async function requestFirebasePhoneOtp(phoneE164: string): Promise<void> 
   try {
     await verifier.render();
     confirmation = await signInWithPhoneNumber(authInstance, phoneE164, verifier);
+    localStorage.setItem(OTP_SEND_KEY, String(Date.now()));
   } catch (error) {
     resetFirebasePhoneAuth();
     const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';

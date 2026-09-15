@@ -11,11 +11,16 @@ import {
   verifyLoginOtpSchema,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, notFound, unauthorized } from '../../lib/errors.js';
+import { asyncHandler, badRequest, notFound, tooMany, unauthorized } from '../../lib/errors.js';
 import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
 import { signShopToken, signStudentToken } from '../../lib/tokens.js';
 import { validateBody } from '../../middleware/validate.js';
-import { loginLimiter, otpRequestLimiter, otpVerifyLimiter } from '../../middleware/rateLimit.js';
+import {
+  firebaseSessionLimiter,
+  loginLimiter,
+  otpRequestLimiter,
+  otpVerifyLimiter,
+} from '../../middleware/rateLimit.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { sendLoginOtp } from '../../providers/notification/index.js';
 import { emailProvider } from '../../providers/email/index.js';
@@ -27,6 +32,8 @@ export const authRouter = Router();
 
 const LOGIN_OTP_TTL_MS = 5 * 60_000;
 const MAX_LOGIN_OTP_ATTEMPTS = 5;
+const LOGIN_OTP_RESEND_MS = 60_000;
+const MAX_LOGIN_OTP_SENDS_PER_PHONE_PER_DAY = 10;
 
 /** Step 1 of student login: send a 6-digit OTP to the phone. */
 authRouter.post(
@@ -36,6 +43,22 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     if (env.STUDENT_AUTH_PROVIDER !== 'local') throw notFound();
     const { phone } = req.body as { phone: string };
+
+    // A per-IP limiter alone is weak on mobile networks and campus Wi-Fi. These
+    // database-backed phone limits also survive Redis restarts and directly
+    // cap the maximum paid-SMS exposure for one number.
+    const now = new Date();
+    const recent = await prisma.loginOtp.findFirst({
+      where: { phone, createdAt: { gt: new Date(now.getTime() - LOGIN_OTP_RESEND_MS) } },
+      select: { id: true },
+    });
+    if (recent) throw tooMany('Please wait a minute before requesting another code');
+    const sentToday = await prisma.loginOtp.count({
+      where: { phone, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
+    });
+    if (sentToday >= MAX_LOGIN_OTP_SENDS_PER_PHONE_PER_DAY) {
+      throw tooMany('Too many codes requested for this number today');
+    }
 
     const otp = generateOtp();
     await prisma.loginOtp.create({
@@ -101,7 +124,7 @@ authRouter.post(
  */
 authRouter.post(
   '/student/firebase-login',
-  otpVerifyLimiter,
+  firebaseSessionLimiter,
   validateBody(z.object({ idToken: z.string().min(100).max(8_000) })),
   asyncHandler(async (req, res) => {
     if (env.STUDENT_AUTH_PROVIDER !== 'firebase') throw notFound();

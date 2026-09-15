@@ -23,5 +23,9 @@ function makeLimiter(prefix: string, windowMs: number, max: number) {
 export const generalLimiter = makeLimiter('gen', 60_000, 300);
 export const otpRequestLimiter = makeLimiter('otpreq', 60_000, 5);
 export const otpVerifyLimiter = makeLimiter('otpver', 60_000, 10);
+// Firebase has already verified the phone credential before this exchange.
+// Keep enough headroom for many students sharing one campus Wi-Fi NAT and for
+// silent trusted-device renewal; the global limiter still provides a ceiling.
+export const firebaseSessionLimiter = makeLimiter('firebase-session', 60_000, 120);
 export const loginLimiter = makeLimiter('login', 60_000, 5);
 export const uploadLimiter = makeLimiter('upload', 60_000, 10);

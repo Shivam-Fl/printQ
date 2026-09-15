@@ -77,7 +77,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       }
       else await api('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
       setStage('otp');
-      setResendIn(30);
+      setResendIn(60);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the code');
     } finally {

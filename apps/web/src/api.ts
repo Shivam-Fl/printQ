@@ -7,6 +7,9 @@ export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '
 type Role = 'student' | 'shop';
 
 const tokenKey = (role: Role) => `printq:${role}:token`;
+const firebaseStudentAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase';
+
+let studentRenewal: Promise<string | null> | null = null;
 
 export function getToken(role: Role): string | null {
   return localStorage.getItem(tokenKey(role));
@@ -37,9 +40,48 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(
+/**
+ * Exchange Firebase's persisted trusted-device session for a fresh PrintQ
+ * access token. Firebase refreshes its one-hour ID token without an SMS; a new
+ * OTP is needed only after explicit logout, cleared browser data or revocation.
+ *
+ * A shared promise prevents a page with several concurrent API calls from
+ * creating a refresh storm when an old PrintQ token expires.
+ */
+export async function renewStudentSession(): Promise<string | null> {
+  if (!firebaseStudentAuthEnabled) return null;
+  if (studentRenewal) return studentRenewal;
+
+  studentRenewal = (async () => {
+    const { resumeFirebasePhoneSession } = await import('./firebasePhoneAuth.js');
+    const idToken = await resumeFirebasePhoneSession(true);
+    if (!idToken) return null;
+
+    const response = await fetch(`${API_URL}/api/auth/student/firebase-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+    if (!response.ok) return null;
+
+    const data = (await response.json().catch(() => ({}))) as { token?: unknown };
+    if (typeof data.token !== 'string' || !data.token) return null;
+    setToken('student', data.token);
+    window.dispatchEvent(new Event('printq:student-session-renewed'));
+    return data.token;
+  })()
+    .catch(() => null)
+    .finally(() => {
+      studentRenewal = null;
+    });
+
+  return studentRenewal;
+}
+
+async function requestJson<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData } = {},
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData },
+  allowStudentRenewal: boolean,
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.role) {
@@ -57,18 +99,36 @@ export async function api<T>(
   const res = await fetch(`${API_URL}${path}`, { method: options.method ?? 'GET', headers, body });
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
+    if (res.status === 401 && options.role === 'student' && allowStudentRenewal) {
+      const token = await renewStudentSession();
+      if (token) return requestJson<T>(path, options, false);
+    }
     if (res.status === 401 && options.role) clearToken(options.role);
     throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`, data);
   }
   return data as T;
 }
 
+export async function api<T>(
+  path: string,
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData } = {},
+): Promise<T> {
+  return requestJson<T>(path, options, true);
+}
+
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
 
 /** Fetch an authenticated binary response (e.g. a receipt PDF) and save it. */
 export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {
-  const token = getToken(role);
-  const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  let token = getToken(role);
+  let res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401 && role === 'student') {
+    token = await renewStudentSession();
+    if (token) {
+      res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    }
+  }
+  if (res.status === 401) clearToken(role);
   if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
