@@ -1,5 +1,5 @@
 import type { Job } from '@prisma/client';
-import type { JobSpecs } from '@printq/shared';
+import type { JobSpecs, JobStatus } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { digestReleaseCode, verifyOtpHash } from '../../lib/otp.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
@@ -23,6 +23,29 @@ export interface ReleaseResult {
   requiresCashConfirmation?: boolean;
   cashAmountPaise?: number;
   selectedPrinterId?: string;
+}
+
+/**
+ * Counter-code lookup deliberately includes prepared and legacy removed jobs:
+ * the advisory queue can never make a paid document unrecoverable at the
+ * physical counter. Terminal/in-flight statuses stay in the lookup so staff
+ * receive an accurate "already released" result instead of "invalid code".
+ */
+export const COUNTER_CODE_LOOKUP_STATUSES = [
+  'awaiting_arrival',
+  'queued',
+  'notified',
+  'no_show',
+  'requeued',
+  'otp_verified',
+  'printing',
+  'finishing',
+  'ready_for_pickup',
+] as const satisfies readonly JobStatus[];
+
+/** A direct counter release is allowed even when the job has no live position. */
+export function isDirectCounterReleaseRecoverable(status: JobStatus): boolean {
+  return (['awaiting_arrival', 'queued', 'notified', 'no_show', 'requeued'] as readonly JobStatus[]).includes(status);
 }
 
 /**
@@ -51,7 +74,7 @@ export async function releaseByOtp(
         { paymentProvider: 'cash', paymentStatus: 'cash_due' },
       ],
       status: {
-        in: ['awaiting_arrival', 'queued', 'notified', 'no_show', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup'],
+        in: [...COUNTER_CODE_LOOKUP_STATUSES],
       },
     },
     orderBy: { createdAt: 'desc' },
@@ -140,7 +163,7 @@ export async function releaseByOtp(
     };
   }
 
-  const arrivedAtCounter = matched.status === 'awaiting_arrival' || matched.status === 'no_show';
+  const arrivedAtCounter = ['awaiting_arrival', 'no_show', 'requeued'].includes(matched.status);
   const updated = await applyTransition(
     matched.id,
     matched.status,
@@ -160,8 +183,11 @@ export async function releaseByOtp(
       ...(arrivedAtCounter
         ? {
             arrivedAt: new Date(),
-            queuedAt: new Date(),
-            checkInCount: { increment: 1 },
+            // A counter-code release proves staff have the student in front
+            // of them, but it is not a proximity check-in and must never
+            // fabricate a physical queue position or consume a check-in.
+            queuedAt: null,
+            queueLeftAt: new Date(),
           }
         : {}),
       // Clear only legacy temporary OTP data. The encrypted stable code stays

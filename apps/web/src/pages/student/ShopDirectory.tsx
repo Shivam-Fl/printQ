@@ -28,7 +28,7 @@ export default function ShopDirectory() {
   }, [q]);
 
   return (
-    <div className="page">
+    <main className="page">
       <Topbar />
       <div className="directory-heading"><span className="eyebrow-label">Campus print counters</span><h1>Find a shop</h1><p>Choose a connected shop now, or scan the QR displayed at your usual counter.</p></div>
       <div className="search-field"><span aria-hidden>⌕</span><input type="search" placeholder="Search shop or campus" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></div>
@@ -47,6 +47,6 @@ export default function ShopDirectory() {
           ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }

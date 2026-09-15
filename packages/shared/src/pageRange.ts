@@ -3,10 +3,17 @@
  * Returns the list of 1-based page numbers, validated and de-duplicated.
  * Throws on malformed input or out-of-bounds pages.
  */
+export class PageRangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PageRangeError';
+  }
+}
+
 export function parsePageRange(range: string, totalPages: number): number[] {
   const trimmed = range.trim();
   if (!/^\d+(-\d+)?(\s*,\s*\d+(-\d+)?)*$/.test(trimmed)) {
-    throw new Error('Invalid page range format');
+    throw new PageRangeError('Use a format like 1-5,8');
   }
   const pages = new Set<number>();
   for (const part of trimmed.split(',')) {
@@ -14,7 +21,7 @@ export function parsePageRange(range: string, totalPages: number): number[] {
     const start = Number(startStr);
     const end = endStr !== undefined ? Number(endStr) : start;
     if (start < 1 || end > totalPages || start > end) {
-      throw new Error(`Page range "${part.trim()}" is out of bounds (document has ${totalPages} pages)`);
+      throw new PageRangeError('Selected pages are outside this document');
     }
     for (let p = start; p <= end; p++) pages.add(p);
   }

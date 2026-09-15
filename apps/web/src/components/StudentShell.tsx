@@ -12,14 +12,14 @@ export default function StudentShell({ children }: { children: ReactNode }) {
 
   function newPrint() {
     const slug = lastShopSlug();
-    navigate(slug ? `/s/${slug}` : '/home?pick=1');
+    navigate(slug ? `/s/${slug}` : '/shops');
   }
 
   const cls = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : '');
 
   return (
     <div className="shell">
-      {children}
+      <main className="student-main">{children}</main>
       <nav className="tabbar">
         <NavLink to="/home" className={cls}>
           <IconHome />

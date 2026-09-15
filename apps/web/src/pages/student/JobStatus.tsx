@@ -36,6 +36,44 @@ interface JobDetail {
   file: { originalName: string; pages: number | null };
 }
 
+type PaymentStatus = JobDetail['paymentStatus'];
+
+export interface PaymentSummary {
+  label: string;
+  receiptAvailable: boolean;
+  receiptMessage: string;
+}
+
+/** Keep the order total truthful: an order is not a paid order until the API says so. */
+export function paymentSummary(
+  paymentStatus: PaymentStatus,
+  paymentProvider: string | null,
+  cashCollectedAt: string | null,
+): PaymentSummary {
+  const cashCollected = paymentProvider === 'cash' && Boolean(cashCollectedAt);
+  if (cashCollected || (paymentStatus === 'paid' && paymentProvider !== 'cash')) {
+    return {
+      label: paymentProvider === 'cash' ? 'Cash collected' : 'Amount paid',
+      receiptAvailable: true,
+      receiptMessage: '',
+    };
+  }
+
+  switch (paymentStatus) {
+    case 'cash_due':
+      return { label: 'Cash due', receiptAvailable: false, receiptMessage: 'Receipt will be available after cash is collected at the counter.' };
+    case 'refunding':
+      return { label: 'Refund processing', receiptAvailable: false, receiptMessage: 'The payment is being refunded. The receipt will be available once processing is complete.' };
+    case 'refunded':
+      return { label: 'Refunded', receiptAvailable: false, receiptMessage: 'This payment was refunded, so there is no active payment receipt.' };
+    case 'failed':
+      return { label: 'Payment failed', receiptAvailable: false, receiptMessage: 'No receipt is available because the payment was not completed.' };
+    case 'pending':
+    default:
+      return { label: 'Payment pending', receiptAvailable: false, receiptMessage: 'Receipt will be available after payment is confirmed.' };
+  }
+}
+
 const slotLabel = (iso: string) =>
   new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
@@ -184,6 +222,7 @@ export default function JobStatus() {
   const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
   const reachedIdx = ORDER.indexOf(job.status);
+  const payment = paymentSummary(job.paymentStatus, job.paymentProvider, job.cashCollectedAt);
 
   return (
     <StudentShell>
@@ -214,7 +253,7 @@ export default function JobStatus() {
             <div className="sub">Your order is prepared. Check-in opens shortly before this time, after you reach the shop.</div>
           </div>
         )}
-        {job.status === 'awaiting_arrival' && !pendingSlot && (
+        {['awaiting_arrival', 'requeued'].includes(job.status) && !pendingSlot && (
           <div className="arrival-card">
             <div>
               <span className="eyebrow-label">Order prepared</span>
@@ -252,7 +291,7 @@ export default function JobStatus() {
             </p>
           </div>
         )}
-        {otp && ['queued', 'notified', 'no_show', 'ready_for_pickup'].includes(job.status) && (
+        {otp && ['awaiting_arrival', 'queued', 'notified', 'no_show', 'requeued', 'ready_for_pickup'].includes(job.status) && (
           <div className="ticket turn">
             <div className="eyebrow">your permanent counter code</div>
             <div className="otp-band">{otp}</div>
@@ -275,7 +314,7 @@ export default function JobStatus() {
             <div><strong>Printing is done</strong><p>The shop is completing your requested {job.specs.binding?.replace('_', ' ')} by hand. We’ll notify you as soon as collection is ready.</p></div>
           </div>
         )}
-        {job.status === 'no_show' && (
+        {['no_show', 'requeued'].includes(job.status) && (
           <div className="card stack">
             <strong>Your prepared order is still available</strong>
             <p style={{ margin: 0 }}>{otp
@@ -315,20 +354,22 @@ export default function JobStatus() {
 
         {/* ---- receipt ---- */}
         <div className="card receipt">
-          <div className="line total"><span>{job.paymentProvider === 'cash' && !job.cashCollectedAt
-            ? job.paymentStatus === 'cash_due' ? 'Cash due' : 'Cash order total'
-            : 'Amount paid'}</span><span>{rupees(job.totalPaise)}</span></div>
-          <button
-            className="ghost small"
-            style={{ marginTop: 10 }}
-            onClick={() =>
-              downloadFile(`/api/jobs/${job.id}/receipt`, 'student', `printq-receipt-${job.id.slice(0, 8)}.pdf`).catch(
-                () => setError('Could not download receipt'),
-              )
-            }
-          >
-            Download receipt
-          </button>
+          <div className="line total"><span>{payment.label}</span><span>{rupees(job.totalPaise)}</span></div>
+          {payment.receiptAvailable ? (
+            <button
+              className="ghost small"
+              style={{ marginTop: 10 }}
+              onClick={() =>
+                downloadFile(`/api/jobs/${job.id}/receipt`, 'student', `printq-receipt-${job.id.slice(0, 8)}.pdf`).catch(
+                  () => setError('Could not download receipt'),
+                )
+              }
+            >
+              Download receipt
+            </button>
+          ) : (
+            <p className="receipt-help">{payment.receiptMessage}</p>
+          )}
         </div>
 
         {/* ---- timeline (only for the normal path) ---- */}

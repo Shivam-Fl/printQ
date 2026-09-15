@@ -1147,6 +1147,13 @@ tr:last-child td { border-bottom: none; }
 .directory-card:hover { border-color: #cbd3df; box-shadow: var(--shadow-raised); text-decoration: none; }
 .directory-card p { margin: 3px 0 0; color: var(--pencil); font-size: .78rem; }
 .store-avatar { width: 46px; height: 46px; display: grid; place-items: center; flex-shrink: 0; border-radius: 12px; color: var(--stamp); background: var(--stamp-soft); font-family: var(--font-mono); font-size: .72rem; font-weight: 700; }
+.shop-picker { margin-top: 16px; padding: 2px 0; border: 1px solid transparent; border-radius: 14px; transition: border-color .15s, background .15s, box-shadow .15s; }
+.shop-picker.is-open { padding: 12px; border-color: #cbdaf8; background: var(--stamp-soft); box-shadow: 0 0 0 3px rgba(54, 89, 227, .08); }
+.shop-picker .section-head { margin-top: 0; }
+.shop-picker-feedback { margin: -7px 0 10px; color: var(--pencil); font-size: .8rem; }
+.shop-picker h2:focus { outline: 3px solid rgba(54, 89, 227, .28); outline-offset: 4px; border-radius: 4px; }
+.cta-print.is-open { border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft); }
+.receipt-help { margin: 10px 0 0; font-size: .78rem; line-height: 1.45; }
 
 @media (max-width: 820px) {
   .welcome-layout { grid-template-columns: 1fr; padding: 52px 0 64px; gap: 46px; }

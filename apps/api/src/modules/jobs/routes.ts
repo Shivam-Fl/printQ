@@ -251,7 +251,8 @@ jobsRouter.get(
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
         counterCodeAvailable: codeVisible,
         counterCodeThreshold: env.NEAR_FRONT_THRESHOLD,
-        canCheckIn: ['paid', 'cash_due'].includes(job.paymentStatus) && ['awaiting_arrival', 'no_show'].includes(job.status),
+        canCheckIn: ['paid', 'cash_due'].includes(job.paymentStatus)
+          && ['awaiting_arrival', 'no_show', 'requeued'].includes(job.status),
         checkInOpensAt,
       },
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countSelectedPages, parsePageRange } from './pageRange.js';
+import { countSelectedPages, PageRangeError, parsePageRange } from './pageRange.js';
 
 describe('parsePageRange', () => {
   it('parses single pages, ranges and mixes', () => {
@@ -19,9 +19,14 @@ describe('parsePageRange', () => {
   });
 
   it('rejects out-of-bounds and inverted ranges', () => {
-    expect(() => parsePageRange('11', 10)).toThrow();
+    expect(() => parsePageRange('11', 10)).toThrow(PageRangeError);
     expect(() => parsePageRange('0-2', 10)).toThrow();
     expect(() => parsePageRange('5-2', 10)).toThrow();
+  });
+
+  it('uses safe, actionable validation messages', () => {
+    expect(() => parsePageRange('1-99', 3)).toThrow('Selected pages are outside this document');
+    expect(() => parsePageRange('pages 1-3', 3)).toThrow('Use a format like 1-5,8');
   });
 });
 

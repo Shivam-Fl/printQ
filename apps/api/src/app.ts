@@ -9,6 +9,7 @@ import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { generalLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/error.js';
+import { HttpError } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { filesRouter } from './modules/files/routes.js';
 import { jobsRouter } from './modules/jobs/routes.js';
@@ -49,7 +50,7 @@ export function createApp(): express.Express {
       origin: (origin, callback) => {
         // allow same-origin/CLI requests (no Origin header) and the allowlist
         if (!origin || env.CORS_ORIGINS.includes(origin)) callback(null, true);
-        else callback(new Error('Not allowed by CORS'));
+        else callback(new HttpError(403, 'Origin is not allowed', 'CORS_ORIGIN_DENIED'));
       },
     }),
   );

@@ -86,3 +86,14 @@ describe('student session renewal', () => {
     expect(storage.has('printq:student:token')).toBe(false);
   });
 });
+
+describe('API base URL configuration', () => {
+  it('trims deployment whitespace and trailing slashes', () => {
+    expect(apiModule.normalizeBaseUrl(' https://api.printqs.com/\r\n')).toBe('https://api.printqs.com');
+  });
+
+  it('preserves same-origin mode for missing or whitespace-only configuration', () => {
+    expect(apiModule.normalizeBaseUrl(undefined)).toBe('');
+    expect(apiModule.normalizeBaseUrl(' \r\n\t ')).toBe('');
+  });
+});

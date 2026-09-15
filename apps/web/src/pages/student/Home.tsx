@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../api.js';
 import { statusMeta } from '../../jobStatus.js';
@@ -22,6 +22,21 @@ interface Me {
   phone: string;
 }
 
+export type NewPrintAction =
+  | { kind: 'shop'; slug: string }
+  | { kind: 'picker' }
+  | { kind: 'directory' };
+
+export function resolveNewPrintAction(
+  _rememberedSlug: string | null,
+  shops: Array<{ slug: string }>,
+): NewPrintAction {
+  const onlyShop = shops[0];
+  if (onlyShop && shops.length === 1) return { kind: 'shop', slug: onlyShop.slug };
+  if (shops.length > 0) return { kind: 'picker' };
+  return { kind: 'directory' };
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -30,6 +45,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [pickOpen, setPickOpen] = useState(params.get('pick') === '1');
   const [error, setError] = useState('');
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (!getToken('student')) {
@@ -55,13 +72,28 @@ export default function Home() {
     return [...seen.values()];
   }, [jobs]);
 
+  useEffect(() => {
+    if (loading || !pickOpen || shops.length > 0) return;
+    navigate('/shops', { replace: true });
+  }, [loading, navigate, pickOpen, shops.length]);
+
+  useEffect(() => {
+    if (!pickOpen || shops.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      pickerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      pickerHeadingRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pickOpen, shops.length]);
+
   const active = jobs.filter((j) => statusMeta(j.status).active);
   const firstName = me?.name?.split(' ')[0] ?? 'there';
 
   function startPrint() {
-    const slug = lastShopSlug() ?? shops[0]?.slug;
-    if (slug && shops.length <= 1) navigate(`/s/${slug}`);
-    else setPickOpen(true);
+    const action = resolveNewPrintAction(lastShopSlug(), shops);
+    if (action.kind === 'shop') navigate(`/s/${action.slug}`);
+    else if (action.kind === 'picker') setPickOpen(true);
+    else navigate('/shops');
   }
 
   return (
@@ -76,7 +108,12 @@ export default function Home() {
 
         {error && <div className="error-box" role="alert">{error}</div>}
 
-        <button className="cta-print" onClick={startPrint}>
+        <button
+          className={`cta-print${pickOpen && shops.length > 1 ? ' is-open' : ''}`}
+          onClick={startPrint}
+          aria-expanded={shops.length > 1 ? pickOpen : undefined}
+          aria-controls={shops.length > 1 ? 'home-shop-picker' : undefined}
+        >
           <span className="ic">
             <IconPlus />
           </span>
@@ -87,11 +124,18 @@ export default function Home() {
           <IconChevron />
         </button>
 
-        {(pickOpen || shops.length > 1) && shops.length > 0 && (
-          <>
+        {pickOpen && shops.length > 0 && (
+          <div
+            id="home-shop-picker"
+            ref={pickerRef}
+            className={`shop-picker${pickOpen ? ' is-open' : ''}`}
+            role="region"
+            aria-labelledby="home-shop-picker-title"
+          >
             <div className="section-head">
-              <h2>Your shops</h2>
+              <h2 id="home-shop-picker-title" ref={pickerHeadingRef} tabIndex={-1}>Choose a shop</h2>
             </div>
+            {pickOpen && <p className="shop-picker-feedback" role="status">Select where you want to print next.</p>}
             <div className="shops-row">
               {shops.map((s) => (
                 <button
@@ -107,7 +151,7 @@ export default function Home() {
                 </button>
               ))}
             </div>
-          </>
+          </div>
         )}
 
         {active.length > 0 && (
@@ -145,7 +189,7 @@ export default function Home() {
               <div>
                 <strong>No prints yet</strong>
                 <p className="dim" style={{ margin: '2px 0 0' }}>
-                  Scan your shop's QR code, or <Link to="/s/demo">open the demo shop</Link> to try it.
+                  Scan your shop's QR code, or <Link to="/shops">find a nearby shop</Link> to start a print.
                 </p>
               </div>
             </div>

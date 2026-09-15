@@ -8,10 +8,6 @@ export const JOB_EVENTS = [
   'COUNTER_RELEASE',
   'FRONT_REACHED',
   'OTP_VERIFIED',
-  'WINDOW_EXPIRED',
-  'REQUEUE',
-  'GRACE_EXPIRED',
-  'REJOINED',
   'PRINT_STARTED',
   'PRINT_COMPLETED',
   'FINISHING_REQUIRED',
@@ -40,11 +36,13 @@ const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
     OTP_VERIFIED: 'otp_verified',
     COUNTER_RELEASE: 'otp_verified',
     QUEUE_SKIPPED: 'awaiting_arrival',
-    WINDOW_EXPIRED: 'no_show',
     CANCEL: 'cancelled',
   },
-  no_show: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', REQUEUE: 'requeued', GRACE_EXPIRED: 'expired' },
-  requeued: { REJOINED: 'queued' },
+  // `no_show` and `requeued` remain only to recover records created under
+  // the retired timed-OTP model. Neither state has a location-free ingress:
+  // a student must check in again, or staff can release their stable code.
+  no_show: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', QUEUE_SKIPPED: 'awaiting_arrival' },
+  requeued: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', QUEUE_SKIPPED: 'awaiting_arrival' },
   otp_verified: { PRINT_STARTED: 'printing', CASH_RETURNED: 'cancelled' },
   // PRINT_FAILED returns to otp_verified so the shop can re-dispatch without a new OTP
   printing: {

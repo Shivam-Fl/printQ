@@ -2,7 +2,17 @@
  * Same-origin by default: dev uses the Vite proxy, production serves the web
  * app from the API. Set VITE_API_URL only for a split-domain deploy.
  */
-export const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+/**
+ * Build-time environment variables can pick up a trailing newline when they
+ * are injected from a dashboard or dotenv file. Keep same-origin mode as an
+ * empty string, while making split-domain URLs safe for every consumer.
+ */
+export function normalizeBaseUrl(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\/+$/, '');
+}
+
+export const API_URL = normalizeBaseUrl(import.meta.env.VITE_API_URL);
 
 type Role = 'student' | 'shop';
 

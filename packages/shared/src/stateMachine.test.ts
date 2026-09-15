@@ -26,14 +26,16 @@ describe('job state machine', () => {
     expect(transition('otp_verified', 'CASH_RETURNED')).toBe('cancelled');
   });
 
-  it('handles the no-show → requeue branch', () => {
-    expect(transition('notified', 'WINDOW_EXPIRED')).toBe('no_show');
-    expect(transition('no_show', 'REQUEUE')).toBe('requeued');
-    expect(transition('requeued', 'REJOINED')).toBe('queued');
+  it('removes an absent arrival without cancelling the paid order, then permits a fresh arrival', () => {
+    expect(transition('queued', 'QUEUE_SKIPPED')).toBe('awaiting_arrival');
+    expect(transition('awaiting_arrival', 'ARRIVED')).toBe('queued');
   });
 
-  it('expires after the grace period', () => {
-    expect(transition('no_show', 'GRACE_EXPIRED')).toBe('expired');
+  it('does not provide a location-free requeue path for legacy no-show records', () => {
+    expect(transition('no_show', 'ARRIVED')).toBe('queued');
+    expect(transition('no_show', 'COUNTER_RELEASE')).toBe('otp_verified');
+    expect(() => transition('no_show', 'REQUEUE' as never)).toThrow(InvalidTransitionError);
+    expect(() => transition('requeued', 'REJOINED' as never)).toThrow(InvalidTransitionError);
   });
 
   it('returns a failed print to otp_verified for re-dispatch', () => {
@@ -53,7 +55,7 @@ describe('job state machine', () => {
     expect(() => transition('completed', 'CANCEL')).toThrow(InvalidTransitionError);
   });
 
-  it('keeps a skipped arrival paid and available without blocking the line', () => {
+  it('keeps a skipped arrival paid and directly recoverable without blocking the line', () => {
     expect(transition('queued', 'QUEUE_SKIPPED')).toBe('awaiting_arrival');
     expect(transition('awaiting_arrival', 'COUNTER_RELEASE')).toBe('otp_verified');
   });
@@ -70,13 +72,13 @@ describe('job state machine', () => {
     }
   });
 
-  it('every state is reachable or initial (no orphan states)', () => {
+  it('keeps all launch states reachable while retaining legacy records for recovery only', () => {
     const reachable = new Set<string>(['pending_payment']);
     for (const from of JOB_STATUSES) {
       for (const event of JOB_EVENTS) {
         if (canTransition(from, event)) reachable.add(transition(from, event));
       }
     }
-    expect([...JOB_STATUSES].filter((s) => !reachable.has(s))).toEqual([]);
+    expect([...JOB_STATUSES].filter((s) => !reachable.has(s) && !['no_show', 'requeued', 'expired'].includes(s))).toEqual([]);
   });
 });

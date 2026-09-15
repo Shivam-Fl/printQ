@@ -307,7 +307,7 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
   const job = await prisma.job.findFirst({ where: { id: jobId, studentId } });
   if (!job) throw notFound();
   if (job.status === 'queued') return job;
-  if (job.status !== 'awaiting_arrival' && job.status !== 'no_show') {
+  if (job.status !== 'awaiting_arrival' && job.status !== 'no_show' && job.status !== 'requeued') {
     throw conflict('This order cannot join the live line in its current state');
   }
   const paymentReady = job.paymentStatus === 'paid'
@@ -438,103 +438,60 @@ export async function removeFromLiveQueue(jobId: string, shopId: string, actorId
   return updated;
 }
 
-async function afterNoShow(job: Job, noShowCount: number): Promise<void> {
-  const canRequeue = noShowCount <= 1;
-  if (canRequeue) {
-    await timersQueue.add(
-      'graceExpiry',
-      { jobId: job.id },
-      { delay: env.NO_SHOW_GRACE_MINUTES * 60_000, jobId: `grace-${job.id}-${Date.now()}` },
-    );
-  } else {
-    // Second no-show: expire and refund immediately. The old implementation
-    // transitioned here but never reached the refund path.
-    const expired = await applyTransition(job.id, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
-    if (expired) {
-      await refundIfPaid(expired);
-      await scheduleFileDeletion(expired.fileId);
-    }
-  }
-  await notifyStudent(job.studentId, {
-    title: canRequeue ? 'You missed your turn' : 'Job expired',
-    body: canRequeue
-      ? `Requeue for free in the app within ${env.NO_SHOW_GRACE_MINUTES} minutes, or the job expires.`
-      : 'You missed your turn twice — please submit a new job.',
-    url: `/jobs/${job.id}`,
-  });
-  publishEvent(`student:${job.studentId}`, 'job:update', {
-    jobId: job.id,
-    status: canRequeue ? 'no_show' : 'expired',
-    canRequeue,
-  });
-  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-  await emitQueueUpdate(job.shopId);
+/**
+ * Compatibility handler for delayed timers created before arrival-based
+ * queuing. Current orders never create these timers. If an old timer fires,
+ * remove the job from the physical line but preserve the paid order and its
+ * stable code rather than creating a timed no-show/refund branch.
+ */
+export function isLegacyNoShowTimerDue(otpExpiresAt: Date | null, now = Date.now()): boolean {
+  return otpExpiresAt === null || otpExpiresAt.getTime() <= now;
 }
 
-/** Timer handler: OTP window expired without verification → no-show. */
 export async function handleNoShowCheck(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
-  if (!job || job.status !== 'notified') return; // OTP was given in time
-  if (job.otpExpiresAt && job.otpExpiresAt.getTime() > Date.now()) return; // re-notified later
-
-  const updated = await applyTransition(jobId, 'notified', 'WINDOW_EXPIRED', { type: 'system' }, {
-    noShowAt: new Date(),
-    noShowCount: { increment: 1 },
-    otpHash: null,
-    otpCode: null,
-    otpExpiresAt: null,
-  });
-  if (!updated) return;
-  await afterNoShow(job, updated.noShowCount);
+  // An older delayed timer may fire after a job's old turn window was
+  // extended. It must not remove the student until the newest window ends.
+  if (!job || job.status !== 'notified' || !isLegacyNoShowTimerDue(job.otpExpiresAt)) return;
+  await removeFromLiveQueue(job.id, job.shopId, 'legacy-no-show-sweeper');
 }
 
-/** Shop marks a notified job as no-show before the timer fires (student clearly absent). */
+/** Compatibility alias for callers from the retired timed no-show model. */
 export async function markNoShow(jobId: string, shopId: string, actorId: string): Promise<void> {
-  const job = await prisma.job.findFirst({ where: { id: jobId, shopId } });
-  if (!job) throw notFound();
-  if (job.status !== 'notified') throw conflict('Job is not awaiting an OTP');
-
-  const updated = await applyTransition(jobId, 'notified', 'WINDOW_EXPIRED', { type: 'shop', id: actorId }, {
-    noShowAt: new Date(),
-    noShowCount: { increment: 1 },
-    otpHash: null,
-    otpCode: null,
-    otpExpiresAt: null,
-  });
-  if (!updated) return;
-  await afterNoShow(job, updated.noShowCount);
+  await removeFromLiveQueue(jobId, shopId, actorId);
 }
 
-/** Timer handler: grace period passed with no requeue → expired. */
+/**
+ * Compatibility handler for an old grace timer. Do not expire/refund a paid
+ * order merely because that obsolete timer fired; return it to the prepared
+ * state so a fresh proximity check-in or counter-code release can recover it.
+ */
 export async function handleGraceExpiry(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job || job.status !== 'no_show') return;
-  const expired = await applyTransition(jobId, 'no_show', 'GRACE_EXPIRED', { type: 'system' });
-  // Requeue and grace-expiry can race. Never refund unless this transition won.
-  if (!expired) return;
-  await refundIfPaid(expired);
-  await scheduleFileDeletion(expired.fileId);
-  publishEvent(`student:${job.studentId}`, 'job:update', { jobId, status: 'expired' });
+  const restored = await applyTransition(jobId, 'no_show', 'QUEUE_SKIPPED', { type: 'system' }, {
+    queuedAt: null,
+    queueLeftAt: new Date(),
+  });
+  if (!restored) return;
+  await notifyStudent(job.studentId, {
+    title: 'Your print order is ready when you are',
+    body: 'Check in again after reaching the shop, or show your six-digit code to staff at the counter.',
+    url: `/jobs/${job.id}`,
+  });
   await emitQueueUpdate(job.shopId);
 }
 
 /**
- * Student's one free requeue after a no-show. queuedAt is preserved, so the
- * job rejoins at/near the front rather than the back — they already waited.
+ * Compatibility endpoint for the retired timed no-show model. Re-entry now
+ * always happens through checkInJob(), which verifies a fresh location and
+ * writes a new queuedAt timestamp at the end of the live line.
  */
 export async function requeueJob(jobId: string, studentId: string): Promise<Job> {
   // ownership baked into the query — a student can only requeue their own job
   const job = await prisma.job.findFirst({ where: { id: jobId, studentId } });
   if (!job) throw notFound();
-  if (job.status !== 'no_show') throw conflict('Job cannot be requeued');
-  if (job.noShowCount > 1) throw conflict('Requeue already used');
-
-  await applyTransition(jobId, 'no_show', 'REQUEUE', { type: 'student', id: studentId });
-  const rejoined = await applyTransition(jobId, 'requeued', 'REJOINED', { type: 'system' });
-
-  if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-  await emitQueueUpdate(job.shopId);
-  return rejoined ?? job;
+  throw conflict('Rejoining the live line requires a fresh location check-in at the shop');
 }
 
 /**

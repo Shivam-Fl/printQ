@@ -4,7 +4,9 @@ import { API_URL, getToken, renewStudentSession } from './api.js';
 let studentSocket: Socket | null = null;
 let shopSocket: Socket | null = null;
 
-// empty API_URL = same origin (Vite proxy in dev, API-served app in prod)
+// Empty API_URL = same origin (Vite proxy in dev, API-served app in prod).
+// API_URL is normalized in api.ts so CRLF/whitespace from deployment config
+// cannot leak into the Socket.IO URL.
 const target = API_URL || '/';
 
 export function getStudentSocket(): Socket | null {

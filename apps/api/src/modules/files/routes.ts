@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { fileTypeFromBuffer } from 'file-type';
@@ -10,6 +11,7 @@ import { uploadLimiter } from '../../middleware/rateLimit.js';
 import { storage } from '../../providers/storage/index.js';
 import { fileRetentionDeadline } from '../../lib/fileRetention.js';
 import { convertQueue } from '../../lib/queues.js';
+import { env } from '../../config/env.js';
 
 export const filesRouter = Router();
 
@@ -20,27 +22,116 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
 });
 
-type AllowedKind = { ext: string; mime: string };
+type AllowedKind = {
+  ext: 'pdf' | 'docx' | 'jpg' | 'png';
+  mime: string;
+  filenameExtensions: readonly string[];
+  declaredMimeTypes: readonly string[];
+};
+
+const ALLOWED_KINDS: Record<AllowedKind['ext'], AllowedKind> = {
+  pdf: {
+    ext: 'pdf',
+    mime: 'application/pdf',
+    filenameExtensions: ['.pdf'],
+    declaredMimeTypes: ['application/pdf', 'application/x-pdf', 'application/octet-stream'],
+  },
+  docx: {
+    ext: 'docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    filenameExtensions: ['.docx'],
+    declaredMimeTypes: [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-word.document.12',
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/octet-stream',
+    ],
+  },
+  jpg: {
+    ext: 'jpg',
+    mime: 'image/jpeg',
+    filenameExtensions: ['.jpg', '.jpeg'],
+    declaredMimeTypes: ['image/jpeg', 'image/pjpeg', 'application/octet-stream'],
+  },
+  png: {
+    ext: 'png',
+    mime: 'image/png',
+    filenameExtensions: ['.png'],
+    declaredMimeTypes: ['image/png', 'image/x-png', 'application/octet-stream'],
+  },
+};
 
 /**
- * Content-based (magic bytes) file validation — client filename and MIME type
- * are never trusted. DOCX is a zip container, so file-type may report it as
- * either 'docx' or plain 'zip'; the zip case is accepted only when the
- * declared name ends in .docx and conversion will fail safely if it isn't.
+ * A file is accepted only when filename extension, browser-declared MIME and
+ * its magic bytes agree. The browser may fall back to application/octet-stream,
+ * but only after the other two independent checks have identified the same
+ * allowlisted type. DOCX is a ZIP container, so its package marker is also
+ * checked when file-type reports a generic ZIP archive.
  */
-async function detectAllowedType(buffer: Buffer, originalName: string): Promise<AllowedKind | null> {
+async function detectAllowedType(buffer: Buffer): Promise<AllowedKind | null> {
   const detected = await fileTypeFromBuffer(buffer);
   if (!detected) return null;
-  if (detected.ext === 'pdf') return { ext: 'pdf', mime: 'application/pdf' };
-  if (detected.ext === 'png') return { ext: 'png', mime: 'image/png' };
-  if (detected.ext === 'jpg') return { ext: 'jpg', mime: 'image/jpeg' };
+  if (detected.ext === 'pdf') return ALLOWED_KINDS.pdf;
+  if (detected.ext === 'png') return ALLOWED_KINDS.png;
+  if (detected.ext === 'jpg') return ALLOWED_KINDS.jpg;
   if (detected.ext === 'docx') {
-    return { ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+    return ALLOWED_KINDS.docx;
   }
-  if (detected.ext === 'zip' && originalName.toLowerCase().endsWith('.docx')) {
-    return { ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+  if (detected.ext === 'zip' && buffer.includes(Buffer.from('word/document.xml'))) {
+    return ALLOWED_KINDS.docx;
   }
   return null;
+}
+
+function hasCoherentUploadType(kind: AllowedKind, originalName: string, declaredMimeType: string): boolean {
+  const extension = extname(originalName).toLowerCase();
+  const mime = declaredMimeType.toLowerCase().split(';', 1)[0]?.trim() ?? '';
+  return kind.filenameExtensions.includes(extension) && kind.declaredMimeTypes.includes(mime);
+}
+
+/** Exposed for regression coverage; the route remains the only caller in production. */
+export async function validateUploadFileType(
+  buffer: Buffer,
+  originalName: string,
+  declaredMimeType: string,
+): Promise<AllowedKind | null> {
+  const kind = await detectAllowedType(buffer);
+  return kind && hasCoherentUploadType(kind, originalName, declaredMimeType) ? kind : null;
+}
+
+function trustedFrameAncestors(origins: readonly string[]): string[] {
+  return origins.flatMap((origin) => {
+    // CORS may be permissive in local development, but a preview must never
+    // become frameable by every site. Only concrete HTTP(S) origins qualify.
+    if (origin === '*') return [];
+    try {
+      const parsed = new URL(origin);
+      return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.origin === origin
+        ? [parsed.origin]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Overrides Helmet only for an authenticated, ready local preview response.
+ * CORS continues to allow reads only for env.CORS_ORIGINS; CSP separately
+ * restricts embedding to those concrete configured frontend origins.
+ */
+export function setPreviewSecurityHeaders(
+  res: Pick<import('express').Response, 'removeHeader' | 'setHeader'>,
+  origins: readonly string[] = env.CORS_ORIGINS,
+): void {
+  const frameAncestors = trustedFrameAncestors(origins);
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    `sandbox; default-src 'none'; frame-ancestors ${frameAncestors.length > 0 ? frameAncestors.join(' ') : "'none'"}`,
+  );
 }
 
 /**
@@ -67,8 +158,10 @@ filesRouter.post(
     const sources: { key: string; mime: string; name: string }[] = [];
     let totalBytes = 0;
     for (const f of files) {
-      const kind = await detectAllowedType(f.buffer, f.originalname);
-      if (!kind) throw badRequest(`"${f.originalname}" isn't a PDF, DOCX, JPG or PNG`);
+      const kind = await validateUploadFileType(f.buffer, f.originalname, f.mimetype);
+      if (!kind) {
+        throw badRequest('Each file must be a matching PDF, DOCX, JPG, JPEG or PNG');
+      }
       const key = `orig/${randomUUID()}.${kind.ext}`;
       await storage.put(key, f.buffer, kind.mime);
       sources.push({ key, mime: kind.mime, name: f.originalname.slice(0, 120) });
@@ -134,8 +227,9 @@ filesRouter.get(
     }
     const bytes = await storage.get(file.convertedKey);
     res.setHeader('Content-Type', 'application/pdf');
-    // sandbox neutralizes any active content should a hostile PDF slip through
-    res.setHeader('Content-Security-Policy', 'sandbox');
+    // Applied after a file is found, ready and authorized; global Helmet stays
+    // strict for every other endpoint.
+    setPreviewSecurityHeaders(res);
     res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
     res.send(bytes);
   }),
