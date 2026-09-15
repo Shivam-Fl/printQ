@@ -20,10 +20,10 @@ function ShopAuthLayout({ title, subtitle, children }: { title: string; subtitle
       <aside className="auth-aside shop-auth-aside">
         <div className="auth-proof">
           <span className="eyebrow-label">A calmer counter</span>
-          <h2>Every order arrives paid, configured and ready to print.</h2>
+          <h2>Every order arrives configured and ready for payment or print.</h2>
           <ol>
-            <li><span>1</span><div><strong>See who actually arrived</strong><p>Remote paid orders stay separate from the physical walk-in line.</p></div></li>
-            <li><span>2</span><div><strong>Enter one counter code</strong><p>Find and print the correct paid file regardless of advisory position.</p></div></li>
+            <li><span>1</span><div><strong>See who actually arrived</strong><p>Remote prepared orders stay separate from the physical walk-in line.</p></div></li>
+            <li><span>2</span><div><strong>Enter one counter code</strong><p>Find the right file, collect cash when due, then print.</p></div></li>
             <li><span>3</span><div><strong>Hand it over</strong><p>Pickup, history and receipts stay in one place.</p></div></li>
           </ol>
         </div>

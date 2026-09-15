@@ -215,7 +215,7 @@ export default function Dashboard() {
   }
 
   async function jobAction(id: string, action: 'no-show' | 'handover') {
-    if (action === 'no-show' && !confirm('Remove this student from the live line? Their paid order stays available by counter code, but a later check-in will place them at the end.')) return;
+    if (action === 'no-show' && !confirm('Remove this student from the live line? Their prepared order stays available by counter code, but a later check-in will place them at the end.')) return;
     setError('');
     try {
       await api(`/api/shop/jobs/${id}/${action}`, { method: 'POST', role: 'shop' });
@@ -265,7 +265,7 @@ export default function Dashboard() {
   async function toggleAvailability() {
     if (!setup) return;
     const next = !setup.acceptingOrders;
-    if (!next && !confirm('Pause new student orders? Existing paid orders and counter codes will continue to work.')) return;
+    if (!next && !confirm('Pause new student orders? Existing prepared orders and counter codes will continue to work.')) return;
     setError('');
     try {
       await api('/api/shop/availability', {

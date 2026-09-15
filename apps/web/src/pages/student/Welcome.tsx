@@ -82,7 +82,7 @@ export default function Welcome() {
             <div>
               <span className="role-label">For print shops</span>
               <h3>Run your queue</h3>
-              <p>Prepared orders stay separate from checked-in students. One code finds and prints any paid order.</p>
+              <p>Prepared orders stay separate from checked-in students. One code finds the right order and confirms cash when needed.</p>
               <span className="role-link">Open shop dashboard <IconChevron /></span>
             </div>
           </Link>
