@@ -50,7 +50,7 @@ Phase 0 — baseline frozen; Phase 1 CI/release implementation in progress.
 | `npm run build` | Passed | All packages; existing web bundle-size warning remains tracked |
 | `npm audit --omit=dev --audit-level=high` | Passed | 0 reported production dependency vulnerabilities |
 | Local Docker integration run | Deferred | Docker Desktop engine failed locally; no user-owned services were used. GitHub Actions supplies isolated PostgreSQL/Redis for the required migration and simulator run. |
-| CI run `35005552170` | Cancelled | CI simulator configuration defect: it defaulted to Redis `6380` while the disposable service is `6379`; no result from this run is accepted as launch evidence. |
+| CI run `35005552170` | Cancelled | Simulator defaulted to Redis `6380` while CI exposes `6379`; secret scan also lacked its required read-only pull-request permission. Both defects are fixed before rerun; no result from this run is accepted as launch evidence. |
 
 ## Rollback
 
