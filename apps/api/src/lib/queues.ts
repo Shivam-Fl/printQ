@@ -15,6 +15,10 @@ export function bullConnection() {
     password: url.password || undefined,
     db: url.pathname && url.pathname !== '/' ? Number(url.pathname.slice(1)) : 0,
     tls: url.protocol === 'rediss:' ? {} : undefined,
+    // Unit tests import queue-owning modules without enqueueing work. Delay
+    // the socket until an operation actually needs Redis, while workers and
+    // E2E still connect immediately on their first real queue operation.
+    lazyConnect: true,
     maxRetriesPerRequest: null,
   };
 }
@@ -43,3 +47,12 @@ export const maintenanceQueue = new Queue('maintenance', {
   connection: bullConnection(),
   defaultJobOptions: { removeOnComplete: 100, removeOnFail: 100 },
 });
+
+/** Close BullMQ connections explicitly so CI/test workers cannot leak handles. */
+export async function closeQueues(): Promise<void> {
+  await Promise.allSettled([
+    convertQueue.close(),
+    timersQueue.close(),
+    maintenanceQueue.close(),
+  ]);
+}

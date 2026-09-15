@@ -17,13 +17,15 @@
     "package:agent": "node scripts/package-agent.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:ci": "node scripts/run-ci-tests.mjs",
     "test:e2e:sim": "node scripts/e2e-sim.mjs",
     "test:launch": "npm run build && npm run test && npm run test:e2e:sim",
+    "ci:integration:ready": "node scripts/verify-ci-environment.mjs",
     "db:migrate": "npm run db:migrate -w apps/api",
     "db:seed": "npm run db:seed -w apps/api"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.0",
