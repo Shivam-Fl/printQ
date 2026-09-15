@@ -6,20 +6,25 @@ import ShopNav from '../../components/ShopNav.js';
 type PayoutStatus = 'requested' | 'processing' | 'paid' | 'failed' | 'cancelled';
 
 interface EarningsData {
+  settlementBalancePaise: number;
   availablePaise: number;
+  amountDuePaise: number;
   pendingPaise: number;
   lifetimeEarnedPaise: number;
+  cashCollectedPaise: number;
   minimumPayoutPaise: number;
   payoutSchedule: 'daily' | 'on_demand';
   payoutProvider: 'mock' | 'razorpay_route';
+  balancePaymentProvider: 'mock' | 'razorpay';
   payoutAccountReady: boolean;
   entries: {
     id: string;
-    type: 'print_earning' | 'payout_reserved' | 'payout_released' | 'adjustment';
+    type: 'print_earning' | 'cash_settlement' | 'balance_payment' | 'payout_reserved' | 'payout_released' | 'adjustment';
     amountPaise: number;
     description: string;
     createdAt: string;
     jobId: string | null;
+    balancePaymentId: string | null;
   }[];
   payouts: {
     id: string;
@@ -29,6 +34,14 @@ interface EarningsData {
     createdAt: string;
     paidAt: string | null;
     lastError: string | null;
+  }[];
+  balancePayments: {
+    id: string;
+    amountPaise: number;
+    status: 'pending' | 'paid' | 'failed';
+    provider: string;
+    createdAt: string;
+    paidAt: string | null;
   }[];
 }
 
@@ -112,6 +125,48 @@ export default function Earnings() {
     }
   }
 
+  async function payAmountDue() {
+    if (!data || data.amountDuePaise <= 0) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await api<{
+        balancePayment: { id: string };
+        checkout: { mode: 'mock' | 'razorpay'; keyId?: string; orderId?: string; amountPaise?: number };
+      }>('/api/shop/earnings/pay-due', { method: 'POST', role: 'shop' });
+      if (response.checkout.mode === 'mock') {
+        await api('/api/shop/earnings/pay-due/mock-confirm', {
+          method: 'POST',
+          role: 'shop',
+          body: { balancePaymentId: response.balancePayment.id },
+        });
+        setMessage('Test settlement completed. No real money moved.');
+        await refresh();
+        return;
+      }
+
+      await loadRazorpay();
+      const checkout = new window.Razorpay!({
+        key: response.checkout.keyId,
+        order_id: response.checkout.orderId,
+        amount: response.checkout.amountPaise,
+        currency: 'INR',
+        name: 'PrintQ',
+        description: 'Shop cash-order settlement',
+        handler: () => {
+          setMessage('Payment received. The balance will update after secure confirmation.');
+          window.setTimeout(() => void refresh(), 2_500);
+        },
+      });
+      checkout.open();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not open settlement payment');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const canPayout = Boolean(data
     && data.payoutAccountReady
     && data.availablePaise >= data.minimumPayoutPaise);
@@ -132,10 +187,21 @@ export default function Earnings() {
       {!data ? <p className="dim">Loading…</p> : (
         <>
           <div className="stat-grid earnings-stats">
-            <div className="stat accent"><div className="n">{rupees(data.availablePaise)}</div><div className="k">Available to pay out</div></div>
+            <div className={`stat ${data.amountDuePaise > 0 ? '' : 'accent'}`}><div className="n">{rupees(data.availablePaise)}</div><div className="k">Available to pay out</div></div>
             <div className="stat"><div className="n">{rupees(data.pendingPaise)}</div><div className="k">Paid orders not printed yet</div></div>
             <div className="stat"><div className="n">{rupees(data.lifetimeEarnedPaise)}</div><div className="k">Lifetime shop earnings</div></div>
           </div>
+
+          {data.amountDuePaise > 0 && (
+            <section className="notice settlement-due-card">
+              <div>
+                <span className="eyebrow-label">Cash settlement</span>
+                <strong>{rupees(data.amountDuePaise)} due to PrintQ</strong>
+                <p>Cash collected at the counter is first offset against online-order earnings. Pay only the remaining net balance.</p>
+              </div>
+              <button disabled={busy} onClick={() => void payAmountDue()}>{busy ? 'Opening…' : `Pay ${rupees(data.amountDuePaise)}`}</button>
+            </section>
+          )}
 
           <div className="earnings-layout">
             <section className="card payout-control">
@@ -199,7 +265,9 @@ export default function Earnings() {
                   <tr key={entry.id}>
                     <td>{when(entry.createdAt)}</td>
                     <td>{entry.description}</td>
-                    <td className="mono">{entry.jobId ? entry.jobId.slice(0, 8).toUpperCase() : 'PAYOUT'}</td>
+                    <td className="mono">{entry.jobId
+                      ? entry.jobId.slice(0, 8).toUpperCase()
+                      : entry.balancePaymentId ? 'SETTLEMENT' : 'PAYOUT'}</td>
                     <td className={`mono ledger-amount ${entry.amountPaise >= 0 ? 'positive' : ''}`}>
                       {entry.amountPaise > 0 ? '+' : ''}{rupees(entry.amountPaise)}
                     </td>
@@ -212,4 +280,15 @@ export default function Earnings() {
       )}
     </div>
   );
+}
+
+function loadRazorpay(): Promise<void> {
+  if (window.Razorpay) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Could not load payment window'));
+    document.body.appendChild(script);
+  });
 }

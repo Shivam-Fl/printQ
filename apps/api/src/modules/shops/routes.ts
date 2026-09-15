@@ -32,7 +32,13 @@ import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
-import { creditPrintEarning, getShopEarnings, requestShopPayout } from '../earnings/service.js';
+import {
+  confirmShopBalancePayment,
+  createShopBalancePayment,
+  creditPrintEarning,
+  getShopEarnings,
+  requestShopPayout,
+} from '../earnings/service.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
 
@@ -58,6 +64,7 @@ shopRouter.get(
         checkInRadiusM: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
+        cashPaymentsEnabled: true,
         acceptingOrders: true,
         printOptions: true,
         otpWindowMinutes: true,
@@ -140,6 +147,7 @@ const shopPatchSchema = z.object({
   longitude: z.number().finite().min(-180).max(180).nullable().optional(),
   checkInRadiusM: z.number().int().min(20).max(500).optional(),
   autoAssignEnabled: z.boolean().optional(),
+  cashPaymentsEnabled: z.boolean().optional(),
   acceptingOrders: z.boolean().optional(),
   printOptions: printOptionsSchema.optional(),
 }).superRefine((value, context) => {
@@ -180,6 +188,7 @@ shopRouter.patch(
         checkInRadiusM: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
+        cashPaymentsEnabled: true,
         acceptingOrders: true,
         printOptions: true,
       },
@@ -236,6 +245,35 @@ shopRouter.post(
   asyncHandler(async (req, res) => {
     const payout = await requestShopPayout(req.shopUser!.shopId, req.shopUser!.id);
     res.status(201).json({ payout });
+  }),
+);
+
+/** Settle a negative shop ledger created by cash-collected platform fees. */
+shopRouter.post(
+  '/earnings/pay-due',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const result = await createShopBalancePayment(req.shopUser!.shopId, req.shopUser!.id);
+    res.status(result.created ? 201 : 200).json(result);
+  }),
+);
+
+/** Local/test provider equivalent of Razorpay's captured-payment webhook. */
+shopRouter.post(
+  '/earnings/pay-due/mock-confirm',
+  requireShopOwner,
+  validateBody(z.object({ balancePaymentId: z.string().uuid() })),
+  asyncHandler(async (req, res) => {
+    if (env.PAYMENT_PROVIDER !== 'mock') throw notFound();
+    const balancePayment = await prisma.shopBalancePayment.findFirst({
+      where: {
+        id: (req.body as { balancePaymentId: string }).balancePaymentId,
+        shopId: req.shopUser!.shopId,
+      },
+    });
+    if (!balancePayment) throw notFound();
+    await confirmShopBalancePayment(balancePayment.providerOrderId, `mock_balance_${balancePayment.id}`);
+    res.json({ ok: true });
   }),
 );
 
@@ -449,6 +487,9 @@ shopRouter.get(
         specs: true,
         pagesPerCopy: true,
         totalPaise: true,
+        paymentStatus: true,
+        paymentProvider: true,
+        cashCollectedAt: true,
         assignedPrinterId: true,
         otpExpiresAt: true,
         printError: true,
@@ -480,10 +521,11 @@ shopRouter.post(
   otpVerifyLimiter,
   validateBody(releaseOtpSchema),
   asyncHandler(async (req, res) => {
-    const { otp, printerId, overrideQueue } = req.body as {
+    const { otp, printerId, overrideQueue, cashReceived } = req.body as {
       otp: string;
       printerId?: string;
       overrideQueue: boolean;
+      cashReceived: boolean;
     };
     const result = await releaseByOtp(
       req.shopUser!.shopId,
@@ -491,11 +533,15 @@ shopRouter.post(
       req.shopUser!.id,
       printerId,
       overrideQueue,
+      cashReceived,
     );
     if (!result.ok) {
       res.status(200).json({
         requiresManualAssignment: result.requiresManualAssignment,
         requiresQueueOverride: result.requiresQueueOverride,
+        requiresCashConfirmation: result.requiresCashConfirmation,
+        cashAmountPaise: result.cashAmountPaise,
+        selectedPrinterId: result.selectedPrinterId,
         position: result.position,
         queueStatus: result.queueStatus,
         jobId: result.job?.id,
@@ -581,6 +627,53 @@ shopRouter.post(
     await dispatchJob(updated, { type: 'shop', id: req.shopUser!.id });
     publishEvent(`shop:${shopId}`, 'queue:retry_dispatched', { jobId: updated.id, printerId });
     res.json({ ok: true, job: { id: updated.id, status: updated.status, printerId } });
+  }),
+);
+
+/** Close a collected-cash order only after staff physically returns the cash. */
+shopRouter.post(
+  '/jobs/:id/cash-returned',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!job) throw notFound();
+    if (
+      job.paymentProvider !== 'cash'
+      || job.paymentStatus !== 'paid'
+      || !job.cashCollectedAt
+      || job.status !== 'otp_verified'
+    ) {
+      throw conflict('This cash order cannot be closed in its current state');
+    }
+
+    const updated = await applyTransition(
+      job.id,
+      'otp_verified',
+      'CASH_RETURNED',
+      { type: 'shop', id: req.shopUser!.id },
+      { paymentStatus: 'refunded', claimedByAgentId: null, printError: null },
+    );
+    if (!updated) throw conflict('Job state changed, try again');
+    await prisma.paymentEvent.upsert({
+      where: { providerEventId: `cash_returned_${job.id}` },
+      create: {
+        provider: 'cash',
+        providerEventId: `cash_returned_${job.id}`,
+        jobId: job.id,
+        payload: { cashReturned: true, returnedByShopUserId: req.shopUser!.id },
+      },
+      update: {},
+    });
+    await scheduleFileDeletion(job.fileId);
+    await notifyStudent(job.studentId, {
+      title: 'Cash returned — order closed',
+      body: 'The shop could not complete this print and returned your cash. The order has been cancelled.',
+      url: `/jobs/${job.id}`,
+    });
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'cancelled' });
+    await emitQueueUpdate(shopId);
+    res.json({ ok: true, job: { id: updated.id, status: updated.status, paymentStatus: updated.paymentStatus } });
   }),
 );
 

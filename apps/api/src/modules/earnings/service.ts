@@ -1,9 +1,11 @@
 import { Prisma, type ShopPayout } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { env } from '../../config/env.js';
 import { conflict } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { payoutProvider, PayoutProviderError } from '../../providers/payout/index.js';
+import { paymentProvider } from '../../providers/payment/index.js';
 
 const PRE_PRINT_STATUSES = [
   'awaiting_arrival',
@@ -16,25 +18,61 @@ const PRE_PRINT_STATUSES = [
   'finishing',
 ] as const;
 
+/** Ledger balance including cash orders whose print has not completed yet. */
+export async function getProjectedCashSettlementBalance(shopId: string): Promise<number> {
+  const [balance, unsettledCashJobs] = await Promise.all([
+    prisma.shopLedgerEntry.aggregate({ where: { shopId }, _sum: { amountPaise: true } }),
+    prisma.job.findMany({
+      where: {
+        shopId,
+        paymentProvider: 'cash',
+        status: { notIn: ['completed', 'expired', 'cancelled'] },
+        ledgerEntries: { none: { type: 'cash_settlement' } },
+      },
+      select: { shopBasePaise: true, totalPaise: true },
+    }),
+  ]);
+  return (balance._sum.amountPaise ?? 0)
+    + unsettledCashJobs.reduce((total, job) => total + job.shopBasePaise - job.totalPaise, 0);
+}
+
+export async function canShopAcceptCash(shopId: string): Promise<boolean> {
+  return (await getProjectedCashSettlementBalance(shopId)) > -env.MAX_SHOP_CASH_DEBT_PAISE;
+}
+
 /** Credit the private shop ledger exactly once, after physical printing succeeds. */
 export async function creditPrintEarning(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({
     where: { id: jobId },
-    select: { id: true, shopId: true, shopBasePaise: true, status: true, paymentStatus: true },
+    select: {
+      id: true,
+      shopId: true,
+      shopBasePaise: true,
+      totalPaise: true,
+      status: true,
+      paymentStatus: true,
+      paymentProvider: true,
+    },
   });
   if (!job || !['ready_for_pickup', 'completed'].includes(job.status) || job.paymentStatus !== 'paid') return;
   if (job.shopBasePaise <= 0) {
     logger.error({ jobId }, 'shop_earning_missing_base_snapshot');
     return;
   }
+  const isCash = job.paymentProvider === 'cash';
+  const type = isCash ? 'cash_settlement' : 'print_earning';
   await prisma.shopLedgerEntry.upsert({
-    where: { jobId_type: { jobId, type: 'print_earning' } },
+    where: { jobId_type: { jobId, type } },
     create: {
       shopId: job.shopId,
       jobId,
-      type: 'print_earning',
-      amountPaise: job.shopBasePaise,
-      description: 'Completed print order',
+      type,
+      // For cash, the shop already holds the student's full payment. Only the
+      // net difference belongs in PrintQ's payable ledger.
+      amountPaise: isCash ? job.shopBasePaise - job.totalPaise : job.shopBasePaise,
+      description: isCash
+        ? 'Cash order settlement — cash retained by shop'
+        : 'Completed online print order',
     },
     update: {},
   });
@@ -47,7 +85,7 @@ export async function reconcilePrintEarnings(): Promise<void> {
       status: { in: ['ready_for_pickup', 'completed'] },
       paymentStatus: 'paid',
       shopBasePaise: { gt: 0 },
-      ledgerEntries: { none: { type: 'print_earning' } },
+      ledgerEntries: { none: { type: { in: ['print_earning', 'cash_settlement'] } } },
     },
     select: { id: true },
     take: 200,
@@ -56,9 +94,21 @@ export async function reconcilePrintEarnings(): Promise<void> {
 }
 
 export async function getShopEarnings(shopId: string) {
-  const [available, lifetime, pending, shop, entries, payouts] = await Promise.all([
+  const [balance, lifetime, cashCollected, pending, shop, entries, payouts, balancePayments] = await Promise.all([
     prisma.shopLedgerEntry.aggregate({ where: { shopId }, _sum: { amountPaise: true } }),
-    prisma.shopLedgerEntry.aggregate({ where: { shopId, type: 'print_earning' }, _sum: { amountPaise: true } }),
+    prisma.job.aggregate({
+      where: { shopId, paymentStatus: 'paid', status: { in: ['ready_for_pickup', 'completed'] } },
+      _sum: { shopBasePaise: true },
+    }),
+    prisma.job.aggregate({
+      where: {
+        shopId,
+        paymentProvider: 'cash',
+        paymentStatus: 'paid',
+        cashCollectedAt: { not: null },
+      },
+      _sum: { totalPaise: true },
+    }),
     prisma.job.aggregate({
       where: { shopId, paymentStatus: 'paid', status: { in: [...PRE_PRINT_STATUSES] } },
       _sum: { shopBasePaise: true },
@@ -71,7 +121,15 @@ export async function getShopEarnings(shopId: string) {
       where: { shopId },
       orderBy: { createdAt: 'desc' },
       take: 30,
-      select: { id: true, type: true, amountPaise: true, description: true, createdAt: true, jobId: true },
+      select: {
+        id: true,
+        type: true,
+        amountPaise: true,
+        description: true,
+        createdAt: true,
+        jobId: true,
+        balancePaymentId: true,
+      },
     }),
     prisma.shopPayout.findMany({
       where: { shopId },
@@ -79,19 +137,98 @@ export async function getShopEarnings(shopId: string) {
       take: 20,
       select: { id: true, amountPaise: true, status: true, provider: true, createdAt: true, paidAt: true, lastError: true },
     }),
+    prisma.shopBalancePayment.findMany({
+      where: { shopId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { id: true, amountPaise: true, status: true, provider: true, createdAt: true, paidAt: true },
+    }),
   ]);
   if (!shop) throw conflict('Shop not found');
+  const settlementBalancePaise = balance._sum.amountPaise ?? 0;
   return {
-    availablePaise: available._sum.amountPaise ?? 0,
+    settlementBalancePaise,
+    availablePaise: Math.max(0, settlementBalancePaise),
+    amountDuePaise: Math.max(0, -settlementBalancePaise),
     pendingPaise: pending._sum.shopBasePaise ?? 0,
-    lifetimeEarnedPaise: lifetime._sum.amountPaise ?? 0,
+    lifetimeEarnedPaise: lifetime._sum.shopBasePaise ?? 0,
+    cashCollectedPaise: cashCollected._sum.totalPaise ?? 0,
     minimumPayoutPaise: env.MIN_SHOP_PAYOUT_PAISE,
     payoutSchedule: shop.payoutSchedule,
     payoutProvider: payoutProvider.name,
+    balancePaymentProvider: paymentProvider.name,
     payoutAccountReady: payoutProvider.name === 'mock' || Boolean(shop.razorpayLinkedAccountId),
     entries,
     payouts,
+    balancePayments,
   };
+}
+
+/** Create or reuse an exact payment order for the shop's current amount due. */
+export async function createShopBalancePayment(shopId: string, requestedById: string) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Shop" WHERE "id" = ${shopId} FOR UPDATE`;
+    const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { id: true } });
+    if (!shop) throw conflict('Shop not found');
+
+    const balance = await tx.shopLedgerEntry.aggregate({ where: { shopId }, _sum: { amountPaise: true } });
+    const amountPaise = Math.max(0, -(balance._sum.amountPaise ?? 0));
+    if (amountPaise <= 0) throw conflict('There is no amount due');
+
+    const existing = await tx.shopBalancePayment.findFirst({
+      where: { shopId, status: 'pending', amountPaise },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) {
+      return {
+        created: false,
+        balancePayment: existing,
+        checkout: paymentProvider.checkout(existing.providerOrderId, existing.amountPaise, existing.id),
+      };
+    }
+
+    const id = randomUUID();
+    const order = await paymentProvider.createOrder(id, amountPaise, 'shop_balance');
+    const balancePayment = await tx.shopBalancePayment.create({
+      data: {
+        id,
+        shopId,
+        amountPaise,
+        provider: order.provider,
+        providerOrderId: order.providerOrderId,
+        requestedById,
+      },
+    });
+    return { created: true, balancePayment, checkout: order.checkout };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+/** Credit a captured shop settlement payment exactly once. */
+export async function confirmShopBalancePayment(providerOrderId: string, paymentId: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const payment = await tx.shopBalancePayment.findUnique({ where: { providerOrderId } });
+    if (!payment) return false;
+    if (payment.status === 'paid') return true;
+    if (payment.status !== 'pending') return false;
+
+    await tx.$queryRaw`SELECT "id" FROM "Shop" WHERE "id" = ${payment.shopId} FOR UPDATE`;
+    await tx.shopBalancePayment.update({
+      where: { id: payment.id },
+      data: { status: 'paid', paymentId, paidAt: new Date() },
+    });
+    await tx.shopLedgerEntry.upsert({
+      where: { balancePaymentId_type: { balancePaymentId: payment.id, type: 'balance_payment' } },
+      create: {
+        shopId: payment.shopId,
+        balancePaymentId: payment.id,
+        type: 'balance_payment',
+        amountPaise: payment.amountPaise,
+        description: 'Cash-order balance paid to PrintQ',
+      },
+      update: {},
+    });
+    return true;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 async function reserveFullBalance(shopId: string, requestedById?: string): Promise<ShopPayout> {

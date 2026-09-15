@@ -152,6 +152,7 @@ async function main() {
     PLATFORM_MARKUP_BPS: '2500',
     SHOP_PAYOUT_PROVIDER: 'mock',
     MIN_SHOP_PAYOUT_PAISE: '100',
+    MAX_SHOP_CASH_DEBT_PAISE: '100',
     SMS_PROVIDER: 'console',
     EMAIL_PROVIDER: 'console',
     LOG_LEVEL: 'info',
@@ -183,7 +184,7 @@ async function main() {
   const located = await request('/api/shop/me', {
     method: 'PATCH',
     token: shopToken,
-    body: { latitude: 28.6139, longitude: 77.209, checkInRadiusM: 150 },
+    body: { latitude: 28.6139, longitude: 77.209, checkInRadiusM: 50, cashPaymentsEnabled: true },
   });
   assert(located.status === 200 && located.data.shop?.locationUpdatedAt, 'secure arrival zone configured');
 
@@ -231,6 +232,7 @@ async function main() {
   assert(setup.data.setup?.ready === true, 'setup checklist reports launch-ready');
   const publicShop = await request(`/api/public/shops/${shopSlug}`);
   assert(publicShop.data.shop?.open === true, 'student storefront opens only with a reachable agent');
+  assert(publicShop.data.shop?.cashPaymentsEnabled === true, 'cash is shown only after the shop enables it');
   assert(
     publicShop.data.shop?.options?.papers?.every((paper) => !('bwPaise' in paper) && !('colorPaise' in paper)),
     'public storefront never exposes the owner base rate card',
@@ -349,6 +351,169 @@ async function main() {
   const completed = await request(`/api/jobs/${jobId}`, { token: studentToken });
   assert(completed.data.job.status === 'completed', 'student history shows a completed order');
   assert(!('priceBreakdown' in completed.data.job), 'student order API keeps the private pricing split hidden');
+
+  console.log('\nCash collection and shop settlement journey');
+  const cashSpecs = { copies: 2, paperSize: 'A4', color: false, duplex: false, binding: null, pageRange: '1' };
+  const cashCreated = await request('/api/jobs', {
+    method: 'POST',
+    token: studentToken,
+    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+  });
+  assert(
+    cashCreated.status === 201 && cashCreated.data.checkout?.mode === 'cash',
+    'student can prepare a cash order without an online checkout',
+  );
+  const cashJobId = cashCreated.data.job.id;
+  const cashPrepared = await waitFor('prepared cash order', async () => {
+    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+    return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
+  });
+  assert(
+    cashPrepared.paymentStatus === 'cash_due' && cashPrepared.position === null && cashPrepared.otpCode === null,
+    'unpaid cash order stays outside the physical line with its code hidden',
+  );
+  const duplicateCash = await request('/api/jobs', {
+    method: 'POST',
+    token: studentToken,
+    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+  });
+  assert(duplicateCash.status === 409, 'one active unpaid cash order per student limits counter spam');
+  const cashCheckIn = await request(`/api/jobs/${cashJobId}/check-in`, {
+    method: 'POST',
+    token: studentToken,
+    body: arrivalProof(),
+  });
+  assert(cashCheckIn.status === 200, 'cash order can join only after the same arrival check');
+  const cashLive = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  const cashCode = cashLive.data.job.otpCode;
+  assert(/^\d{6}$/.test(cashCode ?? ''), 'cash order code unlocks automatically near the front');
+  const cashReleasePrompt = await request('/api/shop/release', {
+    method: 'POST',
+    token: shopToken,
+    body: { otp: cashCode },
+  });
+  assert(
+    cashReleasePrompt.status === 200
+      && cashReleasePrompt.data.requiresCashConfirmation === true
+      && cashReleasePrompt.data.cashAmountPaise === cashCreated.data.job.totalPaise,
+    'OTP lookup stops and shows the exact cash amount before printing',
+  );
+  const stillUnpaid = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  assert(
+    stillUnpaid.data.job.paymentStatus === 'cash_due' && stillUnpaid.data.job.status === 'queued',
+    'looking up the OTP alone cannot mark cash paid or dispatch the document',
+  );
+  const cashReleased = await request('/api/shop/release', {
+    method: 'POST',
+    token: shopToken,
+    body: {
+      otp: cashCode,
+      cashReceived: true,
+      ...(cashReleasePrompt.data.selectedPrinterId ? { printerId: cashReleasePrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  assert(cashReleased.status === 200 && cashReleased.data.ok, 'staff cash confirmation atomically releases the print');
+  await waitFor('cash print simulated jam', async () => {
+    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+    return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
+  });
+  const cashRetry = await request(`/api/shop/jobs/${cashJobId}/retry-print`, { method: 'POST', token: shopToken, body: {} });
+  assert(cashRetry.status === 200, 'cash print retains the normal hardware-failure recovery');
+  await waitFor('cash print completion', async () => {
+    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+    return result.data.job?.status === 'ready_for_pickup';
+  });
+  const cashEarnings = await waitFor('cash settlement ledger', async () => {
+    const result = await request('/api/shop/earnings', { token: shopToken });
+    return result.data.earnings?.amountDuePaise > 0 ? result : null;
+  });
+  const cashTotalPaise = cashCreated.data.job.totalPaise;
+  const expectedCashFeePaise = cashTotalPaise - 400;
+  assert(
+    cashEarnings.data.earnings.amountDuePaise === expectedCashFeePaise
+      && cashEarnings.data.earnings.availablePaise === 0
+      && cashEarnings.data.earnings.cashCollectedPaise === cashTotalPaise
+      && cashEarnings.data.earnings.entries.some((entry) => entry.type === 'cash_settlement' && entry.amountPaise === -expectedCashFeePaise),
+    'cash retained by the shop creates only the net platform-fee debit',
+  );
+  const cashPausedByDebt = await request(`/api/public/shops/${shopSlug}`);
+  assert(cashPausedByDebt.data.shop?.cashPaymentsEnabled === false, 'cash option pauses automatically at the shop credit limit');
+  const debtLimitedCash = await request('/api/jobs', {
+    method: 'POST',
+    token: studentToken,
+    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+  });
+  assert(debtLimitedCash.status === 409, 'server rejects new cash exposure while the settlement limit is reached');
+  const dueOrder = await request('/api/shop/earnings/pay-due', { method: 'POST', token: shopToken });
+  assert(dueOrder.status === 201 && dueOrder.data.checkout?.mode === 'mock', 'owner can open one aggregated amount-due payment');
+  const dueConfirm = await request('/api/shop/earnings/pay-due/mock-confirm', {
+    method: 'POST',
+    token: shopToken,
+    body: { balancePaymentId: dueOrder.data.balancePayment.id },
+  });
+  assert(dueConfirm.status === 200, 'test settlement confirmation is accepted');
+  const afterCashSettlement = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    afterCashSettlement.data.earnings.amountDuePaise === 0
+      && afterCashSettlement.data.earnings.availablePaise === 0,
+    'captured shop payment clears the amount due exactly once',
+  );
+  const duplicateDueConfirm = await request('/api/shop/earnings/pay-due/mock-confirm', {
+    method: 'POST',
+    token: shopToken,
+    body: { balancePaymentId: dueOrder.data.balancePayment.id },
+  });
+  const afterDuplicateSettlement = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    duplicateDueConfirm.status === 200 && afterDuplicateSettlement.data.earnings.settlementBalancePaise === 0,
+    'duplicate provider confirmation cannot credit the shop twice',
+  );
+  await request(`/api/shop/jobs/${cashJobId}/handover`, { method: 'POST', token: shopToken });
+  const cashRestored = await request(`/api/public/shops/${shopSlug}`);
+  assert(cashRestored.data.shop?.cashPaymentsEnabled === true, 'cash option returns automatically after the shop settles its balance');
+
+  const returnCashCreated = await request('/api/jobs', {
+    method: 'POST',
+    token: studentToken,
+    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+  });
+  const returnCashJobId = returnCashCreated.data.job.id;
+  await waitFor('cash-return order prepared', async () => {
+    const result = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
+    return result.data.job?.status === 'awaiting_arrival';
+  });
+  await request(`/api/jobs/${returnCashJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
+  const returnCashLive = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
+  const returnCashPrompt = await request('/api/shop/release', {
+    method: 'POST',
+    token: shopToken,
+    body: { otp: returnCashLive.data.job.otpCode },
+  });
+  await request('/api/shop/release', {
+    method: 'POST',
+    token: shopToken,
+    body: {
+      otp: returnCashLive.data.job.otpCode,
+      cashReceived: true,
+      ...(returnCashPrompt.data.selectedPrinterId ? { printerId: returnCashPrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  await waitFor('cash-return simulated failure', async () => {
+    const result = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
+    return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
+  });
+  const cashReturned = await request(`/api/shop/jobs/${returnCashJobId}/cash-returned`, { method: 'POST', token: shopToken });
+  assert(
+    cashReturned.status === 200
+      && cashReturned.data.job?.status === 'cancelled'
+      && cashReturned.data.job?.paymentStatus === 'refunded',
+    'staff can close an unrecoverable print only after recording the physical cash return',
+  );
+  const afterCashReturn = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    !afterCashReturn.data.earnings.entries.some((entry) => entry.jobId === returnCashJobId),
+    'returned cash from an unprinted job never creates shop earnings or platform debt',
+  );
 
   console.log('\nLate arrival, skip-safe counter lookup and refund journey');
   const queueFileId = await upload(studentToken, shopSlug, 1, 'arrival-model-test.pdf');

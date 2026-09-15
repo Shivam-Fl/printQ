@@ -2,6 +2,7 @@ import type { JobStatus } from './types.js';
 
 export const JOB_EVENTS = [
   'PAYMENT_CONFIRMED',
+  'CASH_SELECTED',
   'ARRIVED',
   'QUEUE_SKIPPED',
   'COUNTER_RELEASE',
@@ -16,6 +17,7 @@ export const JOB_EVENTS = [
   'FINISHING_REQUIRED',
   'FINISHING_COMPLETED',
   'PRINT_FAILED',
+  'CASH_RETURNED',
   'HANDED_OVER',
   'CANCEL',
 ] as const;
@@ -26,7 +28,7 @@ export type JobEvent = (typeof JOB_EVENTS)[number];
  * Every status write in the system must go through transition().
  */
 const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
-  pending_payment: { PAYMENT_CONFIRMED: 'awaiting_arrival', CANCEL: 'cancelled' },
+  pending_payment: { PAYMENT_CONFIRMED: 'awaiting_arrival', CASH_SELECTED: 'awaiting_arrival', CANCEL: 'cancelled' },
   awaiting_arrival: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', CANCEL: 'cancelled' },
   queued: {
     FRONT_REACHED: 'notified',
@@ -43,7 +45,7 @@ const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
   },
   no_show: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', REQUEUE: 'requeued', GRACE_EXPIRED: 'expired' },
   requeued: { REJOINED: 'queued' },
-  otp_verified: { PRINT_STARTED: 'printing' },
+  otp_verified: { PRINT_STARTED: 'printing', CASH_RETURNED: 'cancelled' },
   // PRINT_FAILED returns to otp_verified so the shop can re-dispatch without a new OTP
   printing: {
     PRINT_COMPLETED: 'ready_for_pickup',

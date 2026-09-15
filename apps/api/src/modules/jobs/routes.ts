@@ -16,7 +16,7 @@ import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { paymentProvider } from '../../providers/payment/index.js';
-import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, requeueJob } from '../queue/engine.js';
+import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, onCashSelected, requeueJob } from '../queue/engine.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
@@ -27,6 +27,7 @@ import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperational } from '../shops/availability.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
+import { getProjectedCashSettlementBalance } from '../earnings/service.js';
 
 export const jobsRouter = Router();
 
@@ -73,12 +74,13 @@ jobsRouter.post(
   requireStudent,
   validateBody(createJobSchema),
   asyncHandler(async (req, res) => {
-    const { fileId, specs, mode, scheduledTime, couponCode } = req.body as {
+    const { fileId, specs, mode, scheduledTime, couponCode, paymentMethod } = req.body as {
       fileId: string;
       specs: JobSpecs;
       mode: 'instant' | 'scheduled';
       scheduledTime?: Date;
       couponCode?: string;
+      paymentMethod: 'online' | 'cash';
     };
     const file = await prisma.uploadedFile.findFirst({
       where: { id: fileId, studentId: req.student!.id, status: 'ready' },
@@ -88,6 +90,23 @@ jobsRouter.post(
 
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
+    }
+    if (paymentMethod === 'cash' && !file.shop.cashPaymentsEnabled) {
+      throw conflict('This shop is not accepting cash orders. Pay online or ask the shop to enable cash.');
+    }
+    if (paymentMethod === 'cash') {
+      const existingCashOrder = await prisma.job.count({
+        where: {
+          shopId: file.shopId,
+          studentId: req.student!.id,
+          paymentProvider: 'cash',
+          paymentStatus: 'cash_due',
+          status: { notIn: ['completed', 'expired', 'cancelled'] },
+        },
+      });
+      if (existingCashOrder > 0) {
+        throw conflict('Finish or cancel your existing cash order at this shop before creating another.');
+      }
     }
 
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
@@ -100,6 +119,13 @@ jobsRouter.post(
       resolvedCouponCode = resolved.code;
     }
     if (breakdown.totalPaise < 100) throw badRequest('Minimum order is ₹1');
+    if (paymentMethod === 'cash') {
+      const projectedBalance = await getProjectedCashSettlementBalance(file.shopId);
+      const thisOrderSettlement = shopBase.totalPaise - breakdown.totalPaise;
+      if (projectedBalance + thisOrderSettlement < -env.MAX_SHOP_CASH_DEBT_PAISE) {
+        throw conflict('Cash is temporarily unavailable at this shop. Pay online while the shop settles its cash balance.');
+      }
+    }
 
     const job = await prisma.job.create({
       data: {
@@ -117,11 +143,21 @@ jobsRouter.post(
         discountPaise: breakdown.discountPaise,
         mode,
         scheduledTime: mode === 'scheduled' ? scheduledTime : null,
+        paymentProvider: paymentMethod === 'cash' ? 'cash' : null,
       },
     });
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
-    const order = await paymentProvider.createOrder(job.id, breakdown.totalPaise);
+    if (paymentMethod === 'cash') {
+      await onCashSelected(job.id);
+      res.status(201).json({
+        job: { id: job.id, status: 'awaiting_arrival', totalPaise: job.totalPaise },
+        checkout: { mode: 'cash', amountPaise: job.totalPaise },
+      });
+      return;
+    }
+
+    const order = await paymentProvider.createOrder(job.id, breakdown.totalPaise, 'print_job');
     await prisma.job.update({
       where: { id: job.id },
       data: { paymentProvider: order.provider, paymentOrderId: order.providerOrderId },
@@ -187,6 +223,8 @@ jobsRouter.get(
         checkInCount: true,
         assignedPrinterId: true,
         paymentStatus: true,
+        paymentProvider: true,
+        cashCollectedAt: true,
         printError: true,
         printAttempts: true,
         rating: true,
@@ -213,7 +251,7 @@ jobsRouter.get(
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
         counterCodeAvailable: codeVisible,
         counterCodeThreshold: env.NEAR_FRONT_THRESHOLD,
-        canCheckIn: job.paymentStatus === 'paid' && ['awaiting_arrival', 'no_show'].includes(job.status),
+        canCheckIn: ['paid', 'cash_due'].includes(job.paymentStatus) && ['awaiting_arrival', 'no_show'].includes(job.status),
         checkInOpensAt,
       },
     });
@@ -289,10 +327,15 @@ jobsRouter.post(
     ) {
       throw conflict('Job can no longer be cancelled');
     }
-    const updated = await applyTransition(job.id, job.status, 'CANCEL', {
-      type: 'student',
-      id: req.student!.id,
-    });
+    const updated = await applyTransition(
+      job.id,
+      job.status,
+      'CANCEL',
+      { type: 'student', id: req.student!.id },
+      job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due'
+        ? { paymentStatus: 'failed' }
+        : {},
+    );
     if (!updated) throw conflict('Job state changed, try again');
     await refundIfPaid(job);
     await scheduleFileDeletion(job.fileId);

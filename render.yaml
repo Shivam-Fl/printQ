@@ -79,6 +79,8 @@ services:
         value: mock
       - key: MIN_SHOP_PAYOUT_PAISE
         value: "50000"
+      - key: MAX_SHOP_CASH_DEBT_PAISE
+        value: "50000"
       - key: VAPID_PUBLIC_KEY
         sync: false # npx web-push generate-vapid-keys
       - key: VAPID_PRIVATE_KEY

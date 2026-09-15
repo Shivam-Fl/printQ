@@ -19,6 +19,10 @@ export interface ReleaseResult {
   position?: number | null;
   queueStatus?: string;
   eligiblePrinters?: { printerId: string; estimatedWaitMinutes: number }[];
+  /** Cash orders stop here until counter staff confirms the full amount was received. */
+  requiresCashConfirmation?: boolean;
+  cashAmountPaise?: number;
+  selectedPrinterId?: string;
 }
 
 /**
@@ -32,6 +36,7 @@ export async function releaseByOtp(
   shopUserId: string,
   manualPrinterId?: string,
   overrideQueue = false,
+  cashReceived = false,
 ): Promise<ReleaseResult> {
   const shop = await prisma.shop.findUnique({ where: { id: shopId } });
   if (!shop) throw notFound();
@@ -41,7 +46,10 @@ export async function releaseByOtp(
     where: {
       shopId,
       releaseCodeDigest: digest,
-      paymentStatus: 'paid',
+      OR: [
+        { paymentStatus: 'paid' },
+        { paymentProvider: 'cash', paymentStatus: 'cash_due' },
+      ],
       status: {
         in: ['awaiting_arrival', 'queued', 'notified', 'no_show', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup'],
       },
@@ -53,7 +61,7 @@ export async function releaseByOtp(
   // hashed before stable release codes existed.
   if (!matched) {
     const legacyCandidates = await prisma.job.findMany({
-      where: { shopId, status: 'notified', otpHash: { not: null } },
+      where: { shopId, status: 'notified', paymentStatus: 'paid', otpHash: { not: null } },
     });
     for (const candidate of legacyCandidates) {
       if (await verifyOtpHash(candidate.otpHash!, otp)) {
@@ -121,6 +129,17 @@ export async function releaseByOtp(
     }
   }
 
+  const isCashDue = matched.paymentProvider === 'cash' && matched.paymentStatus === 'cash_due';
+  if (isCashDue && !cashReceived) {
+    return {
+      ok: false,
+      requiresCashConfirmation: true,
+      cashAmountPaise: matched.totalPaise,
+      selectedPrinterId: printerId,
+      job: matched,
+    };
+  }
+
   const arrivedAtCounter = matched.status === 'awaiting_arrival' || matched.status === 'no_show';
   const updated = await applyTransition(
     matched.id,
@@ -131,6 +150,13 @@ export async function releaseByOtp(
       assignedPrinterId: printerId,
       claimedByAgentId: null,
       printError: null,
+      ...(isCashDue
+        ? {
+            paymentStatus: 'paid',
+            paymentId: `cash_${matched.id}`,
+            cashCollectedAt: new Date(),
+          }
+        : {}),
       ...(arrivedAtCounter
         ? {
             arrivedAt: new Date(),

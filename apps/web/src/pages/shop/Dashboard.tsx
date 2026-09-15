@@ -20,6 +20,9 @@ interface QueueJob {
   };
   pagesPerCopy: number;
   totalPaise: number;
+  paymentStatus: 'pending' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
+  paymentProvider: string | null;
+  cashCollectedAt: string | null;
   assignedPrinterId: string | null;
   otpExpiresAt: string | null;
   printError: string | null;
@@ -50,6 +53,13 @@ interface QueueOverride {
   queueStatus: string;
 }
 
+interface CashConfirmation {
+  jobId?: string;
+  amountPaise: number;
+  selectedPrinterId?: string;
+  overrideQueue: boolean;
+}
+
 interface SetupStatus {
   ready: boolean;
   printerReady: boolean;
@@ -67,6 +77,7 @@ export default function Dashboard() {
   const [otp, setOtp] = useState('');
   const [manual, setManual] = useState<ManualAssign | null>(null);
   const [queueOverride, setQueueOverride] = useState<QueueOverride | null>(null);
+  const [cashConfirmation, setCashConfirmation] = useState<CashConfirmation | null>(null);
   const [manualPrinter, setManualPrinter] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -141,7 +152,7 @@ export default function Dashboard() {
     };
   }, [refresh]);
 
-  async function release(printerId?: string, overrideQueue = false) {
+  async function release(printerId?: string, overrideQueue = false, cashReceived = false) {
     setError('');
     setMessage('');
     try {
@@ -149,6 +160,9 @@ export default function Dashboard() {
         ok?: boolean;
         requiresManualAssignment?: boolean;
         requiresQueueOverride?: boolean;
+        requiresCashConfirmation?: boolean;
+        cashAmountPaise?: number;
+        selectedPrinterId?: string;
         jobId?: string;
         position?: number | null;
         queueStatus?: string;
@@ -160,9 +174,11 @@ export default function Dashboard() {
           otp,
           ...(printerId ? { printerId } : {}),
           overrideQueue,
+          cashReceived,
         },
       });
       if (res.requiresQueueOverride) {
+        setCashConfirmation(null);
         setQueueOverride({
           jobId: res.jobId,
           position: res.position ?? null,
@@ -171,14 +187,27 @@ export default function Dashboard() {
         return;
       }
       if (res.requiresManualAssignment) {
+        setCashConfirmation(null);
         setManual({ jobId: res.jobId, eligiblePrinters: res.eligiblePrinters ?? [], overrideQueue });
         setManualPrinter(res.eligiblePrinters?.[0]?.printerId ?? '');
+        return;
+      }
+      if (res.requiresCashConfirmation && res.cashAmountPaise != null) {
+        setManual(null);
+        setQueueOverride(null);
+        setCashConfirmation({
+          jobId: res.jobId,
+          amountPaise: res.cashAmountPaise,
+          selectedPrinterId: res.selectedPrinterId,
+          overrideQueue,
+        });
         return;
       }
       setMessage('Sent to printer ✓');
       setOtp('');
       setManual(null);
       setQueueOverride(null);
+      setCashConfirmation(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Release failed');
@@ -205,6 +234,19 @@ export default function Dashboard() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not retry this print');
+    }
+  }
+
+  async function returnCashAndClose(id: string, amountPaise: number) {
+    if (!confirm(`Only continue after returning ${rupees(amountPaise)} in cash to the student. Close this order?`)) return;
+    setError('');
+    setMessage('');
+    try {
+      await api(`/api/shop/jobs/${id}/cash-returned`, { method: 'POST', role: 'shop' });
+      setMessage('Cash return recorded — order closed');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not close this cash order');
     }
   }
 
@@ -259,7 +301,7 @@ export default function Dashboard() {
         <div>
           <span className="eyebrow-label">Live operations</span>
           <h1>Counter &amp; walk-in line</h1>
-          <p>Queue positions organize students; the six-digit code always controls which paid order prints.</p>
+          <p>Queue positions organize students; the six-digit code always controls which prepared order prints.</p>
         </div>
         <div className="queue-summary">
           <span><strong>{waiting.length}</strong> waiting</span>
@@ -291,7 +333,7 @@ export default function Dashboard() {
           <span className="eyebrow-label">Counter action</span>
           <h2>Find order by counter code</h2>
           <p>
-            Enter the student’s six-digit code to find the correct paid document. Codes unlock automatically near the front; staff can explicitly override the advisory line when a real counter situation requires it.
+            Enter the student’s six-digit code to find the correct document. Codes unlock automatically near the front; staff can explicitly override the advisory line when a real counter situation requires it.
           </p>
         </div>
         <div className="release-controls">
@@ -307,6 +349,7 @@ export default function Dashboard() {
               setOtp(e.target.value.replace(/\D/g, ''));
               setQueueOverride(null);
               setManual(null);
+              setCashConfirmation(null);
             }}
             onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && void release()}
           />
@@ -357,6 +400,19 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+        {cashConfirmation && (
+          <div className="manual-picker cash-confirm-panel" role="alert">
+            <span className="eyebrow-label">Cash order</span>
+            <strong>Collect {rupees(cashConfirmation.amountPaise)}</strong>
+            <p>Count the cash first. This confirmation records the payment and sends the exact order to the printer.</p>
+            <div className="row">
+              <button onClick={() => release(cashConfirmation.selectedPrinterId, cashConfirmation.overrideQueue, true)}>
+                Cash received &amp; print
+              </button>
+              <button className="ghost" onClick={() => setCashConfirmation(null)}>Not received</button>
+            </div>
+          </div>
+        )}
         {error && <div className="error-box">{error}</div>}
       </div>
 
@@ -386,6 +442,7 @@ export default function Dashboard() {
                 </td>
                 <td>
                   <span className="stamp blue">checked in</span>
+                  {j.paymentStatus === 'cash_due' && <span className="stamp yellow" style={{ marginLeft: 6 }}>cash due</span>}
                 </td>
                 <td className="mono">{rupees(j.totalPaise)}</td>
                 <td>
@@ -406,7 +463,7 @@ export default function Dashboard() {
 
       {prepared.length > 0 && (
         <>
-          <div className="section-heading"><div><h2>Prepared, not checked in</h2><p>Paid remote orders are ready to find by code but do not occupy the physical line.</p></div><span className="summary-pill">{prepared.length}</span></div>
+          <div className="section-heading"><div><h2>Prepared, not checked in</h2><p>Remote orders are ready to find by code but do not occupy the physical line.</p></div><span className="summary-pill">{prepared.length}</span></div>
           <div className="table-shell">
             <table>
               <thead>
@@ -424,7 +481,10 @@ export default function Dashboard() {
                         {j.file.originalName}
                       </td>
                       <td>{specsText(j)}</td>
-                      <td><span className="stamp yellow">awaiting arrival</span></td>
+                      <td>
+                        <span className="stamp yellow">awaiting arrival</span>
+                        {j.paymentStatus === 'cash_due' && <span className="stamp yellow" style={{ marginLeft: 6 }}>cash due</span>}
+                      </td>
                     </tr>
                   ))}
               </tbody>
@@ -458,9 +518,16 @@ export default function Dashboard() {
                 </td>
                 <td>
                   {j.status === 'otp_verified' && j.printError && (
-                    <button className="small" onClick={() => retryPrint(j.id)}>
-                      Retry print
-                    </button>
+                    <span className="row" style={{ flexWrap: 'nowrap' }}>
+                      <button className="small" onClick={() => retryPrint(j.id)}>
+                        Retry print
+                      </button>
+                      {j.paymentProvider === 'cash' && j.cashCollectedAt && (
+                        <button className="ghost small" onClick={() => returnCashAndClose(j.id, j.totalPaise)}>
+                          Cash returned
+                        </button>
+                      )}
+                    </span>
                   )}
                   {j.status === 'finishing' && (
                     <button className="small" onClick={() => completeFinishing(j.id)}>

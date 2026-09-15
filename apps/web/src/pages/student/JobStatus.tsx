@@ -20,7 +20,9 @@ interface JobDetail {
   counterCodeThreshold: number;
   otpExpiresAt: string | null;
   noShowCount: number;
-  paymentStatus: 'pending' | 'paid' | 'refunding' | 'refunded' | 'failed';
+  paymentStatus: 'pending' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
+  paymentProvider: string | null;
+  cashCollectedAt: string | null;
   rating: number | null;
   printError: string | null;
   printAttempts: number;
@@ -195,6 +197,15 @@ export default function JobStatus() {
           {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
         </div>
 
+        {job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due' && (
+          <div className="notice cash-due-notice">
+            <div>
+              <strong>Pay {rupees(job.totalPaise)} in cash at the counter</strong>
+              <p>Keep the exact total ready. Staff will confirm it before sending your document to the printer.</p>
+            </div>
+          </div>
+        )}
+
         {/* ---- hero state ---- */}
         {pendingSlot && (
           <div className="ticket">
@@ -208,7 +219,7 @@ export default function JobStatus() {
             <div>
               <span className="eyebrow-label">Order prepared</span>
               <h2>Join only after you arrive</h2>
-              <p>Your upload and payment do not occupy the physical line. Check in at the shop entrance to receive a fair walk-in position.</p>
+              <p>Your prepared order does not occupy the physical line. Check in at the shop entrance to receive a fair walk-in position.</p>
             </div>
             {!confirmingArrival ? (
               <button onClick={() => setConfirmingArrival(true)}>I’m at the shop</button>
@@ -216,8 +227,8 @@ export default function JobStatus() {
               <div className="arrival-confirm">
                 <strong>Are you physically at {job.shop.name}?</strong>
                 <p>{job.checkInCount > 0
-                  ? 'This is a new check-in, so you will join at the end of the current physical line. Your counter code has not changed.'
-                  : 'This adds you to the live line now. If plans change, staff can remove you without cancelling your paid order.'}</p>
+                 ? 'This is a new check-in, so you will join at the end of the current physical line. Your counter code has not changed.'
+                   : 'This adds you to the live line now. If plans change, staff can remove you without cancelling your prepared order.'}</p>
                 <div className="row">
                   <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'Yes, join the line'}</button>
                   <button className="ghost" disabled={checkingIn} onClick={() => setConfirmingArrival(false)}>Not yet</button>
@@ -266,7 +277,7 @@ export default function JobStatus() {
         )}
         {job.status === 'no_show' && (
           <div className="card stack">
-            <strong>Your paid order is still available</strong>
+            <strong>Your prepared order is still available</strong>
             <p style={{ margin: 0 }}>{otp
               ? 'This order left the line. Your permanent counter code still identifies the document, or you can check in again at the end.'
               : 'This order left the line before its counter code unlocked. Check in again to join at the end of the current line.'}</p>
@@ -304,7 +315,9 @@ export default function JobStatus() {
 
         {/* ---- receipt ---- */}
         <div className="card receipt">
-          <div className="line total"><span>Amount paid</span><span>{rupees(job.totalPaise)}</span></div>
+          <div className="line total"><span>{job.paymentProvider === 'cash' && !job.cashCollectedAt
+            ? job.paymentStatus === 'cash_due' ? 'Cash due' : 'Cash order total'
+            : 'Amount paid'}</span><span>{rupees(job.totalPaise)}</span></div>
           <button
             className="ghost small"
             style={{ marginTop: 10 }}

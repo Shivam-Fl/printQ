@@ -36,6 +36,7 @@ enum AgentStatus {
 
 enum PaymentStatus {
   pending
+  cash_due
   paid
   refunding
   refunded
@@ -57,9 +58,17 @@ enum ShopPayoutStatus {
 
 enum ShopLedgerType {
   print_earning
+  cash_settlement
+  balance_payment
   payout_reserved
   payout_released
   adjustment
+}
+
+enum ShopBalancePaymentStatus {
+  pending
+  paid
+  failed
 }
 
 enum JobMode {
@@ -94,6 +103,7 @@ model Shop {
   locationUpdatedAt DateTime?
   payoutSchedule    PayoutSchedule @default(daily)
   razorpayLinkedAccountId String?  @unique
+  cashPaymentsEnabled Boolean @default(false)
   autoAssignEnabled Boolean  @default(true)
   acceptingOrders   Boolean  @default(true)
   /// legacy RateCard JSON — superseded by printOptions
@@ -112,6 +122,7 @@ model Shop {
   coupons       Coupon[]
   ledgerEntries ShopLedgerEntry[]
   payouts       ShopPayout[]
+  balancePayments ShopBalancePayment[]
 }
 
 /// A discount code — platform-wide (shopId null) or scoped to one shop.
@@ -311,6 +322,8 @@ model Job {
   /// provider order id (e.g. razorpay order_xxx)
   paymentOrderId  String?       @unique
   paymentId       String?
+  /// Set only after counter staff explicitly confirms physical cash receipt.
+  cashCollectedAt DateTime?
 
   /// coupon code applied at checkout, if any — discount already folded into totalPaise
   couponCode    String?
@@ -417,6 +430,26 @@ model ShopPayout {
   @@index([status, lastAttemptAt])
 }
 
+/// Incoming payment from a shop when cash-order platform fees exceed its
+/// online-order payout balance. Captured payments credit the settlement ledger.
+model ShopBalancePayment {
+  id              String                   @id @default(uuid())
+  shopId          String
+  shop            Shop                     @relation(fields: [shopId], references: [id])
+  amountPaise     Int
+  status          ShopBalancePaymentStatus @default(pending)
+  provider        String
+  providerOrderId String                   @unique
+  paymentId       String?                  @unique
+  requestedById   String?
+  paidAt          DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  ledgerEntries   ShopLedgerEntry[]
+
+  @@index([shopId, createdAt])
+}
+
 /// Append-only private money ledger. Positive amounts increase the shop's
 /// payable balance; payout reservations are negative.
 model ShopLedgerEntry {
@@ -427,6 +460,8 @@ model ShopLedgerEntry {
   job         Job?           @relation(fields: [jobId], references: [id])
   payoutId    String?
   payout      ShopPayout?    @relation(fields: [payoutId], references: [id])
+  balancePaymentId String?
+  balancePayment   ShopBalancePayment? @relation(fields: [balancePaymentId], references: [id])
   type        ShopLedgerType
   amountPaise Int
   description String
@@ -434,5 +469,6 @@ model ShopLedgerEntry {
 
   @@unique([jobId, type])
   @@unique([payoutId, type])
+  @@unique([balancePaymentId, type])
   @@index([shopId, createdAt])
 }

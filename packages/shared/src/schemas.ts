@@ -125,6 +125,8 @@ export const releaseOtpSchema = z.object({
   printerId: z.string().uuid().optional(),
   /** Explicit staff confirmation for a paid order outside the near-front window. */
   overrideQueue: z.boolean().default(false),
+  /** Required before a cash order can transition to the printer. */
+  cashReceived: z.boolean().default(false),
 });
 
 export const couponCodeSchema = z.string().trim().min(1).max(40);
@@ -137,6 +139,7 @@ export const createJobSchema = z
     /** required for scheduled mode: 15 min – 72 h ahead */
     scheduledTime: z.coerce.date().optional(),
     couponCode: couponCodeSchema.optional(),
+    paymentMethod: z.enum(['online', 'cash']).default('online'),
   })
   .superRefine((val, ctx) => {
     if (val.mode === 'scheduled') {

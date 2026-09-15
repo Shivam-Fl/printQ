@@ -8,7 +8,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { verifyRazorpayWebhookSignature } from '../../providers/payment/index.js';
 import { onPaymentConfirmed } from '../queue/engine.js';
-import { applyPayoutProviderStatus } from '../earnings/service.js';
+import { applyPayoutProviderStatus, confirmShopBalancePayment } from '../earnings/service.js';
 
 export const paymentsRouter = Router();
 
@@ -101,15 +101,20 @@ webhookRouter.post(
       const job = orderId
         ? await prisma.job.findUnique({ where: { paymentOrderId: orderId } })
         : null;
+      const balancePayment = orderId && !job
+        ? await prisma.shopBalancePayment.findUnique({ where: { providerOrderId: orderId } })
+        : null;
+      const expectedAmount = job?.totalPaise ?? balancePayment?.amountPaise;
 
       if (
-        job &&
-        (payment?.amount !== job.totalPaise || payment.currency !== 'INR' || payment.status !== 'captured')
+        expectedAmount != null &&
+        (payment?.amount !== expectedAmount || payment.currency !== 'INR' || payment.status !== 'captured')
       ) {
         logger.error(
           {
-            jobId: job.id,
-            expectedAmount: job.totalPaise,
+            jobId: job?.id,
+            balancePaymentId: balancePayment?.id,
+            expectedAmount,
             receivedAmount: payment?.amount,
             currency: payment?.currency,
             status: payment?.status,
@@ -143,6 +148,8 @@ webhookRouter.post(
           },
         });
         await onPaymentConfirmed(job.id);
+      } else if (balancePayment && payment?.id && orderId) {
+        await confirmShopBalancePayment(orderId, payment.id);
       } else {
         logger.warn({ orderId }, 'razorpay_payment_for_unknown_order');
       }

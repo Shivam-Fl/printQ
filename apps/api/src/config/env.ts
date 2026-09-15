@@ -47,6 +47,9 @@ const envSchema = z.object({
   PLATFORM_MARKUP_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
   SHOP_PAYOUT_PROVIDER: z.enum(['mock', 'razorpay_route']).default('mock'),
   MIN_SHOP_PAYOUT_PAISE: z.coerce.number().int().min(100).default(50_000),
+  // Cash remains available while the shop's completed + in-flight settlement
+  // exposure stays within this credit limit. ₹500 by default.
+  MAX_SHOP_CASH_DEBT_PAISE: z.coerce.number().int().min(100).default(50_000),
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),

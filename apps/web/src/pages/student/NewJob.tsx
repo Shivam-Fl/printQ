@@ -49,6 +49,8 @@ export default function NewJob() {
   const [opts, setOpts] = useState<ShopOptions | null>(null);
   const [specs, setSpecs] = useState<Specs | null>(null);
   const [mode, setMode] = useState<'instant' | 'scheduled'>('instant');
+  const [paymentMethod, setPaymentMethod] = useState<'online' | 'cash'>('online');
+  const [cashPaymentsEnabled, setCashPaymentsEnabled] = useState(false);
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
   const [pages, setPages] = useState<number | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -71,9 +73,10 @@ export default function NewJob() {
 
   // load the shop's offered options and seed defaults
   useEffect(() => {
-    api<{ shop: { options: ShopOptions } }>(`/api/public/shops/${slug}`)
+    api<{ shop: { options: ShopOptions; cashPaymentsEnabled: boolean } }>(`/api/public/shops/${slug}`)
       .then((r) => {
         setOpts(r.shop.options);
+        setCashPaymentsEnabled(r.shop.cashPaymentsEnabled);
         const p0 = r.shop.options.papers[0];
         setSpecs({
           copies: 1,
@@ -172,16 +175,20 @@ export default function NewJob() {
     setBusy(true);
     setError('');
     try {
-      const body: Record<string, unknown> = { fileId, specs, mode };
+      const body: Record<string, unknown> = { fileId, specs, mode, paymentMethod };
       if (mode === 'scheduled') body.scheduledTime = new Date(slot).toISOString();
       if (appliedCoupon) body.couponCode = appliedCoupon;
       const res = await api<{
         job: { id: string };
-        checkout: { mode: 'mock' | 'razorpay'; keyId?: string; orderId?: string; amountPaise?: number };
+        checkout: { mode: 'mock' | 'razorpay' | 'cash'; keyId?: string; orderId?: string; amountPaise?: number };
       }>('/api/jobs', { method: 'POST', role: 'student', body });
 
       if (pushPermission() === 'default') void enablePush();
 
+      if (res.checkout.mode === 'cash') {
+        navigate(`/jobs/${res.job.id}`);
+        return;
+      }
       if (res.checkout.mode === 'mock') {
         await api('/api/payments/mock/confirm', { method: 'POST', role: 'student', body: { jobId: res.job.id } });
         navigate(`/jobs/${res.job.id}`);
@@ -318,6 +325,22 @@ export default function NewJob() {
               <div style={{ marginTop: 14 }}><label htmlFor="slot">Planned arrival</label><input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} /><p className="dim" style={{ marginBottom: 0 }}>We’ll remind you near this time. Check-in still starts only when you are physically there.</p></div>
             )}
           </section>
+
+          <section className="checkout-card">
+            <div className="checkout-card-head"><h2>Payment</h2><p>Choose how you want to pay for this order.</p></div>
+            <div className="payment-methods" role="radiogroup" aria-label="Payment method">
+              <button className={paymentMethod === 'online' ? 'payment-method on' : 'payment-method'} onClick={() => setPaymentMethod('online')}>
+                <strong>Pay online</strong>
+                <span>Secure checkout now</span>
+              </button>
+              {cashPaymentsEnabled && (
+                <button className={paymentMethod === 'cash' ? 'payment-method on' : 'payment-method'} onClick={() => setPaymentMethod('cash')}>
+                  <strong>Cash at counter</strong>
+                  <span>Staff confirms cash before printing</span>
+                </button>
+              )}
+            </div>
+          </section>
         </div>
 
         <aside className="checkout-sidebar">
@@ -343,9 +366,15 @@ export default function NewJob() {
             )}
             {couponError && <p className="error" style={{ marginBottom: 0 }}>{couponError}</p>}
             <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
-              {busy ? 'Opening payment…' : mode === 'scheduled' ? 'Pay & save arrival time' : 'Pay & prepare order'}
+              {busy
+                ? paymentMethod === 'cash' ? 'Preparing order…' : 'Opening payment…'
+                : paymentMethod === 'cash'
+                  ? mode === 'scheduled' ? 'Prepare cash order & save time' : 'Prepare cash order'
+                  : mode === 'scheduled' ? 'Pay & save arrival time' : 'Pay & prepare order'}
             </button>
-            <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>Secure payment · exact preview · status notifications</p>
+            <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>
+              {paymentMethod === 'cash' ? 'Pay the total shown above at the counter · status notifications' : 'Secure payment · exact preview · status notifications'}
+            </p>
           </div>
         </aside>
       </div>

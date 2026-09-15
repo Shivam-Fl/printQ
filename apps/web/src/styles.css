@@ -992,6 +992,9 @@ tr:last-child td { border-bottom: none; }
 .simulator-inline { margin: 14px 0; padding: 11px 12px; border-radius: 9px; color: #695d21; background: var(--highlight-soft); font-size: .78rem; }
 .payout-hint { margin: 9px 0 0; text-align: center; font-size: .76rem; }
 .earnings-success { border-color: #a8d8bd; background: #effaf3; }
+.settlement-due-card { margin: 0 0 18px; border-color: #e5c68d; background: #fff9ed; }
+.settlement-due-card strong { margin-top: 5px; font-size: 1.15rem; }
+.cash-due-notice { margin-top: 16px; border-color: #e5c68d; background: #fff9ed; }
 .section-head.compact { margin-top: 0; }
 .table-shell.flat { border: 0; border-radius: 0; box-shadow: none; }
 .ledger-amount { color: var(--pencil); font-weight: 700; }
@@ -1116,6 +1119,11 @@ tr:last-child td { border-bottom: none; }
 .checkout-card-head { margin-bottom: 18px; }
 .checkout-card-head h2 { margin: 0 0 4px; font-size: 1.18rem; }
 .checkout-card-head p { margin: 0; color: var(--pencil); font-size: .84rem; }
+.payment-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.payment-method { display: flex; min-height: 82px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 16px 18px; border: 1px solid var(--rule); background: #fff; color: var(--ink); text-align: left; box-shadow: none; }
+.payment-method:hover { border-color: #91a9db; transform: none; }
+.payment-method.on { border-color: var(--stamp); background: var(--stamp-soft); box-shadow: 0 0 0 2px rgba(40, 84, 168, .12); }
+.payment-method span { color: var(--pencil); font-size: .78rem; font-weight: 500; }
 .checkout-sidebar { position: sticky; top: 18px; display: grid; gap: 14px; }
 .preview-card { overflow: hidden; border: 1px solid var(--rule); border-radius: 16px; background: #e7e9ed; box-shadow: var(--shadow); }
 .preview-card-head { display: flex; justify-content: space-between; gap: 10px; padding: 13px 15px; background: var(--paper); border-bottom: 1px solid var(--rule); font-size: .8rem; }
@@ -1157,6 +1165,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 @media (max-width: 620px) {
+  .payment-methods { grid-template-columns: 1fr; }
   .welcome-page { width: min(100% - 32px, 500px); }
   .public-nav-links a:first-child { display: none; }
   .welcome-layout { min-height: 0; padding-top: 42px; }

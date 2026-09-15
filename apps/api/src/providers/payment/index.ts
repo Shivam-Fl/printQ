@@ -8,9 +8,12 @@ export interface CreatedOrder {
   checkout: Record<string, unknown>;
 }
 
+export type PaymentPurpose = 'print_job' | 'shop_balance';
+
 export interface PaymentProvider {
   name: 'mock' | 'razorpay';
-  createOrder(jobId: string, amountPaise: number): Promise<CreatedOrder>;
+  createOrder(referenceId: string, amountPaise: number, purpose?: PaymentPurpose): Promise<CreatedOrder>;
+  checkout(providerOrderId: string, amountPaise: number, referenceId: string): Record<string, unknown>;
   /** Full refund of a captured payment (cancelled or expired-without-print jobs). */
   refund(paymentId: string, amountPaise: number): Promise<void>;
 }
@@ -22,12 +25,17 @@ export interface PaymentProvider {
 class MockPaymentProvider implements PaymentProvider {
   readonly name = 'mock' as const;
 
-  async createOrder(jobId: string, amountPaise: number): Promise<CreatedOrder> {
+  async createOrder(referenceId: string, amountPaise: number): Promise<CreatedOrder> {
+    const providerOrderId = `mock_${randomUUID()}`;
     return {
       provider: 'mock',
-      providerOrderId: `mock_${randomUUID()}`,
-      checkout: { mode: 'mock', jobId, amountPaise },
+      providerOrderId,
+      checkout: this.checkout(providerOrderId, amountPaise, referenceId),
     };
+  }
+
+  checkout(providerOrderId: string, amountPaise: number, referenceId: string): Record<string, unknown> {
+    return { mode: 'mock', providerOrderId, referenceId, amountPaise };
   }
 
   async refund(): Promise<void> {
@@ -39,7 +47,7 @@ class MockPaymentProvider implements PaymentProvider {
 class RazorpayProvider implements PaymentProvider {
   readonly name = 'razorpay' as const;
 
-  async createOrder(jobId: string, amountPaise: number): Promise<CreatedOrder> {
+  async createOrder(referenceId: string, amountPaise: number, purpose: PaymentPurpose = 'print_job'): Promise<CreatedOrder> {
     const auth = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
     const res = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
@@ -47,8 +55,10 @@ class RazorpayProvider implements PaymentProvider {
       body: JSON.stringify({
         amount: amountPaise,
         currency: 'INR',
-        receipt: jobId,
-        notes: { jobId },
+        receipt: referenceId,
+        notes: purpose === 'print_job'
+          ? { purpose, jobId: referenceId }
+          : { purpose, shopBalancePaymentId: referenceId },
       }),
     });
     if (!res.ok) {
@@ -59,13 +69,17 @@ class RazorpayProvider implements PaymentProvider {
     return {
       provider: 'razorpay',
       providerOrderId: order.id,
-      checkout: {
-        mode: 'razorpay',
-        keyId: env.RAZORPAY_KEY_ID,
-        orderId: order.id,
-        amountPaise,
-        currency: 'INR',
-      },
+      checkout: this.checkout(order.id, amountPaise),
+    };
+  }
+
+  checkout(providerOrderId: string, amountPaise: number): Record<string, unknown> {
+    return {
+      mode: 'razorpay',
+      keyId: env.RAZORPAY_KEY_ID,
+      orderId: providerOrderId,
+      amountPaise,
+      currency: 'INR',
     };
   }
 

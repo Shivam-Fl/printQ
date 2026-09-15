@@ -47,6 +47,7 @@ export default function Settings() {
   const [opts, setOpts] = useState<Options | null>(null);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [autoAssign, setAutoAssign] = useState(true);
+  const [cashPayments, setCashPayments] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -63,7 +64,7 @@ export default function Settings() {
       navigate('/dashboard/login');
       return;
     }
-    api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
+    api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean; cashPaymentsEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
       .then((r) => {
         setOpts(r.shop.printOptions);
         setProfile({
@@ -78,6 +79,7 @@ export default function Settings() {
         });
         setLocationQuery([r.shop.address, r.shop.campusName].filter(Boolean).join(', '));
         setAutoAssign(r.shop.autoAssignEnabled);
+        setCashPayments(r.shop.cashPaymentsEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
   }, [navigate]);
@@ -222,6 +224,7 @@ export default function Settings() {
           checkInRadiusM: profile.checkInRadiusM,
           printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
           autoAssignEnabled: autoAssign,
+          cashPaymentsEnabled: cashPayments,
         },
       });
       setOpts({ papers, bindings, duplexEnabled: opts.duplexEnabled });
@@ -379,6 +382,14 @@ export default function Settings() {
           <p className="dim" style={{ margin: '4px 0 0' }}>On: the counter code sends each job to the best printer automatically. Off: you pick from a dropdown.</p>
         </div>
         <button className={autoAssign ? '' : 'ghost'} onClick={() => setAutoAssign((v) => !v)}>{autoAssign ? 'ON' : 'OFF'}</button>
+      </div>
+
+      <div className="automation-panel">
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <strong>Accept cash at the counter</strong>
+          <p className="dim" style={{ margin: '4px 0 0' }}>Students can prepare an order without online payment. Staff must confirm the exact cash amount before it can print.</p>
+        </div>
+        <button className={cashPayments ? '' : 'ghost'} onClick={() => setCashPayments((value) => !value)}>{cashPayments ? 'ON' : 'OFF'}</button>
       </div>
 
       <div className="settings-surface">

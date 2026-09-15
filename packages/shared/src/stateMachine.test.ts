@@ -18,6 +18,14 @@ describe('job state machine', () => {
     expect(s).toBe('completed');
   });
 
+  it('prepares a cash order without pretending an online payment happened', () => {
+    expect(transition('pending_payment', 'CASH_SELECTED')).toBe('awaiting_arrival');
+  });
+
+  it('closes a failed cash print after staff physically returns the money', () => {
+    expect(transition('otp_verified', 'CASH_RETURNED')).toBe('cancelled');
+  });
+
   it('handles the no-show → requeue branch', () => {
     expect(transition('notified', 'WINDOW_EXPIRED')).toBe('no_show');
     expect(transition('no_show', 'REQUEUE')).toBe('requeued');
