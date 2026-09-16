@@ -20,6 +20,15 @@ const cfg = await loadConfig();
 const mode = cfg.env?.mode ?? 'preview';
 
 // A library has nothing to drive. Skipping is the correct outcome, not a failure.
+// A deployment_status fires for every PR in the repo, including ones no agent ever touched.
+// In compose mode there is nothing to do with a deployment at all.
+if (eventName === 'deployment_status' && mode === 'compose') {
+  process.stdout.write('env.mode is "compose" — a deployment is not what QA tests here. Skipping.\n');
+  setOutput('skip', 'true');
+  setOutput('pr', '');
+  process.exit(0);
+}
+
 if (mode === 'none') {
   process.stdout.write('env.mode is "none" — this repo has no runnable surface, so browser QA does not apply.\n');
   setOutput('skip', 'true');
@@ -72,8 +81,15 @@ if (!sha) sha = detail.headRefOid;
 if (!sha) die(`could not determine the head commit of PR #${pr}`);
 const issue = (detail.body ?? '').match(/(?:closes|fixes|resolves)\s+#(\d+)/i)?.[1];
 if (!issue) {
-  die(`PR #${pr} does not close an issue, so there is no work order to test against. ` +
-      'Add "Closes #<n>" to the PR body.');
+  // NOT an error. Deployments and CI fire for every PR in the repo — human ones, dependabot
+  // ones, the PR that installed this framework. A PR with no work order is simply not the
+  // pipeline's business, and failing here would put a red X on everyone else's work.
+  process.stdout.write(
+    `PR #${pr} closes no issue, so it has no work order and was not produced by this ` +
+    'pipeline. Skipping — this is not a failure.\n');
+  setOutput('skip', 'true');
+  setOutput('pr', '');
+  process.exit(0);
 }
 
 setOutput('pr', String(pr));

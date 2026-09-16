@@ -22,6 +22,10 @@ permissions:
   issues: write
   pull-requests: write
   actions: write
+  checks: read              # statusCheckRollup reads check runs...
+  statuses: read            # ...and legacy commit statuses. Without both, gh returns
+                            # "Resource not accessible by integration", which reads as an
+                            # auth problem rather than a missing permission.
 
 jobs:
   gate:

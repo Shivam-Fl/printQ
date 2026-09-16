@@ -32,6 +32,17 @@ jobs:
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
 
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      # Each step tees its output so the digest can read the real failure, and `continue-on-error`
+      # lets every check run — one digest listing four problems beats four sequential red builds.
+      # Not continue-on-error: if the prep fails, every check after it fails for the wrong
+      # reason and the digest blames the PR for a broken build setup.
       # A repo with its own CI should keep using it. verify.mode: existing skips ours
       # entirely rather than running a weaker duplicate alongside it.
       - name: Should we run our own checks?
@@ -46,17 +57,6 @@ jobs:
       # needing something other than npm edits this line.
       # Works in a repo with no package.json: install the repo's own deps when there is a
       # manifest, then make sure the framework's single dependency is available either way.
-      - name: Bootstrap
-        run: |
-          if [ -f package-lock.json ]; then npm ci
-          elif [ -f package.json ]; then npm install --no-audit --no-fund
-          fi
-          node .sdlc/bin/ensure-deps.mjs
-
-      # Each step tees its output so the digest can read the real failure, and `continue-on-error`
-      # lets every check run — one digest listing four problems beats four sequential red builds.
-      # Not continue-on-error: if the prep fails, every check after it fails for the wrong
-      # reason and the digest blames the PR for a broken build setup.
       - name: Prepare
         if: steps.mode.outputs.mode != 'existing'
         run: |
