@@ -43,6 +43,11 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
 
+  // A real Windows spooler normally acknowledges acceptance, not physical
+  // output. Only the deterministic simulator may auto-complete a job, and
+  // never in production. Real jobs require the authenticated staff action.
+  ALLOW_SIMULATED_PRINT_COMPLETION: z.coerce.boolean().default(false),
+
   PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
   PLATFORM_MARKUP_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
   SHOP_PAYOUT_PROVIDER: z.enum(['mock', 'razorpay_route']).default('mock'),
@@ -74,7 +79,9 @@ const envSchema = z.object({
 
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
-  FILE_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  // Unprinted uploads have a hard 24-hour maximum. Successful and terminal
+  // jobs use the fixed, event-based ten-minute deadline in fileRetention.ts.
+  FILE_UNPRINTED_RETENTION_MINUTES: z.coerce.number().int().min(1).max(1_440).default(1_440),
   /// Paid orders that never arrive are refunded and closed after this window.
   PREPARED_ORDER_TTL_HOURS: z.coerce.number().int().min(24).max(720).default(168),
   /// "almost your turn" alert when this many people (or fewer) are ahead
@@ -149,5 +156,10 @@ if (env.STORAGE_DRIVER === 's3') {
 if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.some((o) => o === '*')) {
   // eslint-disable-next-line no-console
   console.error('Wildcard CORS origin is not allowed in production');
+  process.exit(1);
+}
+if (env.NODE_ENV === 'production' && env.ALLOW_SIMULATED_PRINT_COMPLETION) {
+  // eslint-disable-next-line no-console
+  console.error('ALLOW_SIMULATED_PRINT_COMPLETION cannot be enabled in production');
   process.exit(1);
 }

@@ -141,8 +141,17 @@ async function printJob(job: DispatchPayload): Promise<void> {
       jobId: job.jobId,
     });
 
-    await api(`/api/agent/jobs/${job.jobId}/complete`, { method: 'POST' });
-    console.log(`Job ${job.jobId}: completed`);
+    const completion = await api(`/api/agent/jobs/${job.jobId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ outcome: isSimulationMode() ? 'simulator_complete' : 'spool_accepted' }),
+    });
+    if (!completion.ok) throw new Error(`completion update failed: ${completion.status}`);
+    const outcome = (await completion.json().catch(() => ({}))) as { completionConfirmationRequired?: boolean };
+    console.log(
+      outcome.completionConfirmationRequired
+        ? `Job ${job.jobId}: spool accepted — staff must confirm the printed output in PrintQs.`
+        : `Job ${job.jobId}: completed`,
+    );
   } catch (err) {
     const reason = err instanceof Error ? err.message : 'unknown';
     console.error(`Job ${job.jobId}: print failed —`, reason);

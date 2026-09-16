@@ -89,6 +89,14 @@ enum FileStatus {
   deleted
 }
 
+/// The only signals that may start the strict content-deletion clock. A
+/// spool submission is deliberately not represented here: it is not proof
+/// that paper was produced.
+enum PrintCompletionMethod {
+  simulator
+  staff_confirmed
+}
+
 model Shop {
   id                String   @id @default(uuid())
   slug              String   @unique
@@ -282,8 +290,14 @@ model UploadedFile {
   pages        Int?
   status       FileStatus @default(uploaded)
   error        String?
-  /// files auto-deleted after this time (privacy, printQ.md §14)
+  /// Event-based deletion deadline. Successful prints and terminal jobs set
+  /// this to their confirmation/terminal timestamp + 10 minutes; unprinted
+  /// uploads use the 24-hour hard maximum.
   deleteAfter  DateTime?
+  deletionScheduledAt DateTime?
+  contentDeletedAt    DateTime?
+  deletionAttempts    Int      @default(0)
+  lastDeletionError   String?
   createdAt    DateTime   @default(now())
 
   jobs Job[]
@@ -369,6 +383,14 @@ model Job {
   /// Persisted spooler failure state so a dashboard refresh never loses the recovery action.
   printError       String?
   printAttempts    Int       @default(0)
+  /// The agent accepted the print into its local driver/spooler. This is not
+  /// successful-print evidence and never starts content deletion.
+  spoolAcceptedAt  DateTime?
+  /// Set only when the simulator completes or authenticated staff confirms
+  /// the physical output. This starts the ten-minute deletion clock.
+  printConfirmedAt DateTime?
+  printConfirmedById String?
+  printCompletionMethod PrintCompletionMethod?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

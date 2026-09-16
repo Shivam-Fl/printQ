@@ -48,11 +48,33 @@ export const maintenanceQueue = new Queue('maintenance', {
   defaultJobOptions: { removeOnComplete: 100, removeOnFail: 100 },
 });
 
+/** Exact T+10m object deletion jobs. PostgreSQL's deleteAfter remains the
+ * authority; this queue gives normal cases a prompt execution path while the
+ * minute sweeper repairs Redis/worker outages. */
+export const fileRetentionQueue = new Queue<{ fileId: string }>('file-retention', {
+  connection: bullConnection(),
+  defaultJobOptions: {
+    attempts: 10,
+    backoff: { type: 'exponential', delay: 5_000 },
+    removeOnComplete: 1000,
+    removeOnFail: 5000,
+  },
+});
+
+/** Failed terminal deletion jobs are retained here for operational alerting and
+ * investigation; no document content or object key is included in the payload. */
+export const fileDeletionDeadLetterQueue = new Queue<{ fileId: string; reason: string }>('file-retention-dlq', {
+  connection: bullConnection(),
+  defaultJobOptions: { removeOnComplete: 100, removeOnFail: 5000 },
+});
+
 /** Close BullMQ connections explicitly so CI/test workers cannot leak handles. */
 export async function closeQueues(): Promise<void> {
   await Promise.allSettled([
     convertQueue.close(),
     timersQueue.close(),
     maintenanceQueue.close(),
+    fileRetentionQueue.close(),
+    fileDeletionDeadLetterQueue.close(),
   ]);
 }

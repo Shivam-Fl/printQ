@@ -119,7 +119,14 @@ async function main() {
   const bytes = Buffer.from(await fileRes.arrayBuffer());
   ok(fileRes.status === 200 && bytes.slice(0, 4).toString() === '%PDF', 'agent downloaded the print-ready PDF');
 
-  await j(`/api/agent/jobs/${jobId}/complete`, { method: 'POST', agentToken });
+  const completion = await j(`/api/agent/jobs/${jobId}/complete`, {
+    method: 'POST',
+    agentToken,
+    body: { outcome: 'simulator_complete' },
+  });
+  ok(completion.status === 200 && completion.data.finishingRequired, 'simulator completion is confirmed and enters manual finishing');
+  const finishing = await j(`/api/shop/jobs/${jobId}/finishing-complete`, { method: 'POST', token: shopToken });
+  ok(finishing.status === 200, 'shop confirms manual finishing');
   await j(`/api/shop/jobs/${jobId}/handover`, { method: 'POST', token: shopToken });
 
   const finalJob = (await j(`/api/jobs/${jobId}`, { token })).data.job;

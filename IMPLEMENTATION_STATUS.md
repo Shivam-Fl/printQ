@@ -1,62 +1,70 @@
 # PrintQs launch implementation status
 
-Last updated: 2026-09-15 (Asia/Kolkata)
+Last updated: 2026-09-16 (Asia/Kolkata)
 
 ## Current phase
 
-Phase 0 — baseline frozen; Phase 1 CI/release implementation in progress.
+Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced. Phase 2 isolation is partially complete: a distinct Firebase development project and GitHub development environment exist, while durable development database, queue, object storage, Cloud Run, Resend, and Razorpay TEST endpoints still require their own provider resources. This branch implements the Phase 3 verified-print retention contract; it is not deployed until its feature PR passes CI and is merged to `master`.
 
-## Ownership and branch
+## Ownership and release source
 
 | Item | Value |
 | --- | --- |
 | Integration owner | Codex lead implementation agent |
-| Isolated worktree | `C:\Users\acer\Desktop\startup\printQ-ci-release` |
-| Feature branch | `codex/ci-release-baseline` |
-| Baseline commit | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
-| Production branch at audit | `master` at the same SHA |
-| New release branches | `development` and `main`, both created from the frozen baseline |
+| User-owned source tree | `C:\Users\acer\Desktop\startup\printQ` — deliberately untouched; it contains QA/generated changes |
+| Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-phase2-master` |
+| Active feature branch | `codex/storage-completion-retention` |
+| Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
+| Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
+| Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
 
-## Baseline evidence
+## Completed, evidenced controls
 
-- Source working tree was deliberately left untouched. It contains user-owned modified and untracked QA/generated materials.
-- The isolated worktree starts clean from the audited deployed SHA above.
-- Existing QA workbook: `outputs/printqs-production-qa-20260915/PrintQs_Production_QA_Matrix.xlsx`; 164 cases, 147 pass, 17 externally/device/provider-blocked at the historical run, and one open launch-hygiene defect (`DEF-010`, QA shops publicly discoverable).
-- Current CI workflow has Node 22 but does not provision PostgreSQL or Redis and runs no Prisma migration/integration environment. This is the first defect to repair.
-- Existing deployment configuration is Render/free/local storage, combined API/worker, console reset email, and legacy student Razorpay/Route paths. These are historical and are not production-launch compliant.
+- The historical deployed SHA was recorded before implementation. The original working tree and its user-owned QA files were preserved.
+- CI now provisions disposable PostgreSQL 16 and Redis 7, verifies connectivity, applies Prisma migrations, builds all workspaces, runs the full test suite and agent simulator, retains JUnit/simulator evidence, checks production dependencies, and scans secrets.
+- GitHub Actions run `35124027115` passed for the current audited `master` base. The earlier CI repair passed in run `35006008738`; cancelled runs are not accepted as evidence.
+- `master`, `development`, and the unused `main` are protected with pull requests and required `CI / check` plus `CI / secret scan`; direct, content-identical push probes to `master` and `development` were rejected by GitHub (`GH006`).
+- A separate Firebase development project was created in the Firebase console with Analytics/Gemini disabled and a registered development web application. Six development-only browser configuration values are stored as GitHub **development environment** secrets; no values are in Git.
+- Docker Desktop remains unavailable on this workstation. No Docker Desktop repair or user-service mutation was attempted. Local validation uses pure/unit/build checks and GitHub Actions supplies disposable PostgreSQL/Redis integration services.
 
-## Environment and provider status
+## Active retention change (awaiting CI/PR)
 
-| Area | Audited state | Launch status |
-| --- | --- | --- |
-| Development | No isolated branch-scoped environment evidenced | Not created |
-| Production compute | Render combined API/worker configuration | Must move to Cloud Run |
-| File storage | Local/ephemeral configuration | Must replace with private durable object storage |
-| Student checkout | Online Razorpay plus cash legacy options | Must become pay-at-shop only |
-| Shop collection | Route payout/mock balance payment legacy path | Must become receivable + weekly recurring collection |
-| Razorpay UPI AutoPay | Account approval not evidenced; stated unavailable | External approval required before test/live mandate |
-| Resend domain | Verification not evidenced | External DNS/account action required |
-| Physical printer | Simulator evidence only | Physical acceptance required |
+- A Windows spool acknowledgement is now recorded separately and cannot mark an order printed, post earnings, notify pickup, or start deletion.
+- Deterministic simulator completion is permitted only when explicitly enabled outside production. Real jobs remain visibly awaiting an authenticated staff member's **Printed successfully** confirmation.
+- PostgreSQL records the print confirmation method/time, deletion schedule, deletion attempts/error, and deletion completion. The confirmed successful print or terminal cancellation/expiry creates a fixed T+10-minute deadline; an earlier deadline can never be extended by retries.
+- A delayed deletion job targets each exact deadline; a one-minute PostgreSQL-backed sweeper reconciles missed schedules and a retry-exhausted job lands in a content-free dead-letter queue. Deletion removes every source/converted/preview object, scrubs stored filename/source metadata, and retains only non-content audit/order metadata. Outages/overdue recoverable jobs are recorded instead of silently extending retention.
+- The simulator/E2E contract has been updated to declare deterministic completion explicitly. The real Windows agent reports only `spool_accepted` and removes its temporary cache in its existing `finally` block.
 
 ## Tests and evidence
 
 | Command / evidence | Result | Notes |
 | --- | --- | --- |
-| Historical `npm test` / typecheck / build | Historical pass only | Must be re-run in the isolated environment |
-| Historical production matrix | 147 pass / 17 blocked | Not valid for the new architecture |
-| `npm run typecheck` | Passed | All workspaces after CI/test teardown changes |
-| `npm run test` | Passed | 88 tests: 44 shared, 29 API, 15 web |
-| `npm run test:ci` | Passed | 88 tests and JUnit reports for shared/API/web workspaces |
-| `npm run build` | Passed | All packages; existing web bundle-size warning remains tracked |
-| `npm audit --omit=dev --audit-level=high` | Passed | 0 reported production dependency vulnerabilities |
-| Local Docker integration run | Deferred | Docker Desktop engine failed locally; no user-owned services were used. GitHub Actions supplies isolated PostgreSQL/Redis for the required migration and simulator run. |
-| CI run `35005552170` | Cancelled | Simulator defaulted to Redis `6380` while CI exposes `6379`; secret scan also lacked its required read-only pull-request permission. Both defects are fixed before rerun; no result from this run is accepted as launch evidence. |
+| `npm run db:generate -w apps/api` | Passed | Prisma client regenerated from the active schema. |
+| `npx prisma validate --schema apps/api/prisma/schema.prisma` | Passed | Executed with an isolated disposable test connection string. |
+| `npm run typecheck -w apps/api` | Passed | After the retention/confirmation change. |
+| `npm run test -w apps/api` | Passed | 13 files / 33 tests; includes strict deadline and object-deletion-manifest regression coverage. |
+| `npm run build -w apps/web` | Passed | Existing bundle-size warning remains; no failure. |
+| `npm run test:ci` | Passed | Shared, API, and web JUnit reports written under `.tmp/ci-results/`. |
+| Full local migration/E2E | Deferred safely | Requires PostgreSQL/Redis; GitHub CI will run the disposable migration and simulator path. Docker Desktop is not used as a workaround. |
+
+## Environment/provider status and blockers
+
+| Area | Current status | Required next action / owner |
+| --- | --- | --- |
+| Development Firebase | Isolated project and GitHub environment secrets created | Enable Auth/App Check/realtime/FCM after application wiring; use only development configuration. |
+| Development PostgreSQL/Redis/R2 | Not yet provisioned | Create distinct durable resources, credentials, queue namespace, and private bucket. This requires a selected provider account/billing or existing approved resources. |
+| Production compute/storage | Render combined/local-storage configuration remains legacy | Do not use for real orders; Cloud Run + separate workers + private object storage remain required. |
+| Historical secret scan | Full-history scan detects an old Firebase browser key in Git history | Coordinate key restriction/rotation before history remediation; do not expose its value. |
+| Razorpay AutoPay | UPI AutoPay approval is not evidenced and must remain unclaimed | Founder must authorize an accurate enablement request; no mandate/debit is permitted. |
+| Resend | Domain verification not evidenced | Founder/DNS owner must verify a sender domain. |
+| Physical printer | Simulator only | Shop owner must complete and document real Windows printer acceptance before advertising capabilities. |
 
 ## Rollback
 
-- Code rollback target is the immutable baseline commit `18c89ef62bbf73a2128028f2f62a4a96a08cf477`.
-- No deployment, migration, provider configuration, or live-money action has been performed by this implementation stream.
+- Before this active branch is merged: close its PR; `master` stays at `dd2c94bd0db444a634abc1f30eba10a98cd61731`.
+- After a future merge but before deployment: revert the exact merge commit through a protected feature PR; do not rewrite shared history.
+- No Cloud Run, database, storage, Firebase Auth, Razorpay, Resend, production deployment, live key, mandate, or real-money action has been performed by this stream.
 
 ## Next action
 
-Push the CI repair as a feature branch PR to `development`, verify GitHub's disposable PostgreSQL/Redis migration and simulator run, then protect `development` and `main` with the observed required checks.
+Run the storage/print-confirmation feature PR through the required disposable CI migration and simulator suite, inspect the exact CI artifacts, then merge only the tested SHA to user-designated `master`. In parallel-safe work after that gate, provision only the missing isolated development resources or document the paid-provider approval needed before creating them.

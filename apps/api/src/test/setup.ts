@@ -14,6 +14,7 @@ process.env.STUDENT_AUTH_PROVIDER ??= 'local';
 process.env.STORAGE_DRIVER ??= 'local';
 process.env.SMS_PROVIDER ??= 'console';
 process.env.EMAIL_PROVIDER ??= 'console';
+process.env.ALLOW_SIMULATED_PRINT_COMPLETION ??= 'true';
 
 afterAll(async () => {
   const [{ closeRedis }, { prisma }] = await Promise.all([

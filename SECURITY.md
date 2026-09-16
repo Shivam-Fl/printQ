@@ -45,8 +45,11 @@ This file records the decisions so future sessions (human or AI) don't undo them
 
 - Magic-byte validation (`file-type`), 25 MB cap enforced by multer, random UUID
   storage keys (user filenames never touch the filesystem), path-traversal guard in
-  the local driver, `Content-Security-Policy: sandbox` on inline PDF previews,
-  auto-deletion `FILE_RETENTION_HOURS` after completion (privacy, spec §14).
+  the local driver, `Content-Security-Policy: sandbox` on inline PDF previews.
+  A spool acknowledgement is not successful-print evidence: only an isolated
+  simulator completion or authenticated staff's physical confirmation starts the
+  fixed ten-minute deletion clock. The minute worker deletes source, converted
+  and preview objects, then scrubs stored filenames while retaining audit metadata.
 - Agent file downloads require the agent to have *claimed* the job.
 
 ## Platform hygiene

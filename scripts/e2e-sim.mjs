@@ -155,6 +155,8 @@ async function main() {
     MAX_SHOP_CASH_DEBT_PAISE: '100',
     SMS_PROVIDER: 'console',
     EMAIL_PROVIDER: 'console',
+    // Explicit test-only opt-in. Production configuration rejects this value.
+    ALLOW_SIMULATED_PRINT_COMPLETION: 'true',
     LOG_LEVEL: 'info',
     REDIS_URL: isolatedRedisUrl,
     STORAGE_LOCAL_DIR: storageDir,

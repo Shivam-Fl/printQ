@@ -54,6 +54,7 @@ jobs:
       STORAGE_LOCAL_DIR: .tmp/ci-storage
       SMS_PROVIDER: console
       EMAIL_PROVIDER: console
+      ALLOW_SIMULATED_PRINT_COMPLETION: "true"
       PUBLIC_WEB_URL: http://localhost:4173
       CORS_ORIGINS: http://localhost:4173
     steps:

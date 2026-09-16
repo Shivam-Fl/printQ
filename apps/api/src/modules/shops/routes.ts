@@ -30,6 +30,7 @@ import {
 import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import {
@@ -494,6 +495,9 @@ shopRouter.get(
         otpExpiresAt: true,
         printError: true,
         printAttempts: true,
+        spoolAcceptedAt: true,
+        printConfirmedAt: true,
+        printCompletionMethod: true,
         queuedAt: true,
         arrivedAt: true,
         checkInCount: true,
@@ -630,6 +634,35 @@ shopRouter.post(
   }),
 );
 
+/**
+ * Real Windows drivers usually acknowledge a spool submission rather than
+ * physical completion. Staff inspect the paper and make this auditable action
+ * before PrintQs treats the job as printed, posts earnings, or deletes files.
+ */
+shopRouter.post(
+  '/jobs/:id/confirm-print-completion',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    const job = await prisma.job.findFirst({
+      where: { id: param(req, 'id'), shopId: req.shopUser!.shopId },
+    });
+    if (!job) throw notFound();
+    if (job.status !== 'printing') throw conflict('This job is not awaiting print confirmation');
+
+    const completed = await confirmSuccessfulPrint(
+      job,
+      { type: 'shop', id: req.shopUser!.id },
+      'staff_confirmed',
+    );
+    if (!completed) throw conflict('Job state changed, refresh and try again');
+    res.json({
+      ok: true,
+      job: { id: completed.job.id, status: completed.job.status },
+      finishingRequired: completed.finishingRequired,
+    });
+  }),
+);
+
 /** Close a collected-cash order only after staff physically returns the cash. */
 shopRouter.post(
   '/jobs/:id/cash-returned',
@@ -693,7 +726,6 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
-    await creditPrintEarning(updated.id);
     await notifyStudent(job.studentId, {
       title: 'Print ready ✓',
       body: 'Printing and finishing are complete. Collect it at the counter.',
@@ -705,7 +737,7 @@ shopRouter.post(
   }),
 );
 
-/** Hand the finished print to the student — closes the job and starts file retention. */
+/** Hand the finished print to the student — its deletion clock started at confirmed printing. */
 shopRouter.post(
   '/jobs/:id/handover',
   requireShopUser,
@@ -721,7 +753,6 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
-    await scheduleFileDeletion(job.fileId);
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),

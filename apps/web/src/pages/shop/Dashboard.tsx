@@ -27,6 +27,9 @@ interface QueueJob {
   otpExpiresAt: string | null;
   printError: string | null;
   printAttempts: number;
+  spoolAcceptedAt: string | null;
+  printConfirmedAt: string | null;
+  printCompletionMethod: 'simulator' | 'staff_confirmed' | null;
   queuedAt: string | null;
   arrivedAt: string | null;
   checkInCount: number;
@@ -136,6 +139,7 @@ export default function Dashboard() {
     socket.on('queue:job_printing', onAny);
     socket.on('queue:finishing_required', onAny);
     socket.on('queue:job_ready', onAny);
+    socket.on('queue:print_confirmation_required', onAny);
     socket.on('queue:manual_assign_needed', onAny);
     socket.on('agent:offline', onAny);
     socket.on('queue:print_failed', onPrintFailed);
@@ -145,6 +149,7 @@ export default function Dashboard() {
       socket.off('queue:job_printing', onAny);
       socket.off('queue:finishing_required', onAny);
       socket.off('queue:job_ready', onAny);
+      socket.off('queue:print_confirmation_required', onAny);
       socket.off('queue:manual_assign_needed', onAny);
       socket.off('agent:offline', onAny);
       socket.off('queue:print_failed', onPrintFailed);
@@ -259,6 +264,22 @@ export default function Dashboard() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not complete finishing');
+    }
+  }
+
+  async function confirmPrinted(id: string) {
+    if (!confirm('Only continue after checking that the full requested print came out correctly. This starts the ten-minute document-deletion clock.')) return;
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<{ finishingRequired: boolean }>(`/api/shop/jobs/${id}/confirm-print-completion`, {
+        method: 'POST',
+        role: 'shop',
+      });
+      setMessage(result.finishingRequired ? 'Print confirmed — manual finishing is now in progress' : 'Print confirmed — student notified ✓');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not confirm the printed output');
     }
   }
 
@@ -493,7 +514,7 @@ export default function Dashboard() {
         </>
       )}
 
-      <div className="section-heading"><div><h2>Printing and pickup</h2><p>Jobs released at the counter.</p></div><span className="summary-pill">{inFlight.length}</span></div>
+      <div className="section-heading"><div><h2>Printing and pickup</h2><p>Jobs released at the counter. A Windows spool acknowledgement still needs staff to check the paper before it is marked printed.</p></div><span className="summary-pill">{inFlight.length}</span></div>
       <div className="table-shell">
         <table>
           <thead>
@@ -528,6 +549,11 @@ export default function Dashboard() {
                         </button>
                       )}
                     </span>
+                  )}
+                  {j.status === 'printing' && (
+                    <button className="small" onClick={() => confirmPrinted(j.id)}>
+                      Printed successfully
+                    </button>
                   )}
                   {j.status === 'finishing' && (
                     <button className="small" onClick={() => completeFinishing(j.id)}>
