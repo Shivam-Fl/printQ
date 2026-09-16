@@ -116,16 +116,24 @@ debug_env:
 # save them: memory/ and the ledger are both git. Deriving stores nothing, yields the same
 # password for the same identity so accounts are reusable, and rotating the seed rotates all.
 qa_auth:
-  # The production test accounts do NOT exist in compose mode — the database is created
-  # empty and seeded from apps/api/prisma/seed.ts on every run. Those secrets stay set for
-  # the debugger, which does work against production; QA uses what the seed creates.
-  mode: secrets
+  # fixture: the values below are plaintext ON PURPOSE. This database is created empty by
+  # prisma migrate + seed on every run and destroyed with the runner, so "ci-owner-pass-1" is
+  # a constant already written in apps/api/prisma/seed.ts. Storing it as a secret would be
+  # theatre. The mode refuses to hand these over unless env.mode is compose and
+  # api_allowlist is local-only, so it cannot drift into pointing at anything real.
+  #
+  # The production test accounts stay in GitHub Secrets for the DEBUGGER, which works against
+  # production where the reported bugs actually live. They do not exist in this database.
+  mode: fixture
 
   accounts:
     - role: shop_owner
-      fields: { email: QA_COMPOSE_OWNER_EMAIL, password: QA_COMPOSE_OWNER_PASSWORD }
-    # Students are NOT seeded. QA signs one up by phone and reads the OTP from the API log —
-    # SMS_PROVIDER=console prints it. The recipe is in .sdlc/memory/qa/environment.md.
+      fields:
+        email: "owner@demo.printq.local"    # created by apps/api/prisma/seed.ts
+        password: "ci-owner-pass-1"         # SEED_OWNER_PASSWORD, set in env.boot above
+
+    # Students are NOT seeded. QA signs one up by phone; SMS_PROVIDER=console prints the OTP
+    # to /tmp/printq-api.log. Recipe in .sdlc/memory/qa/environment.md.
 
 # own      = run the checks below (a repo with no CI of its own)
 # existing = skip them; this repo's CI already gates the PR, and the pipeline waits for those

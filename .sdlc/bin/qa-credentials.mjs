@@ -26,21 +26,72 @@ if (mode === 'none') {
 }
 
 if (mode === 'secrets') {
+  // Named secrets, one set per role. Shapes differ between roles: a customer may log in by
+  // phone and OTP while an owner uses a password.
   // Accounts that cannot be self-created: SSO, admin roles, anything provisioned by hand.
   // The values arrive as env from GitHub Secrets; this step only reports which are present
   // so a missing one fails here rather than as a confusing login timeout mid-run.
-  const names = auth.secrets ?? ['QA_USER_EMAIL', 'QA_USER_PASSWORD'];
+  const declared = auth.accounts ?? [{ role: 'primary', fields: { email: 'QA_USER_EMAIL', password: 'QA_USER_PASSWORD' } }];
+  const names = declared.flatMap((a) => Object.values(a.fields ?? {}));
   const missing = names.filter((n) => !process.env[n]);
   if (missing.length) {
     die(`qa_auth.mode is "secrets" but these are not set: ${missing.join(', ')}\n` +
-        `  gh secret set ${missing[0]} --repo <owner>/<repo>`);
+        `  gh secret set ${missing[0]} --app actions --repo <owner>/<repo>`);
+  }
+  const accounts = declared.map((a) => ({
+    role: a.role,
+    ...Object.fromEntries(Object.entries(a.fields ?? {}).map(([k, secret]) => [k, process.env[secret]])),
+  }));
+  for (const a of accounts) {
+    for (const [k, v] of Object.entries(a)) {
+      if (k !== 'role' && v) process.stdout.write(`::add-mask::${v}\n`);
+    }
   }
   setOutput('mode', 'secrets');
-  process.stdout.write(`credentials supplied via secrets: ${names.join(', ')}\n`);
+  setOutput('accounts', JSON.stringify(accounts));
+  process.stdout.write(`credentials for ${accounts.length} role(s) from secrets: ${declared.map((a) => a.role).join(', ')}\n`);
   process.exit(0);
 }
 
-if (mode !== 'derived') die(`unknown qa_auth.mode "${mode}" — expected none, secrets or derived`);
+if (mode === 'fixture') {
+  // Credentials written in plain text in config. Legitimate ONLY for an environment created
+  // empty and destroyed with the runner — a seeded compose stack, where the "password" is a
+  // constant the seed script already contains and protecting it would be theatre.
+  //
+  // The danger is drift: someone later flips env.mode to preview, and now plaintext
+  // credentials are pointed at a real system. So the mode verifies its own preconditions
+  // rather than trusting that whoever set it knew what it meant.
+  const env = cfg.env ?? {};
+  const reasons = [];
+  if (env.mode !== 'compose') {
+    reasons.push(`env.mode is "${env.mode}", not "compose" — fixture credentials are only for a stack built from scratch each run`);
+  }
+  const hosts = env.api_allowlist ?? [];
+  if (!hosts.length) {
+    reasons.push('env.api_allowlist is empty, so the environment cannot be shown to be local');
+  }
+  const nonLocal = hosts.filter((h) => !/^localhost(:|$)|^127\.0\.0\.1(:|$)/.test(String(h)));
+  if (nonLocal.length) {
+    reasons.push(`env.api_allowlist permits ${nonLocal.join(', ')}, which is not local — data would leave the runner`);
+  }
+  if (reasons.length) {
+    die('qa_auth.mode is "fixture" but this environment is not ephemeral:\n' +
+        reasons.map((r) => `  - ${r}`).join('\n') +
+        '\nPlaintext credentials must never point at a real system. Use mode "secrets" instead.');
+  }
+
+  const accounts = (auth.accounts ?? []).map((a) => ({ role: a.role, ...a.fields }));
+  if (!accounts.length) die('qa_auth.mode is "fixture" but no accounts are declared');
+
+  setOutput('mode', 'fixture');
+  setOutput('accounts', JSON.stringify(accounts));
+  process.stdout.write(
+    `fixture credentials for ${accounts.length} role(s): ${accounts.map((a) => a.role).join(', ')}\n` +
+    'Plaintext by design — this database is created empty and destroyed with the runner.\n');
+  process.exit(0);
+}
+
+if (mode !== 'derived') die(`unknown qa_auth.mode "${mode}" — expected none, fixture, secrets or derived`);
 
 const seed = process.env.QA_FIXTURE_SEED;
 if (!seed) {
