@@ -1,0 +1,66 @@
+# Agent 1 — Intake. Pure script: classify, dedupe, risk-score, open the ledger.
+name: sdlc-intake
+
+on:
+  issues:
+    types: [opened, reopened]
+
+concurrency:
+  group: sdlc-${{ github.event.issue.number }}
+  cancel-in-progress: false      # never cancel a state write mid-flight
+
+permissions:
+  contents: write                # writes the ledger on the sdlc-state branch
+  issues: write
+  actions: write          # required to dispatch the next stage with `gh workflow run`
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+
+      - name: Kill switch
+        run: node .sdlc/bin/sdlc-ctl.mjs guard
+
+      # Works in a repo with no package.json: install the repo's own deps when there is a
+      # manifest, then make sure the framework's single dependency is available either way.
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      - name: Open the ledger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .sdlc/bin/sdlc-ctl.mjs init --issue ${{ github.event.issue.number }}
+
+      - name: Triage
+        id: triage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ASSOCIATION: ${{ github.event.issue.author_association }}
+        run: node .sdlc/bin/intake.mjs
+
+      - name: Route
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node .sdlc/bin/sdlc-ctl.mjs transition \
+            --issue ${{ github.event.issue.number }} \
+            --to "${{ steps.triage.outputs.next_state }}" --agent intake
+
+      # Explicit hand-off. The label alone would not start the planner — see the note in
+      # sdlc-plan.yml about GITHUB_TOKEN not triggering workflows.
+      - name: Start the planner
+        if: steps.triage.outputs.next_state == 'planning'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .sdlc/bin/dispatch.mjs sdlc-plan.yml -f issue=${{ github.event.issue.number }}

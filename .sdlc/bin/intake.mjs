@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+// Agent 1 — Intake. No model: classify, risk-score, decide whether the pipeline may start.
+import { gh, ghJson, setOutput, loadConfig, die } from './lib/actions.js';
+
+const issue = process.env.ISSUE;
+const author = (process.env.AUTHOR ?? '').toLowerCase();
+const association = process.env.ASSOCIATION ?? '';
+const cfg = await loadConfig();
+
+const data = await ghJson(['issue', 'view', issue, '--json', 'title,body,labels']);
+const text = ((data.title ?? '') + '\n' + (data.body ?? '')).toLowerCase();
+const labels = (data.labels ?? []).map((l) => l.name);
+
+const say = (body) => gh(['issue', 'comment', issue, '--body', body]);
+const label = (name) => gh(['issue', 'edit', issue, '--add-label', name]);
+
+async function stop(state, reason) {
+  await say(reason);
+  await label('sdlc:needs-human');
+  setOutput('next_state', state);
+  process.exit(0);
+}
+
+// Untrusted reporter: everything downstream acts on this text, so a human triages it first.
+const allowlist = (cfg.allowlist ?? []).map((u) => u.toLowerCase());
+const trusted = allowlist.includes(author) || ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(association);
+if (!trusted) {
+  await stop('needs-human',
+    'Intake stopped: @' + (process.env.AUTHOR ?? '?') + ' is not an allowlisted reporter.\n\n' +
+    'Every agent downstream acts on this issue text, so an outside report is triaged by a human first. ' +
+    'A maintainer can start the pipeline with `/sdlc approve`.');
+}
+
+// Risk: anything near the blast radius stops before a single token is spent.
+const RISKY = [
+  [/\bmigrat|\bschema change|\balter table/, 'database migration'],
+  [/\bauth|\blogin|\bpassword|\btoken|\bsession|\bpermission/, 'authentication or permissions'],
+  [/\bpayment|\bbilling|\bstripe|\bcharge|\brefund/, 'payments'],
+  [/\binfra|\bterraform|\bkubernetes|\bdeploy pipeline|\bsecret/, 'infrastructure or secrets'],
+];
+const risks = RISKY.filter(([re]) => re.test(text)).map(([, name]) => name);
+if (risks.length) {
+  await stop('needs-human',
+    'Intake stopped: this touches ' + risks.join(' and ') + '.\n\n' +
+    'These areas are outside the agents’ blast radius by policy (`forbidden_paths` in ' +
+    '`.sdlc/config.yml`). A human should plan this one. Comment `/sdlc approve` to override.');
+}
+
+// A bug with no reproduction produces a confident fix for the wrong thing.
+const isBug = labels.includes('bug');
+const hasRepro = /step|reproduce|1\.|when i|go to/i.test(data.body ?? '');
+if (isBug && !hasRepro) {
+  await stop('needs-human',
+    'Intake stopped: this is labelled a bug but has no reproduction steps.\n\n' +
+    'Planning from a vague report produces a confident fix for the wrong thing. ' +
+    'Add numbered steps from a clean session, then comment `/sdlc approve`.');
+}
+
+// Duplicate check against open issues — cheap title overlap, no model.
+const open = await ghJson(['issue', 'list', '--state', 'open', '--limit', '60', '--json', 'number,title']);
+const words = new Set((data.title ?? '').toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+const dupe = open.find((o) => {
+  if (String(o.number) === String(issue)) return false;
+  const other = new Set(o.title.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+  const shared = [...words].filter((w) => other.has(w)).length;
+  return words.size > 2 && shared / words.size > 0.7;
+});
+if (dupe) {
+  await say('Looks like a duplicate of #' + dupe.number + '. Closing — reopen if that is wrong.');
+  await gh(['issue', 'close', issue, '--reason', 'not planned']);
+  setOutput('next_state', 'blocked');
+  process.exit(0);
+}
+
+await label('sdlc:planning');
+setOutput('next_state', 'planning');
+process.stdout.write('intake: proceeding to planning\n');
