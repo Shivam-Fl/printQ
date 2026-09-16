@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Agent 1 — Intake. No model: classify, risk-score, decide whether the pipeline may start.
 import { gh, ghJson, setOutput, loadConfig, die } from './lib/actions.js';
+import { riskAreas, hasReproSteps, findDuplicate } from './lib/triage.js';
 
 const issue = process.env.ISSUE;
 const author = (process.env.AUTHOR ?? '').toLowerCase();
@@ -32,23 +33,20 @@ if (!trusted) {
 }
 
 // Risk: anything near the blast radius stops before a single token is spent.
-const RISKY = [
-  [/\bmigrat|\bschema change|\balter table/, 'database migration'],
-  [/\bauth|\blogin|\bpassword|\btoken|\bsession|\bpermission/, 'authentication or permissions'],
-  [/\bpayment|\bbilling|\bstripe|\bcharge|\brefund/, 'payments'],
-  [/\binfra|\bterraform|\bkubernetes|\bdeploy pipeline|\bsecret/, 'infrastructure or secrets'],
-];
-const risks = RISKY.filter(([re]) => re.test(text)).map(([, name]) => name);
+// Sections describing what will NOT be done are excluded first — an issue saying
+// "out of scope: payments" is the clearest statement that payments are not involved, and
+// blocking it for saying so trains people to approve without reading.
+const { risky: risks } = riskAreas({ title: data.title, body: data.body });
 if (risks.length) {
   await stop('needs-human',
     'Intake stopped: this touches ' + risks.join(' and ') + '.\n\n' +
-    'These areas are outside the agents’ blast radius by policy (`forbidden_paths` in ' +
+    'These areas are outside the agents\u2019 blast radius by policy (`forbidden_paths` in ' +
     '`.sdlc/config.yml`). A human should plan this one. Comment `/sdlc approve` to override.');
 }
 
 // A bug with no reproduction produces a confident fix for the wrong thing.
 const isBug = labels.includes('bug');
-const hasRepro = /step|reproduce|1\.|when i|go to/i.test(data.body ?? '');
+const hasRepro = hasReproSteps(data.body);
 if (isBug && !hasRepro) {
   await stop('needs-human',
     'Intake stopped: this is labelled a bug but has no reproduction steps.\n\n' +
@@ -58,13 +56,7 @@ if (isBug && !hasRepro) {
 
 // Duplicate check against open issues — cheap title overlap, no model.
 const open = await ghJson(['issue', 'list', '--state', 'open', '--limit', '60', '--json', 'number,title']);
-const words = new Set((data.title ?? '').toLowerCase().split(/\W+/).filter((w) => w.length > 3));
-const dupe = open.find((o) => {
-  if (String(o.number) === String(issue)) return false;
-  const other = new Set(o.title.toLowerCase().split(/\W+/).filter((w) => w.length > 3));
-  const shared = [...words].filter((w) => other.has(w)).length;
-  return words.size > 2 && shared / words.size > 0.7;
-});
+const dupe = findDuplicate(data.title, open.filter((o) => String(o.number) !== String(issue)));
 if (dupe) {
   await say('Looks like a duplicate of #' + dupe.number + '. Closing — reopen if that is wrong.');
   await gh(['issue', 'close', issue, '--reason', 'not planned']);

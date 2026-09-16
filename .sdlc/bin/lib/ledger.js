@@ -59,6 +59,14 @@ const stamp = (l, now, agent, action) => ({
 /** Legal-transition check. An illegal transition is a bug in a workflow, not a valid state. */
 export function transition(ledger, to, { agent = 'system', now = new Date() } = {}) {
   if (!STATES.includes(to)) return { ok: false, reason: `unknown state "${to}"` };
+
+  // Landing on the state you are already in is a no-op, not an error. Re-running a stage is
+  // ordinary — a retry, a reopened issue, a replayed workflow — and failing there turns a
+  // harmless repeat into a red run that looks like a broken state machine.
+  if (ledger.state === to) {
+    return { ok: true, ledger, unchanged: true };
+  }
+
   const allowed = LEGAL[ledger.state] ?? [];
   if (!allowed.includes(to)) {
     return { ok: false, reason: `illegal transition ${ledger.state} -> ${to}` };
