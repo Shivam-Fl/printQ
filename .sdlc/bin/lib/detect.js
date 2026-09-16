@@ -164,7 +164,10 @@ export function detect(repo) {
     if (!verify[k] && !confidence[k]) confidence[k] = 'none found';
   }
 
-  return { stack, framework, verify, verifyMode, existingWorkflows: existing, env, confidence, notes };
+  // No turn budgets are emitted. The action validates the count after the run, so a cap
+  // that is exceeded discards completed work rather than truncating it — and a repo large
+  // enough to need more turns is exactly where that waste is most expensive.
+  return { stack, framework, verify, verifyMode, existingWorkflows: existing, env, confidence, notes, size: files.size };
 }
 
 function previewHostsFor({ files, framework }) {

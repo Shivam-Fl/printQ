@@ -26,21 +26,11 @@ runtime:
     librarian:          ""
     release:            ""
 
-  max_turns:
-    plan: 40
-    plan_proposer: 40
-    plan_critic: 40
-    plan_arbiter: 40
-    plan_reviewer: 30
-    debug: 60
-    implement: 60
-    review: 40
-    review_correctness: 40
-    review_design: 40
-    qa: 120
-    root_cause: 40
-    librarian: 50
-    release: 25
+  # No turn caps. claude-code-action validates the count AFTER the run, so a cap that is
+  # exceeded discards completed work rather than truncating it — the planner on #4 used 54
+  # turns against 40, produced a valid work order, and the run was thrown away.
+  # limits.attempts and timeout-minutes already bound runaway, before the cost is incurred.
+  max_turns: {}
 
 # single = one agent. council = several in sequence, each reading the last one's output.
 # A council costs roughly 3x the turns. Start single; switch the stage that actually
