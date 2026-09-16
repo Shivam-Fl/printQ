@@ -61,6 +61,29 @@ env:
     - "*.onrender.com"
   ready: "/"
 
+  # Where the page may SEND DATA. This is the guard that actually matters here.
+  #
+  # printQ's Vercel previews build only apps/web and inherit VITE_API_URL. If that points at
+  # the production API, the page passes the *.vercel.app check above while every order QA
+  # places lands in a real shop's print queue.
+  #
+  # EMPTY ON PURPOSE: QA refuses to run until a staging API host is listed. That is the
+  # correct state today, not a misconfiguration.
+  api_allowlist: []
+
+# The debugger gets different rules from QA, on purpose. Reproducing a reported bug often
+# REQUIRES production — the bug exists there, with that account and that data. QA is the
+# opposite: adversarial and broad, so it needs a target it is free to break.
+debug_env:
+  # Reported printQ bugs live in production, with that shop's data and that student's order.
+  # The debugger is allowed there because it cannot do its job otherwise. QA is not, because
+  # its job is to break things. Different work, different contract.
+  allow_production: true
+  url_allowlist: ["*.printqs.com", "*.vercel.app"]
+  api_allowlist: ["*.printqs.com"]
+  read_only: true   # reproduce and observe. No refunds, cancellations or deletions, and
+                    # never a record the agent did not create itself.
+
 # How QA logs in.
 # none    = the app has no login, or QA only tests unauthenticated flows
 # secrets = accounts provisioned by hand (SSO, admin). Values come from GitHub Secrets;
@@ -71,12 +94,20 @@ env:
 # save them: memory/ and the ledger are both git. Deriving stores nothing, yields the same
 # password for the same identity so accounts are reusable, and rotating the seed rotates all.
 qa_auth:
-  mode: derived            # printQ has real accounts (login, OTP, password reset)
-  secrets: [QA_USER_EMAIL, QA_USER_PASSWORD]
-  scope: pr                # run | pr | global
-  roles: [primary, secondary]   # two, so QA can prove user B cannot see user A's orders
-  email_domain: qa.invalid # RFC 2606 reserved — can never reach a real person
-  signup_url: "/dashboard/register"   # from apps/web/src/App.tsx
+  mode: secrets            # printQ's test accounts are provisioned, not self-signup
+
+  # Secret NAMES only — values live in GitHub Secrets and never in this file.
+  #
+  # printQ has two credential shapes: students authenticate by phone + OTP, shop owners by
+  # email + password. Two student roles so QA can prove one student cannot read another's
+  # orders, which is the highest-value permission test on this app.
+  accounts:
+    - role: student_primary
+      fields: { phone: QA_STUDENT_1_PHONE, otp: QA_STUDENT_1_OTP }
+    - role: student_secondary
+      fields: { phone: QA_STUDENT_2_PHONE, otp: QA_STUDENT_2_OTP }
+    - role: shop_owner
+      fields: { email: QA_SHOP_EMAIL, password: QA_SHOP_PASSWORD }
 
 # own      = run the checks below (a repo with no CI of its own)
 # existing = skip them; this repo's CI already gates the PR, and the pipeline waits for those

@@ -4,11 +4,12 @@ Seeded by `sdlc install` from a scan. **Correct it** — an agent reads this bef
 and a wrong entry here steers every ticket wrong.
 
 ## Stack
-node · 204 tracked files
+node · 279 tracked files
 
 ## Top-level layout
 - `Dockerfile/`
 - `apps/`
+- `bin/`
 - `packages/`
 - `scripts/`
 - `vibe-to-production-skill/`

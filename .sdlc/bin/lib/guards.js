@@ -75,6 +75,38 @@ function matchesHost(pattern, host, hostPort) {
 }
 
 /**
+ * Which backends did the page actually talk to, and are they all allowed?
+ *
+ * Checking the page URL alone is not enough and can be actively misleading. A preview
+ * deployment often serves only a frontend while inheriting the production API base URL, so
+ * the page passes a `*.vercel.app` allowlist while every write lands in the production
+ * database. The guard has to look at where the data goes, not where the HTML came from.
+ *
+ * @param {string[]} requestUrls every request origin the page made, from the HAR
+ * @param {string[]} allowlist   host patterns the API is permitted to be
+ * @returns {{ok: true, origins: string[]} | {ok: false, reason: string, offending: string[]}}
+ */
+export function checkApiOrigins(requestUrls = [], allowlist = []) {
+  if (!allowlist.length) {
+    return { ok: false, reason: 'env.api_allowlist is empty — cannot prove this is not production' };
+  }
+  const origins = new Set();
+  for (const u of requestUrls) {
+    try {
+      const { protocol, hostname, port } = new URL(u);
+      if (protocol !== 'http:' && protocol !== 'https:') continue;
+      origins.add(port ? `${hostname}:${port}` : hostname);
+    } catch { /* not a URL we can judge */ }
+  }
+  const offending = [...origins].filter(
+    (host) => !allowlist.some((p) => matchesHost(String(p).trim().toLowerCase(), host.split(':')[0], host)),
+  );
+  return offending.length
+    ? { ok: false, reason: `the page called ${offending.join(', ')}, which env.api_allowlist does not permit`, offending }
+    : { ok: true, origins: [...origins] };
+}
+
+/**
  * Which of these paths are reserved from agents?
  * Globs: `**` crosses directories, `*` does not.
  * @returns {{path: string, rule: string}[]} empty when nothing is forbidden

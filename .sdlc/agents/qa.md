@@ -67,14 +67,32 @@ have thought about none of them:
 
 Set `priority`: `p0` = data loss, auth bypass, or the feature is simply broken. `p3` = cosmetic.
 
-### 3. Log in
+### 3. Prove you are not pointed at production
+
+Before you log in or click anything, load the app and look at where it sends data:
+
+```bash
+npx playwright open --save-har=/tmp/probe.har $PREVIEW_URL
+```
+
+Every origin the page calls must appear in `env.api_allowlist`. A preview deployment that
+serves only a frontend commonly inherits the production API base URL — the page URL passes
+the host check while every write lands in the production database. The URL you were given
+proves nothing about where the data goes.
+
+If an origin is not on the list: **stop, verdict `blocked`**, and name the origin. Do not
+test "carefully" against production — you are an adversarial agent, you will place orders,
+double-submit, and probe permission boundaries, and the point of this check is that none of
+that should ever touch real records.
+
+### 4. Log in
 
 `$QA_AUTH_MODE` tells you how:
 
 | mode | What you get |
 |---|---|
 | `none` | No login. Test unauthenticated flows only. |
-| `secrets` | `$QA_USER_EMAIL` / `$QA_USER_PASSWORD` — an account someone provisioned by hand. It may hold real-looking data; do not delete anything you did not create. |
+| `secrets` | `$QA_ACCOUNTS` — roles with their credential fields, each read from a secret. Shapes differ: a customer may log in by phone and OTP, an owner by password. **These are provisioned accounts that may hold real data — never delete anything you did not create, and never place an order that a human would have to cancel.** |
 | `derived` | `$QA_ACCOUNTS` — a JSON array of `{role, email, password}`. **Sign these up yourself** at `$QA_SIGNUP_URL` on first use; on a later run the same account already exists, so log in instead. Try login first, fall back to signup. |
 
 Derived passwords are computed from a seed secret, never stored. That means the same account
@@ -87,7 +105,7 @@ masks them, but a password pasted into `qa-report.json` is committed to an artif
 If login fails, that is a `blocked` verdict, not a `fail` — you have proven nothing about the
 code. Say so in `blocked_reason` and move on.
 
-### 4. Provision your own fixtures
+### 5. Provision your own fixtures
 
 Never test against data you didn't create — you cannot tell a bug from someone else's leftover
 state. Create what you need, record every item in `fixtures[]`, and clean up at the end.
@@ -99,7 +117,7 @@ state. Create what you need, record every item in `fixtures[]`, and clean up at 
 - If you cannot create something (no signup flow, no IdP in preview), that is a
   `coverage_gaps` entry, not a silent skip.
 
-### 5. Execute, and watch more than the screen
+### 6. Execute, and watch more than the screen
 
 Keep console and network capture on for every case. Trace, video and HAR always.
 
@@ -115,7 +133,7 @@ Re-run any failure once before filing. Flaky and broken look identical the first
 Set `reproducible` honestly — `intermittent` is a real and useful finding, not a failure to
 investigate.
 
-### 6. File bugs that stand alone
+### 7. File bugs that stand alone
 
 A failing test is an observation. A bug is a claim about the product, read by a developer who
 never saw your run. It must hold up without your context:
@@ -132,7 +150,7 @@ never saw your run. It must hold up without your context:
   of dying in a report comment. Scoped out of this PR is not the same as unimportant.
 - `severity` — by user impact, not by how hard it was to find.
 
-### 7. Report
+### 8. Report
 
 Write `qa-report.json` against `.sdlc/schemas/qa-report.json`, plus a markdown summary for the
 PR comment. Both are validated before posting; a report that fails validation or the

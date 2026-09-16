@@ -194,6 +194,15 @@ route_bugs_to_debugger: true
 env:
 ${envLines}
 
+# The debugger gets different rules from QA, on purpose. Reproducing a reported bug often
+# REQUIRES production — the bug exists there, with that account and that data. QA is the
+# opposite: adversarial and broad, so it needs a target it is free to break.
+debug_env:
+  allow_production: false
+  url_allowlist: []
+  api_allowlist: []
+  read_only: true
+
 # How QA logs in.
 # none    = the app has no login, or QA only tests unauthenticated flows
 # secrets = accounts provisioned by hand (SSO, admin). Values come from GitHub Secrets;
@@ -205,7 +214,13 @@ ${envLines}
 # password for the same identity so accounts are reusable, and rotating the seed rotates all.
 qa_auth:
   mode: none               # none | secrets | derived
-  secrets: [QA_USER_EMAIL, QA_USER_PASSWORD]
+
+  # mode: secrets — secret NAMES, never values. One entry per role: most apps need two
+  # accounts to test anything about permissions, and roles rarely share a credential shape
+  # (a customer may log in by phone and OTP while an owner uses a password).
+  accounts:
+    - role: primary
+      fields: { email: QA_USER_EMAIL, password: QA_USER_PASSWORD }
   scope: pr                # run | pr | global
   roles: [primary]         # add a second for permission tests
   email_domain: qa.invalid # RFC 2606 reserved — can never reach a real person
