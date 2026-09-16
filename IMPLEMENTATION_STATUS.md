@@ -4,7 +4,7 @@ Last updated: 2026-09-16 (Asia/Kolkata)
 
 ## Current phase
 
-Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced. Phase 2 isolation is partially complete: a distinct Firebase development project and GitHub development environment exist, while durable development database, queue, object storage, Cloud Run, Resend, and Razorpay TEST endpoints still require their own provider resources. This branch implements the Phase 3 verified-print retention contract; it is not deployed until its feature PR passes CI and is merged to `master`.
+Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced. Phase 2 isolation is partially complete: a distinct Firebase development project and GitHub development environment exist, while durable development database, queue, object storage, Cloud Run, Resend, and Razorpay TEST endpoints still require their own provider resources. The verified-print retention candidate in PR #9 has its exact required-check evidence; the active stacked branch adds code-enforced environment namespaces and provider-mode guardrails before any development deployment is permitted.
 
 ## Ownership and release source
 
@@ -13,8 +13,9 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Integration owner | Codex lead implementation agent |
 | User-owned source tree | `C:\Users\acer\Desktop\startup\printQ` — deliberately untouched; it contains QA/generated changes |
 | Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-phase2-master` |
-| Active feature branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
-| Candidate SHA | `2b2c6309a892d25fa9bedce9a6c1a69dec12acd7` |
+| Verified retention branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
+| Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
+| Active stacked isolation branch | `codex/environment-isolation` at `7a3956b` (based on the retention candidate; not yet independently PR'd) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
@@ -50,13 +51,14 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | GitHub Actions `35131596603` | Passed | Exact candidate migration deploy/status, build, typecheck, JUnit suite, full print-agent simulator, dependency audit, and CI artifact upload. |
 | GitHub Actions `35131203760` | Rejected | Simulator correctly caught the initial premature legacy earning credit. Commit `2b2c630` moves the credit to verified physical print status and the full rerun above passes. |
 | User-owned SDLC `qa` `35131698781` | Not a release gate; failed | Its validation expects `qa-report.json`, but its own workflow did not produce one for this master-targeted PR. `gh pr checks --required` confirms only `CI / check` and `CI / secret scan`, both passed. The workflow is preserved unchanged. |
+| Isolation branch local suite | Passed | API 16 files / 40 tests, all-workspace typecheck, web production build, root JUnit suite with zero failures/errors, and Prisma schema validation. |
 
 ## Environment/provider status and blockers
 
 | Area | Current status | Required next action / owner |
 | --- | --- | --- |
 | Development Firebase | Isolated project and GitHub environment secrets created | Enable Auth/App Check/realtime/FCM after application wiring; use only development configuration. |
-| Development PostgreSQL/Redis/R2 | Not yet provisioned | Create distinct durable resources, credentials, queue namespace, and private bucket. This requires a selected provider account/billing or existing approved resources. |
+| Development PostgreSQL/Redis/R2 | Not yet provisioned | The code now requires a matching database namespace, physically namespaces every Redis queue and storage key, and blocks wrong provider modes. Create distinct durable resources, credentials, and private bucket; this requires a selected provider account/billing or existing approved resources. |
 | Production compute/storage | Render combined/local-storage configuration remains legacy | Do not use for real orders; Cloud Run + separate workers + private object storage remain required. |
 | Historical secret scan | Full-history scan detects an old Firebase browser key in Git history | Coordinate key restriction/rotation before history remediation; do not expose its value. |
 | Razorpay AutoPay | UPI AutoPay approval is not evidenced and must remain unclaimed | Founder must authorize an accurate enablement request; no mandate/debit is permitted. |
@@ -71,4 +73,4 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 
 ## Next action
 
-Run the storage/print-confirmation feature PR through the required disposable CI migration and simulator suite, inspect the exact CI artifacts, then merge only the tested SHA to user-designated `master`. In parallel-safe work after that gate, provision only the missing isolated development resources or document the paid-provider approval needed before creating them.
+Keep PR #9 unmerged until an isolated development deployment path exists, then validate its exact SHA outside CI before any `master` promotion. Rebase the stacked isolation branch on that verified merge, run its own CI/PR, and provision only the missing isolated development resources or document the paid-provider approval needed before creating them.
