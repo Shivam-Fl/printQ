@@ -58,15 +58,23 @@ function setting(map, fallbacks) {
   return fallbacks;
 }
 
-const turns = setting(cfg.runtime?.max_turns, DEFAULT_TURNS[role]) ?? DEFAULT_TURNS[role];
+// 0, empty or absent means NO LIMIT, and that is the default on purpose.
+//
+// claude-code-action validates the turn count AFTER the run: the agent used 54 turns against
+// a cap of 40, produced a valid work order, and the action threw it away. Paying for work and
+// then discarding it is strictly worse than not capping. Runaway is already prevented by the
+// ledger's attempt counter and the job's timeout-minutes, both of which stop work BEFORE it
+// is paid for rather than after.
+const configured = setting(cfg.runtime?.max_turns, undefined);
+const turns = Number(configured) > 0 ? Number(configured) : 0;
 const model = setting(cfg.runtime?.model, '') ?? '';
 
 const args = [
-  `--max-turns ${turns}`,
+  turns ? `--max-turns ${turns}` : '',
   `--allowedTools ${TOOLS[role]}`,
   model ? `--model ${model}` : '',
 ].filter(Boolean).join(' ');
 
 setOutput('args', args);
 setOutput('model', model || '(action default)');
-setOutput('turns', String(turns));
+setOutput('turns', turns ? String(turns) : '(no limit)');
