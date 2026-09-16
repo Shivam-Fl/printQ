@@ -1,0 +1,23 @@
+{
+  "issue": 4,
+  "pr": null,
+  "state": "triage",
+  "owner": null,
+  "lock_expires": null,
+  "attempts": {
+    "plan": 0,
+    "ci": 0,
+    "review": 0,
+    "qa": 0
+  },
+  "budget": {
+    "minutes": 0,
+    "cap_minutes": 120
+  },
+  "touch_paths": [],
+  "acceptance": [],
+  "artifacts": {},
+  "created_at": "2026-09-16T16:28:23.111Z",
+  "updated_at": "2026-09-16T16:28:23.111Z",
+  "history": []
+}
