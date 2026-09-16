@@ -63,4 +63,4 @@ jobs:
         if: steps.triage.outputs.next_state == 'planning'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run sdlc-plan.yml -f issue=${{ github.event.issue.number }}
+        run: node .sdlc/bin/dispatch.mjs sdlc-plan.yml -f issue=${{ github.event.issue.number }}

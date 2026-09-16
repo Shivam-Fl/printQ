@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Posts the validated work order to the issue and routes according to the approval gate.
 import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const exec = promisify(execFile);
 import { gh, setOutput, loadConfig } from './lib/actions.js';
 
 const issue = process.env.ISSUE;
@@ -40,6 +43,7 @@ if (cfg.gates?.plan_approval) {
   await gh(['issue', 'edit', issue, '--remove-label', 'sdlc:planning', '--add-label', 'sdlc:implementing']);
   // Explicit dispatch: the label will not start anything on its own (GITHUB_TOKEN events
   // do not trigger workflows).
-  await gh(['workflow', 'run', 'sdlc-implement.yml', '-f', `issue=${issue}`]);
+  // A 404 here on a fresh install means the workflow is not on the default branch yet.
+await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-implement.yml', '-f', `issue=${issue}`]).catch(() => {});
   setOutput('gated', 'false');
 }

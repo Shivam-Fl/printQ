@@ -105,7 +105,8 @@ await gh(['issue', 'edit', issue, '--add-label', label]);
 // A QA failure re-enters implementation with a revised work order. Dispatched explicitly,
 // because the label change alone will not start it.
 if (r.next_action === 'revise') {
-  await gh(['workflow', 'run', 'sdlc-implement.yml', '-f', `issue=${issue}`]);
+  // A 404 here on a fresh install means the workflow is not on the default branch yet.
+await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-implement.yml', '-f', `issue=${issue}`]).catch(() => {});
 }
 setOutput('next_action', r.next_action);
 setOutput('bugs', String((r.bugs ?? []).length));

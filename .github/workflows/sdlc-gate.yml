@@ -59,4 +59,4 @@ jobs:
 
       - name: Hand off to review
         if: steps.checks.outputs.passed == 'true'
-        run: gh workflow run sdlc-review.yml -f pr="$PR"
+        run: node .sdlc/bin/dispatch.mjs sdlc-review.yml -f pr="$PR"

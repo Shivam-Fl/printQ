@@ -14,5 +14,6 @@ const ctl = (...a) => exec('node', ['.sdlc/bin/sdlc-ctl.mjs', ...a]);
 await ctl('transition', '--issue', issue, '--to', 'merged', '--agent', 'release');
 await ctl('unlock', '--issue', issue);
 await gh(['issue', 'edit', issue, '--add-label', 'sdlc:merged']);
-await gh(['workflow', 'run', 'sdlc-release.yml', '-f', 'pr=' + pr]).catch(() => {});
+// A 404 here on a fresh install means the workflow is not on the default branch yet.
+await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-release.yml', '-f', `pr=${pr}`]).catch(() => {});
 setOutput('issue', issue);

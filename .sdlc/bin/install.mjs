@@ -54,7 +54,7 @@ const COPY = [
   ['.sdlc/agents', /\.md$/],
   ['.sdlc/schemas', /\.json$/],
   ['.sdlc/templates', /\.ya?ml$/],
-  ['.sdlc/bin', null],
+  ['.sdlc/bin', null],   // includes package.json: marks the tree as ESM in any host repo
 ];
 
 let copied = 0, skipped = 0;
@@ -134,8 +134,10 @@ function renderConfig(d, forbidden) {
   const envLines = d.env.mode === 'none'
     ? `  # No runnable surface detected, so browser QA is off. CI, review and the unit suite\n  # still gate every PR. Set this to preview or compose if the repo does ship an app.\n  mode: none`
     : d.env.mode === 'preview'
-    ? `  mode: preview\n  url_allowlist:\n${d.env.url_allowlist.map((h) => `    - "${h}"`).join('\n')}\n  ready: ${q(d.env.ready)}`
-    : `  mode: compose\n  base_url: ${q(d.env.base_url)}\n  url_allowlist:\n${d.env.url_allowlist.map((h) => `    - "${h}"`).join('\n')}\n  boot: ${q(d.env.boot)}\n  ready: ${q(d.env.ready)}`;
+    ? `  mode: preview\n  url_allowlist:\n${d.env.url_allowlist.map((h) => `    - "${h}"`).join('\n')}\n  ready: ${q(d.env.ready)}
+  ready_timeout_seconds: 0   # 0 = auto (180 preview, 420 compose)`
+    : `  mode: compose\n  base_url: ${q(d.env.base_url)}\n  url_allowlist:\n${d.env.url_allowlist.map((h) => `    - "${h}"`).join('\n')}\n  boot: ${q(d.env.boot)}\n  ready: ${q(d.env.ready)}
+  ready_timeout_seconds: 0   # 0 = auto (180 preview, 420 compose)`;
 
   return `# Written by \`sdlc install\` from a scan of this repo. Every value below is a starting
 # point, not a fact — read it before you trust the pipeline with anything.
@@ -186,6 +188,11 @@ councils:
   plan:   single           # single | council
   review: single           # single | council
 
+# Where agent PRs are opened against, and what QA diffs them from. Empty = the repo's
+# default branch. Set this when the team integrates somewhere else — many repos keep
+# main/master as the released state and merge to a development branch.
+base_branch: ""
+
 # Bugs go to the debugger, which reproduces in a live browser before diagnosing.
 route_bugs_to_debugger: true
 
@@ -205,6 +212,8 @@ debug_env:
 
 # How QA logs in.
 # none    = the app has no login, or QA only tests unauthenticated flows
+# fixture = plaintext credentials for an ephemeral stack. Verifies env.mode is compose and
+#           api_allowlist is local-only before it will hand them over.
 # secrets = accounts provisioned by hand (SSO, admin). Values come from GitHub Secrets;
 #           only their NAMES appear here.
 # derived = QA signs itself up, every password an HMAC of one QA_FIXTURE_SEED secret.
@@ -213,7 +222,7 @@ debug_env:
 # save them: memory/ and the ledger are both git. Deriving stores nothing, yields the same
 # password for the same identity so accounts are reusable, and rotating the seed rotates all.
 qa_auth:
-  mode: none               # none | secrets | derived
+  mode: none               # none | fixture | secrets | derived
 
   # mode: secrets — secret NAMES, never values. One entry per role: most apps need two
   # accounts to test anything about permissions, and roles rarely share a credential shape
