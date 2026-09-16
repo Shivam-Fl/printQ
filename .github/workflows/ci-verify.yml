@@ -1,0 +1,124 @@
+# Tier 0 — deterministic CI. No model, no cost beyond runner minutes.
+# Runs BEFORE any agent is allowed near the PR: never pay a model for what tsc finds free.
+name: ci-verify
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      result: ${{ job.status }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Kill switch
+        run: node .sdlc/bin/sdlc-ctl.mjs guard
+
+      # A repo with its own CI should keep using it. verify.mode: existing skips ours
+      # entirely rather than running a weaker duplicate alongside it.
+      - name: Should we run our own checks?
+        id: mode
+        run: |
+          MODE=$(node .sdlc/bin/read-config.mjs verify.mode)
+          echo "mode=${MODE:-own}" >> $GITHUB_OUTPUT
+          [ "$MODE" = "existing" ] && echo "verify.mode is 'existing' — this repo's own CI gates the PR" || true
+
+      # Deliberately NOT read from config. Reading `verify.install` would require a YAML
+      # parser, which is what we are about to install — a bootstrap deadlock. A project
+      # needing something other than npm edits this line.
+      # Works in a repo with no package.json: install the repo's own deps when there is a
+      # manifest, then make sure the framework's single dependency is available either way.
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      # Each step tees its output so the digest can read the real failure, and `continue-on-error`
+      # lets every check run — one digest listing four problems beats four sequential red builds.
+      # Not continue-on-error: if the prep fails, every check after it fails for the wrong
+      # reason and the digest blames the PR for a broken build setup.
+      - name: Prepare
+        if: steps.mode.outputs.mode != 'existing'
+        run: |
+          CMD=$(node .sdlc/bin/read-config.mjs verify.prepare)
+          if [ -z "$CMD" ]; then echo "verify.prepare not configured — skipping"; exit 0; fi
+          echo "$ $CMD" | tee -a /tmp/ci.log
+          eval "$CMD" 2>&1 | tee -a /tmp/ci.log
+
+      - name: Typecheck
+        if: steps.mode.outputs.mode != 'existing'
+        id: typecheck
+        continue-on-error: true
+        run: |
+          CMD=$(node .sdlc/bin/read-config.mjs verify.typecheck)
+          if [ -z "$CMD" ]; then echo "verify.typecheck not configured - skipping"; exit 0; fi
+          echo "$ $CMD" | tee -a /tmp/ci.log
+          eval "$CMD" 2>&1 | tee -a /tmp/ci.log
+
+      - name: Lint
+        if: steps.mode.outputs.mode != 'existing'
+        id: lint
+        continue-on-error: true
+        run: |
+          CMD=$(node .sdlc/bin/read-config.mjs verify.lint)
+          if [ -z "$CMD" ]; then echo "verify.lint not configured - skipping"; exit 0; fi
+          echo "$ $CMD" | tee -a /tmp/ci.log
+          eval "$CMD" 2>&1 | tee -a /tmp/ci.log
+
+      - name: Unit tests
+        if: steps.mode.outputs.mode != 'existing'
+        id: unit
+        continue-on-error: true
+        run: |
+          CMD=$(node .sdlc/bin/read-config.mjs verify.unit)
+          if [ -z "$CMD" ]; then echo "verify.unit not configured - skipping"; exit 0; fi
+          echo "$ $CMD" | tee -a /tmp/ci.log
+          eval "$CMD" 2>&1 | tee -a /tmp/ci.log
+
+      - name: Build
+        if: steps.mode.outputs.mode != 'existing'
+        id: build
+        continue-on-error: true
+        run: |
+          CMD=$(node .sdlc/bin/read-config.mjs verify.build)
+          if [ -z "$CMD" ]; then echo "verify.build not configured - skipping"; exit 0; fi
+          echo "$ $CMD" | tee -a /tmp/ci.log
+          eval "$CMD" 2>&1 | tee -a /tmp/ci.log
+
+      - name: Digest failures
+        id: digest
+        if: steps.typecheck.outcome == 'failure' || steps.lint.outcome == 'failure' || steps.unit.outcome == 'failure' || steps.build.outcome == 'failure'
+        run: node .sdlc/bin/sdlc-ctl.mjs digest --file /tmp/ci.log
+
+      - name: Post digest to the PR
+        if: steps.digest.outcome == 'success' && github.event.pull_request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUMMARY: ${{ steps.digest.outputs.summary }}
+        run: |
+          printf '## CI failed\n\n%s\n\n_Digest produced by regex, not a model._\n' "$SUMMARY" \
+            | gh pr comment "${{ github.event.pull_request.number }}" --body-file -
+
+      - name: Fail if any check failed
+        if: steps.typecheck.outcome == 'failure' || steps.lint.outcome == 'failure' || steps.unit.outcome == 'failure' || steps.build.outcome == 'failure'
+        run: exit 1
