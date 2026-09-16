@@ -5,7 +5,7 @@
   "owner": null,
   "lock_expires": null,
   "attempts": {
-    "plan": 1,
+    "plan": 2,
     "ci": 0,
     "review": 0,
     "qa": 0
@@ -18,7 +18,7 @@
   "acceptance": [],
   "artifacts": {},
   "created_at": "2026-09-16T16:28:23.111Z",
-  "updated_at": "2026-09-16T16:47:44.285Z",
+  "updated_at": "2026-09-16T16:48:26.921Z",
   "history": [
     {
       "at": "2026-09-16T16:28:28.025Z",
@@ -54,6 +54,11 @@
       "at": "2026-09-16T16:47:44.285Z",
       "agent": "intake",
       "action": "-> planning"
+    },
+    {
+      "at": "2026-09-16T16:48:26.921Z",
+      "agent": "plan",
+      "action": "plan attempt 2"
     }
   ]
 }
