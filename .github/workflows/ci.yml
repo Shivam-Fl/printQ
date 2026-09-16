@@ -1,23 +1,100 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [development, main, master]
   pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   check:
+    name: CI / check
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: printq_test
+          POSTGRES_PASSWORD: printq_test
+          POSTGRES_DB: printq_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U printq_test -d printq_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://printq_test:printq_test@127.0.0.1:5432/printq_test
+      REDIS_URL: redis://127.0.0.1:6379/15
+      # The simulator uses a separate configuration key so its production-build
+      # process points at the same disposable CI Redis service, not localhost:6380.
+      PRINTQ_E2E_REDIS_URL: redis://127.0.0.1:6379/15
+      JWT_SECRET: ci-test-jwt-secret-that-is-at-least-thirty-two-characters
+      OTP_PEPPER: ci-test-otp-pepper-that-is-at-least-sixteen-characters
+      PAYMENT_PROVIDER: mock
+      SHOP_PAYOUT_PROVIDER: mock
+      STUDENT_AUTH_PROVIDER: local
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: .tmp/ci-storage
+      SMS_PROVIDER: console
+      EMAIL_PROVIDER: console
+      PUBLIC_WEB_URL: http://localhost:4173
+      CORS_ORIGINS: http://localhost:4173
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run db:generate -w apps/api
-      - run: npm run build -w packages/shared
+      - run: npm run ci:integration:ready
+      - run: npm run db:deploy -w apps/api
+      - run: npx prisma migrate status --schema apps/api/prisma/schema.prisma
+      - run: npm run build
       - run: npm run typecheck
-      - run: npm run test
-      # supply-chain check — fails only on high+ severity in production deps
+      - run: npm run test:ci
+      - name: Run agent simulator and retain trace
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:e2e:sim | tee .tmp/ci-results/agent-simulator.log
+      # Supply-chain check — fails only on high+ severity in production deps.
       - run: npm audit --omit=dev --audit-level=high
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-ci-${{ github.sha }}
+          path: .tmp/ci-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  secret-scan:
+    name: CI / secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"

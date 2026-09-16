@@ -62,7 +62,9 @@ services:
       - key: STUDENT_AUTH_PROVIDER
         value: firebase
       - key: FIREBASE_AUTH_API_KEY
-        value: AIzaSyAPhZhm0j_AkxfoLjqG03vIaQKlnfGGsOU
+        # Environment-specific public Firebase configuration belongs in the
+        # platform environment, never in the repository or a Blueprint sync.
+        sync: false
       # Razorpay test mode is used for the current production pilot. Secrets stay
       # in Render and are never committed to this Blueprint.
       - key: PAYMENT_PROVIDER
