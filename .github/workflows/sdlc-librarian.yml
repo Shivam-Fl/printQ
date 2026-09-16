@@ -43,6 +43,11 @@ jobs:
           # GitHub App token — that path 401s unless the Claude GitHub App is installed on
           # the repo, and requiring an App install would make this framework harder to clone.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt.outputs.args }}
           prompt: |
             Follow .sdlc/agents/librarian.md exactly.

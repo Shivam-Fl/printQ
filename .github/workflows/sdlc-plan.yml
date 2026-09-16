@@ -88,6 +88,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt.outputs.args }}
           prompt: |
             Follow .sdlc/agents/${{ steps.strategy.outputs.pack }} exactly.
@@ -109,6 +114,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt_prop.outputs.args }}
           prompt: |
             Follow .sdlc/agents/plan-council/1-proposer.md exactly.
@@ -123,6 +133,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt_crit.outputs.args }}
           prompt: |
             Follow .sdlc/agents/plan-council/2-critic.md exactly.
@@ -137,6 +152,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt_arb.outputs.args }}
           prompt: |
             Follow .sdlc/agents/plan-council/3-arbiter.md exactly.
@@ -161,6 +181,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
           claude_args: ${{ steps.rt_prev.outputs.args }}
           prompt: |
             Follow .sdlc/agents/plan-reviewer.md exactly.
