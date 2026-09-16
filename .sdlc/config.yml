@@ -55,25 +55,47 @@ route_bugs_to_debugger: true
 # The environment QA drives. url_allowlist is the guard that stops an agent clicking
 # through production — QA refuses to open a browser against anything not matching it.
 env:
-  mode: preview
-  url_allowlist:
-    - "*.vercel.app"
-    - "*.onrender.com"
+  # compose, not preview. printQ's Vercel previews build only apps/web and inherit
+  # VITE_API_URL, so a preview page would pass a *.vercel.app host check while every order QA
+  # places lands in a real shop's print queue. QA is adversarial by design — it double-submits
+  # and probes permission boundaries — so it gets a stack it is free to wreck.
+  mode: compose
+  base_url: "http://localhost:5173"
+  url_allowlist: ["localhost:*"]
+  api_allowlist: ["localhost:*"]   # nothing may leave the runner
   ready: "/"
+  ready_timeout_seconds: 600   # docker pull + migrate + seed + two vite/tsx servers
 
-  # Where the page may SEND DATA. This is the guard that actually matters here.
-  #
-  # printQ's Vercel previews build only apps/web and inherit VITE_API_URL. If that points at
-  # the production API, the page passes the *.vercel.app check above while every order QA
-  # places lands in a real shop's print queue.
-  #
-  # EMPTY ON PURPOSE: QA refuses to run until a staging API host is listed. That is the
-  # correct state today, not a misconfiguration.
-  api_allowlist: []
+  # Infra in docker, app on the host — the layout docker-compose.yml already assumes.
+  # Every value here is a throwaway for an ephemeral database that is destroyed with the
+  # runner; none of it is a secret, which is the point of running QA this way.
+  boot: |
+    set -e
+    cat > .env <<'ENVEOF'
+    NODE_ENV=development
+    PORT=4000
+    CORS_ORIGINS=http://localhost:5173
+    PUBLIC_WEB_URL=http://localhost:5173
+    DATABASE_URL=postgresql://printq:printq_dev_only@localhost:15432/printq
+    REDIS_URL=redis://localhost:6380
+    JWT_SECRET=ci_only_not_a_secret_0000000000000000000000000000000000000000
+    OTP_PEPPER=ci_only_not_a_secret_00000000000
+    STUDENT_AUTH_PROVIDER=local
+    SMS_PROVIDER=console
+    STORAGE_DRIVER=local
+    STORAGE_LOCAL_DIR=./storage
+    VITE_API_URL=http://localhost:4000
+    SEED_OWNER_PASSWORD=ci-owner-pass-1
+    ENVEOF
+    docker compose up -d postgres redis
+    until docker compose exec -T postgres pg_isready -U printq >/dev/null 2>&1; do sleep 2; done
+    npm run db:generate -w apps/api
+    npm run build -w packages/shared
+    npx --yes prisma migrate deploy --schema apps/api/prisma/schema.prisma
+    npm run db:seed -w apps/api
+    npm run dev:api > /tmp/printq-api.log 2>&1 &
+    npm run dev:web > /tmp/printq-web.log 2>&1 &
 
-# The debugger gets different rules from QA, on purpose. Reproducing a reported bug often
-# REQUIRES production — the bug exists there, with that account and that data. QA is the
-# opposite: adversarial and broad, so it needs a target it is free to break.
 debug_env:
   # Reported printQ bugs live in production, with that shop's data and that student's order.
   # The debugger is allowed there because it cannot do its job otherwise. QA is not, because
@@ -94,20 +116,16 @@ debug_env:
 # save them: memory/ and the ledger are both git. Deriving stores nothing, yields the same
 # password for the same identity so accounts are reusable, and rotating the seed rotates all.
 qa_auth:
-  mode: secrets            # printQ's test accounts are provisioned, not self-signup
+  # The production test accounts do NOT exist in compose mode — the database is created
+  # empty and seeded from apps/api/prisma/seed.ts on every run. Those secrets stay set for
+  # the debugger, which does work against production; QA uses what the seed creates.
+  mode: secrets
 
-  # Secret NAMES only — values live in GitHub Secrets and never in this file.
-  #
-  # printQ has two credential shapes: students authenticate by phone + OTP, shop owners by
-  # email + password. Two student roles so QA can prove one student cannot read another's
-  # orders, which is the highest-value permission test on this app.
   accounts:
-    - role: student_primary
-      fields: { phone: QA_STUDENT_1_PHONE, otp: QA_STUDENT_1_OTP }
-    - role: student_secondary
-      fields: { phone: QA_STUDENT_2_PHONE, otp: QA_STUDENT_2_OTP }
     - role: shop_owner
-      fields: { email: QA_SHOP_EMAIL, password: QA_SHOP_PASSWORD }
+      fields: { email: QA_COMPOSE_OWNER_EMAIL, password: QA_COMPOSE_OWNER_PASSWORD }
+    # Students are NOT seeded. QA signs one up by phone and reads the OTP from the API log —
+    # SMS_PROVIDER=console prints it. The recipe is in .sdlc/memory/qa/environment.md.
 
 # own      = run the checks below (a repo with no CI of its own)
 # existing = skip them; this repo's CI already gates the PR, and the pipeline waits for those
