@@ -23,10 +23,16 @@ export function bullConnection() {
   };
 }
 
+/** Queue names are physical Redis keys, so environment isolation cannot rely
+ * on a convention in deployment documentation alone. */
+export function queueName(name: string): string {
+  return `${env.QUEUE_NAMESPACE}-${name}`;
+}
+
 export type TimerJobName = 'noShowCheck' | 'graceExpiry' | 'scheduledDue';
 
 /** File conversion (upload → print-ready PDF). */
-export const convertQueue = new Queue<{ fileId: string }>('convert', {
+export const convertQueue = new Queue<{ fileId: string }>(queueName('convert'), {
   connection: bullConnection(),
   defaultJobOptions: {
     attempts: 3,
@@ -37,13 +43,13 @@ export const convertQueue = new Queue<{ fileId: string }>('convert', {
 });
 
 /** Delayed timers: OTP-window expiry and no-show grace expiry. */
-export const timersQueue = new Queue<{ jobId: string }, void, TimerJobName>('timers', {
+export const timersQueue = new Queue<{ jobId: string }, void, TimerJobName>(queueName('timers'), {
   connection: bullConnection(),
   defaultJobOptions: { attempts: 3, removeOnComplete: 1000, removeOnFail: 5000 },
 });
 
 /** Hourly maintenance (file retention cleanup, stale-agent detection). */
-export const maintenanceQueue = new Queue('maintenance', {
+export const maintenanceQueue = new Queue(queueName('maintenance'), {
   connection: bullConnection(),
   defaultJobOptions: { removeOnComplete: 100, removeOnFail: 100 },
 });
@@ -51,7 +57,7 @@ export const maintenanceQueue = new Queue('maintenance', {
 /** Exact T+10m object deletion jobs. PostgreSQL's deleteAfter remains the
  * authority; this queue gives normal cases a prompt execution path while the
  * minute sweeper repairs Redis/worker outages. */
-export const fileRetentionQueue = new Queue<{ fileId: string }>('file-retention', {
+export const fileRetentionQueue = new Queue<{ fileId: string }>(queueName('file-retention'), {
   connection: bullConnection(),
   defaultJobOptions: {
     attempts: 10,
@@ -63,7 +69,7 @@ export const fileRetentionQueue = new Queue<{ fileId: string }>('file-retention'
 
 /** Failed terminal deletion jobs are retained here for operational alerting and
  * investigation; no document content or object key is included in the payload. */
-export const fileDeletionDeadLetterQueue = new Queue<{ fileId: string; reason: string }>('file-retention-dlq', {
+export const fileDeletionDeadLetterQueue = new Queue<{ fileId: string; reason: string }>(queueName('file-retention-dlq'), {
   connection: bullConnection(),
   defaultJobOptions: { removeOnComplete: 100, removeOnFail: 5000 },
 });

@@ -3,6 +3,7 @@ import {
   bullConnection,
   fileDeletionDeadLetterQueue,
   maintenanceQueue,
+  queueName,
 } from '../lib/queues.js';
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
@@ -39,7 +40,7 @@ async function detectStaleAgents(): Promise<void> {
  */
 export async function startWorkers(): Promise<void> {
   new Worker(
-    'convert',
+    queueName('convert'),
     async (job) => {
       await convertFile((job.data as { fileId: string }).fileId);
     },
@@ -47,7 +48,7 @@ export async function startWorkers(): Promise<void> {
   );
 
   new Worker(
-    'timers',
+    queueName('timers'),
     async (job) => {
       const { jobId } = job.data as { jobId: string };
       if (job.name === 'noShowCheck') await handleNoShowCheck(jobId);
@@ -58,7 +59,7 @@ export async function startWorkers(): Promise<void> {
   );
 
   new Worker(
-    'file-retention',
+    queueName('file-retention'),
     async (job) => {
       try {
         const result = await deleteExpiredFileById((job.data as { fileId: string }).fileId);
@@ -82,7 +83,7 @@ export async function startWorkers(): Promise<void> {
   );
 
   new Worker(
-    'maintenance',
+    queueName('maintenance'),
     async (job) => {
       if (job.name === 'cleanup') {
         await expireStalePreparedOrders();

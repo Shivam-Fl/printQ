@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: printq
       POSTGRES_PASSWORD: printq_dev_only
-      POSTGRES_DB: printq
+      POSTGRES_DB: printq_development
     ports:
       # host 15432 — 5432/5433 are taken by locally installed PostgreSQL services
       - "15432:5432"

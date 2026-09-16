@@ -1,6 +1,16 @@
 import { loadEnvFile } from 'node:process';
 import { z } from 'zod';
 
+/** `z.coerce.boolean()` treats every non-empty string (including "false") as
+ * true. Environment variables are strings, so parse their literal values. */
+const envBoolean = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return value;
+}, z.boolean());
+
 // Load ./.env when present (dev convenience); production uses real env vars.
 try {
   loadEnvFile();
@@ -14,6 +24,10 @@ try {
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  // This durable identity is intentionally separate from NODE_ENV. It is used
+  // in database-name, queue and storage isolation checks so a deployment
+  // cannot accidentally attach development resources to production code.
+  PRINTQ_ENVIRONMENT: z.enum(['development', 'test', 'production']).optional(),
   PORT: z.coerce.number().int().default(4000),
   CORS_ORIGINS: z
     .string()
@@ -23,7 +37,9 @@ const envSchema = z.object({
   GEOCODING_BASE_URL: z.string().url().default('https://nominatim.openstreetmap.org'),
 
   DATABASE_URL: z.string().min(1),
+  DATABASE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,48}$/).optional(),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  QUEUE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9-]{1,48}$/).optional(),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
   OTP_PEPPER: z.string().min(16, 'OTP_PEPPER must be at least 16 chars'),
@@ -33,6 +49,7 @@ const envSchema = z.object({
   // the rest of the platform remains independent of Firebase.
   STUDENT_AUTH_PROVIDER: z.enum(['local', 'firebase']).default('local'),
   FIREBASE_AUTH_API_KEY: z.string().optional(),
+  FIREBASE_PROJECT_ID: z.string().regex(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/).optional(),
 
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
@@ -41,12 +58,13 @@ const envSchema = z.object({
   S3_BUCKET: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  S3_FORCE_PATH_STYLE: envBoolean.default(true),
+  STORAGE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9-]{1,48}$/).optional(),
 
   // A real Windows spooler normally acknowledges acceptance, not physical
   // output. Only the deterministic simulator may auto-complete a job, and
   // never in production. Real jobs require the authenticated staff action.
-  ALLOW_SIMULATED_PRINT_COMPLETION: z.coerce.boolean().default(false),
+  ALLOW_SIMULATED_PRINT_COMPLETION: envBoolean.default(false),
 
   PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
   PLATFORM_MARKUP_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
@@ -105,7 +123,23 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export const env = parsed.data;
+const expectedEnvironment = parsed.data.NODE_ENV === 'production'
+  ? 'production'
+  : parsed.data.NODE_ENV === 'test'
+    ? 'test'
+    : 'development';
+const printqEnvironment = parsed.data.PRINTQ_ENVIRONMENT ?? expectedEnvironment;
+const databaseNamespace = parsed.data.DATABASE_NAMESPACE ?? printqEnvironment;
+const queueNamespace = parsed.data.QUEUE_NAMESPACE ?? `printq-${printqEnvironment}`;
+const storageNamespace = parsed.data.STORAGE_NAMESPACE ?? `printq-${printqEnvironment}`;
+
+export const env = {
+  ...parsed.data,
+  PRINTQ_ENVIRONMENT: printqEnvironment,
+  DATABASE_NAMESPACE: databaseNamespace,
+  QUEUE_NAMESPACE: queueNamespace,
+  STORAGE_NAMESPACE: storageNamespace,
+};
 
 // Cross-field requirements that zod's per-field schema can't express cleanly.
 if (env.PAYMENT_PROVIDER === 'razorpay') {
@@ -125,6 +159,11 @@ if (env.SHOP_PAYOUT_PROVIDER === 'razorpay_route') {
 if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
   // eslint-disable-next-line no-console
   console.error('STUDENT_AUTH_PROVIDER=firebase requires FIREBASE_AUTH_API_KEY');
+  process.exit(1);
+}
+if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_PROJECT_ID) {
+  // eslint-disable-next-line no-console
+  console.error('STUDENT_AUTH_PROVIDER=firebase requires FIREBASE_PROJECT_ID');
   process.exit(1);
 }
 if (env.SMS_PROVIDER === 'msg91') {
@@ -161,5 +200,65 @@ if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.some((o) => o === '*')) {
 if (env.NODE_ENV === 'production' && env.ALLOW_SIMULATED_PRINT_COMPLETION) {
   // eslint-disable-next-line no-console
   console.error('ALLOW_SIMULATED_PRINT_COMPLETION cannot be enabled in production');
+  process.exit(1);
+}
+if (env.PRINTQ_ENVIRONMENT !== expectedEnvironment) {
+  // eslint-disable-next-line no-console
+  console.error(`PRINTQ_ENVIRONMENT=${env.PRINTQ_ENVIRONMENT} is incompatible with NODE_ENV=${env.NODE_ENV}`);
+  process.exit(1);
+}
+const isLiveRazorpayKey = env.RAZORPAY_KEY_ID?.startsWith('rzp_live_') ?? false;
+const isTestRazorpayKey = env.RAZORPAY_KEY_ID?.startsWith('rzp_test_') ?? false;
+if (env.PRINTQ_ENVIRONMENT === 'development' && isLiveRazorpayKey) {
+  // eslint-disable-next-line no-console
+  console.error('Development cannot use a live Razorpay key');
+  process.exit(1);
+}
+if (env.PRINTQ_ENVIRONMENT === 'production' && isTestRazorpayKey) {
+  // eslint-disable-next-line no-console
+  console.error('Production cannot use a Razorpay TEST key');
+  process.exit(1);
+}
+if (env.STUDENT_AUTH_PROVIDER === 'firebase') {
+  const project = env.FIREBASE_PROJECT_ID!.toLowerCase();
+  if (env.PRINTQ_ENVIRONMENT === 'development' && /prod(uction)?/.test(project)) {
+    // eslint-disable-next-line no-console
+    console.error('Development cannot use a production Firebase project');
+    process.exit(1);
+  }
+  if (env.PRINTQ_ENVIRONMENT === 'production' && /(dev(elopment)?|test)/.test(project)) {
+    // eslint-disable-next-line no-console
+    console.error('Production cannot use a development or test Firebase project');
+    process.exit(1);
+  }
+}
+const knownProductionOrigins = new Set(['https://printqs.com', 'https://www.printqs.com', 'https://api.printqs.com']);
+if (env.PRINTQ_ENVIRONMENT === 'development' && env.CORS_ORIGINS.some((origin) => knownProductionOrigins.has(origin))) {
+  // eslint-disable-next-line no-console
+  console.error('Development CORS cannot trust a production PrintQs origin');
+  process.exit(1);
+}
+if (env.PRINTQ_ENVIRONMENT === 'production' && env.CORS_ORIGINS.some((origin) => /localhost|127\.0\.0\.1/i.test(origin))) {
+  // eslint-disable-next-line no-console
+  console.error('Production CORS cannot trust a localhost origin');
+  process.exit(1);
+}
+try {
+  const databaseName = new URL(env.DATABASE_URL).pathname.replace(/^\//, '').toLowerCase();
+  if (!databaseName.includes(env.DATABASE_NAMESPACE.toLowerCase())) {
+    // eslint-disable-next-line no-console
+    console.error('DATABASE_URL database name must include DATABASE_NAMESPACE');
+    process.exit(1);
+  }
+} catch {
+  // zod only verifies a non-empty URL because Prisma permits several database
+  // URL shapes. For Postgres deployments we still need a parseable namespace.
+  // eslint-disable-next-line no-console
+  console.error('DATABASE_URL must be a valid URL with an environment-specific database name');
+  process.exit(1);
+}
+if (env.NODE_ENV === 'production' && env.STORAGE_DRIVER !== 's3') {
+  // eslint-disable-next-line no-console
+  console.error('Production requires private durable S3-compatible object storage');
   process.exit(1);
 }

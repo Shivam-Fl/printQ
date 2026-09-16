@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom';
 import Toasts from './components/Toasts.js';
+import EnvironmentBanner from './components/EnvironmentBanner.js';
 import Welcome from './pages/student/Welcome.js';
 import Login from './pages/student/Login.js';
 import Home from './pages/student/Home.js';
@@ -23,6 +24,7 @@ import Earnings from './pages/shop/Earnings.js';
 export default function App() {
   return (
     <>
+      <EnvironmentBanner />
       <Routes>
         {/* student */}
         <Route path="/" element={<Welcome />} />

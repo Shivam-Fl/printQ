@@ -9,8 +9,10 @@ import type { StorageDriver } from './index.js';
 export class LocalStorage implements StorageDriver {
   private readonly root: string;
 
-  constructor(rootDir: string) {
-    this.root = path.resolve(rootDir);
+  constructor(rootDir: string, namespace: string) {
+    // The local implementation mirrors the physical key isolation used by the
+    // object-store driver. It remains development/test only.
+    this.root = path.resolve(rootDir, namespace);
   }
 
   private resolve(key: string): string {

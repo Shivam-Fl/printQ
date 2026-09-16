@@ -42,6 +42,22 @@ body {
 
 #root { min-height: 100dvh; }
 
+.environment-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 16px;
+  background: var(--highlight-soft);
+  border-bottom: 1px solid #e8d275;
+  color: #635100;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-align: center;
+}
+.environment-banner .stamp { flex: 0 0 auto; }
+
 /* ---------- layout ---------- */
 
 .page {
