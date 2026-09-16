@@ -62,6 +62,13 @@ jobs:
       - name: Refuse work orders that touch forbidden paths
         run: node .sdlc/bin/check-forbidden.mjs --file work-order.json
 
+      - name: Resolve the base branch
+        id: base
+        run: |
+          B=$(node .sdlc/bin/read-config.mjs base_branch)
+          echo "branch=${B:-${{ github.event.repository.default_branch }}}" >> $GITHUB_OUTPUT
+          echo "base branch: ${B:-${{ github.event.repository.default_branch }}}"
+
       - name: Runtime args from config
         id: rt
         run: node .sdlc/bin/claude-args.mjs implement
@@ -121,7 +128,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE: ${{ github.event.issue.number || inputs.issue }}
           BRANCH: sdlc/issue-${{ github.event.issue.number || inputs.issue }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BASE_BRANCH: ${{ steps.base.outputs.branch }}
         run: node .sdlc/bin/open-pr.mjs
 
       - name: Record the PR on the ledger

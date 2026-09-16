@@ -50,6 +50,8 @@ councils:
   review: single           # single | council
 
 # Bugs go to the debugger, which reproduces in a live browser before diagnosing.
+base_branch: "development"   # printQ integrates here; master is the released state
+
 route_bugs_to_debugger: true
 
 # The environment QA drives. url_allowlist is the guard that stops an agent clicking

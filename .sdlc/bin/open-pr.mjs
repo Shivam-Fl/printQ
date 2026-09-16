@@ -9,16 +9,27 @@
 // noticing the absence of something. So the workflow does it: deterministic, and it fails
 // loudly when it cannot.
 
-import { gh, ghJson, setOutput, die } from './lib/actions.js';
+import { gh, ghJson, setOutput, loadConfig, die } from './lib/actions.js';
 
 const issue = process.env.ISSUE;
 const branch = process.env.BRANCH ?? `sdlc/issue-${issue}`;
-// Resolved, never guessed. Defaulting to "main" silently targets a branch that may not
-// exist — printQ uses "master" — and the PR creation then fails for a reason that reads as
-// a permissions problem rather than a wrong base.
+// Precedence: explicit env, then config.base_branch, then the repo's default.
+//
+// Never a hardcoded guess. Defaulting to "main" silently targets a branch that may not exist,
+// and the default branch is often not where the team integrates — plenty of repos keep
+// main/master as the released state and merge to `development`. A PR opened against the wrong
+// base shows every unrelated commit as part of its diff, which misleads the reviewer's caller
+// analysis and QA's blast-radius reasoning long before anyone notices the merge target.
+const cfg = await loadConfig();
 const base = process.env.BASE_BRANCH
+  || cfg.base_branch
   || (await ghJson(['repo', 'view', '--json', 'defaultBranchRef'])).defaultBranchRef?.name
-  || die('could not determine the default branch');
+  || die('could not determine a base branch — set base_branch in .sdlc/config.yml');
+
+// A base that does not exist fails at `gh pr create` with a message about the head ref,
+// which sends you looking at the wrong branch entirely.
+await ghJson(['api', `repos/${process.env.GITHUB_REPOSITORY}/branches/${base}`])
+  .catch(() => die(`base branch "${base}" does not exist in this repo — check base_branch in .sdlc/config.yml`));
 
 // Already open? This runs on every implement attempt, including retries after QA failures,
 // and a second PR for the same branch is worse than none.

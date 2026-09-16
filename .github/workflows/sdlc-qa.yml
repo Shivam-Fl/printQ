@@ -139,6 +139,13 @@ jobs:
         if: steps.ctx.outputs.skip != 'true'
         run: node .sdlc/bin/wait-ready.mjs --url "${{ steps.ctx.outputs.url }}"
 
+      - name: Resolve the base branch
+        id: base
+        run: |
+          B=$(node .sdlc/bin/read-config.mjs base_branch)
+          echo "branch=${B:-${{ github.event.repository.default_branch }}}" >> $GITHUB_OUTPUT
+          echo "base branch: ${B:-${{ github.event.repository.default_branch }}}"
+
       - name: Runtime args from config
         if: steps.ctx.outputs.skip != 'true'
         id: rt
@@ -149,7 +156,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           PREVIEW_URL: ${{ steps.ctx.outputs.url }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BASE_BRANCH: ${{ steps.base.outputs.branch }}
           QA_USER_EMAIL: ${{ secrets.QA_USER_EMAIL }}
           QA_USER_PASSWORD: ${{ secrets.QA_USER_PASSWORD }}
           QA_AUTH_MODE: ${{ steps.creds.outputs.mode }}
