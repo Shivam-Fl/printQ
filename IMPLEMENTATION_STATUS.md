@@ -13,7 +13,8 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Integration owner | Codex lead implementation agent |
 | User-owned source tree | `C:\Users\acer\Desktop\startup\printQ` — deliberately untouched; it contains QA/generated changes |
 | Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-phase2-master` |
-| Active feature branch | `codex/storage-completion-retention` |
+| Active feature branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
+| Candidate SHA | `2b2c6309a892d25fa9bedce9a6c1a69dec12acd7` |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
@@ -46,6 +47,9 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | `npm run build -w apps/web` | Passed | Existing bundle-size warning remains; no failure. |
 | `npm run test:ci` | Passed | Shared, API, and web JUnit reports written under `.tmp/ci-results/`. |
 | Full local migration/E2E | Deferred safely | Requires PostgreSQL/Redis; GitHub CI will run the disposable migration and simulator path. Docker Desktop is not used as a workaround. |
+| GitHub Actions `35131596603` | Passed | Exact candidate migration deploy/status, build, typecheck, JUnit suite, full print-agent simulator, dependency audit, and CI artifact upload. |
+| GitHub Actions `35131203760` | Rejected | Simulator correctly caught the initial premature legacy earning credit. Commit `2b2c630` moves the credit to verified physical print status and the full rerun above passes. |
+| User-owned SDLC `qa` `35131698781` | Not a release gate; failed | Its validation expects `qa-report.json`, but its own workflow did not produce one for this master-targeted PR. `gh pr checks --required` confirms only `CI / check` and `CI / secret scan`, both passed. The workflow is preserved unchanged. |
 
 ## Environment/provider status and blockers
 
