@@ -1,7 +1,7 @@
 {
   "issue": 4,
   "pr": null,
-  "state": "needs-human",
+  "state": "planning",
   "owner": null,
   "lock_expires": null,
   "attempts": {
@@ -18,12 +18,17 @@
   "acceptance": [],
   "artifacts": {},
   "created_at": "2026-09-16T16:28:23.111Z",
-  "updated_at": "2026-09-16T16:28:28.025Z",
+  "updated_at": "2026-09-16T16:39:13.150Z",
   "history": [
     {
       "at": "2026-09-16T16:28:28.025Z",
       "agent": "intake",
       "action": "-> needs-human"
+    },
+    {
+      "at": "2026-09-16T16:39:13.150Z",
+      "agent": "intake",
+      "action": "-> planning"
     }
   ]
 }
