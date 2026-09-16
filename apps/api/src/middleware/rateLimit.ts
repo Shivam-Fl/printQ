@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
+import { env } from '../config/env.js';
 import { redis } from '../lib/redis.js';
 
 /**
@@ -12,10 +13,16 @@ function makeLimiter(prefix: string, windowMs: number, max: number) {
     limit: max,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
-    store: new RedisStore({
-      prefix: `rl:${prefix}:`,
-      sendCommand: (...args: string[]) => redis.call(...(args as [string, ...string[]])) as never,
-    }),
+    // Unit suites exercise route behavior without a networked limiter. CI's
+    // simulator and every non-test process still use the shared Redis store.
+    ...(env.NODE_ENV === 'test'
+      ? {}
+      : {
+          store: new RedisStore({
+            prefix: `rl:${prefix}:`,
+            sendCommand: (...args: string[]) => redis.call(...(args as [string, ...string[]])) as never,
+          }),
+        }),
     message: { error: 'Too many requests, slow down' },
   });
 }
