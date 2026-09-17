@@ -51,6 +51,10 @@ console.log(`\n${bold('Installing')}`);
 
 const COPY = [
   ['.github/workflows', /^(sdlc-.*|ci-verify)\.yml$/],
+  // Without these there is nothing making a bug report carry repro steps, and intake then
+  // stops every bug for lacking them — a gate that fires constantly is a gate people route
+  // around.
+  ['.github/ISSUE_TEMPLATE', /\.(yml|md)$/],
   ['.sdlc/agents', /\.md$/],
   ['.sdlc/schemas', /\.json$/],
   ['.sdlc/templates', /\.ya?ml$/],
@@ -94,7 +98,13 @@ if (existsSync(join(memDir, 'project.md')) && !FORCE) {
   mkdirSync(join(memDir, 'decisions'), { recursive: true });
   writeFileSync(join(memDir, 'project.md'), renderProjectMemory(found, files, target));
   writeFileSync(join(memDir, 'index.md'), renderIndex());
-  for (const f of ['conventions.md', 'qa/environment.md', 'qa/selectors.md']) {
+  // patterns/ and decisions/ get their README too, and not for decoration: git does not track
+  // an empty directory, so `mkdirSync` above produced two directories that vanished on the
+  // first commit. index.md still linked to them, so the first agent to follow that link
+  // reported the memory as missing — and QA logged "no known bug shapes to check against" as
+  // a coverage gap rather than as an empty repo.
+  for (const f of ['conventions.md', 'qa/environment.md', 'qa/selectors.md',
+                   'patterns/README.md', 'decisions/README.md']) {
     const src = join(SRC, '.sdlc/memory', f);
     const dst = join(memDir, f);
     if (existsSync(src) && (!existsSync(dst) || FORCE)) cpSync(src, dst);
@@ -165,21 +175,10 @@ runtime:
     librarian:          ""
     release:            ""
 
-  max_turns:
-    plan: 40
-    plan_proposer: 40
-    plan_critic: 40
-    plan_arbiter: 40
-    plan_reviewer: 30
-    debug: 60
-    implement: 60
-    review: 40
-    review_correctness: 40
-    review_design: 40
-    qa: 120
-    root_cause: 40
-    librarian: 50
-    release: 25
+  # Turn limits. EMPTY MEANS NO LIMIT, which is the default and usually right: the action
+  # validates the count after the run, so exceeding a cap discards completed work instead of
+  # truncating it. limits.attempts and timeout-minutes already stop runaway beforehand.
+  max_turns: {}
 
 # single = one agent. council = several in sequence, each reading the last one's output.
 # A council costs roughly 3x the turns. Start single; switch the stage that actually

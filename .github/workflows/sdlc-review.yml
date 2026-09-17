@@ -10,15 +10,17 @@ on:
       pr: { required: true, type: string }
 
 permissions:
-  contents: read
+  contents: write         # the ledger lives on the sdlc-state branch
   pull-requests: write
+  actions: write          # this stage dispatches the next one
   issues: write
   id-token: write
 
 jobs:
   review:
-    # Always runs to completion even when it requests changes — QA triggers on this workflow
-    # finishing, and a hard failure here would strand the PR with no QA and no explanation.
+    # Always runs to completion even when it requests changes: the last step routes the PR on
+    # the verdict, and a hard failure here would strand it with no QA, no rework and no
+    # explanation.
 
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -26,7 +28,11 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
       # Works in a repo with no package.json: install the repo's own deps when there is a
@@ -38,9 +44,30 @@ jobs:
           fi
           node .sdlc/bin/ensure-deps.mjs
 
-      - name: Resolve the PR
+      - name: Resolve the PR and its issue
         id: ctx
-        run: echo "pr=${{ inputs.pr }}" >> $GITHUB_OUTPUT
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          echo "pr=${{ inputs.pr }}" >> $GITHUB_OUTPUT
+          BODY=$(gh pr view "${{ inputs.pr }}" --json body --jq .body)
+          ISSUE=$(printf '%s' "$BODY" | grep -oiE '(closes|fixes|resolves) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          echo "issue=$ISSUE" >> $GITHUB_OUTPUT
+          echo "PR #${{ inputs.pr }} -> issue #${ISSUE:-none}"
+
+      # Consumes an attempt BEFORE the agent runs, and it is what bounds the review/rework
+      # loop: a reviewer that keeps requesting changes on the same PR spends the budget and
+      # the issue stops at budget-exceeded instead of ping-ponging forever.
+      - name: Consume an attempt
+        if: steps.ctx.outputs.issue != ''
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: node .sdlc/bin/sdlc-ctl.mjs attempt --issue ${{ steps.ctx.outputs.issue }} --stage review
+
+      # ci-green -> review. Without this the ledger never enters `review`, and the transition
+      # the router needs (review -> qa, or review -> implementing) is illegal from ci-green.
+      - name: Mark the issue under review
+        if: steps.ctx.outputs.issue != ''
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: node .sdlc/bin/sdlc-ctl.mjs transition --issue ${{ steps.ctx.outputs.issue }} --to review --agent reviewer
 
       - name: Args — reviewer
         id: rt
@@ -52,15 +79,15 @@ jobs:
         id: rt_des
         run: node .sdlc/bin/claude-args.mjs review_design
 
+      # Reads config through read-config.mjs rather than an inline import. The inline
+      # version carried a hardcoded path that survived the scripts/ -> .sdlc/bin/ move,
+      # because a path inside a `run:` block is a string, not a reference — nothing checks it.
       - name: Review strategy
         id: strategy
         run: |
-          MODE=$(node -e "
-            import('./scripts/lib/actions.js').then(async m => {
-              const c = await m.loadConfig();
-              process.stdout.write((c.councils?.review ?? 'single'));
-            })")
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          MODE=$(node .sdlc/bin/read-config.mjs councils.review)
+          echo "mode=${MODE:-single}" >> $GITHUB_OUTPUT
+          echo "review mode: ${MODE:-single}"
           echo "review mode: $MODE"
 
       # --- single reviewer ------------------------------------------------------
@@ -136,8 +163,20 @@ jobs:
             Write review/design.json. Post NOTHING to GitHub.
 
       - name: Post the cross-verified review
+        id: council
         if: steps.strategy.outputs.mode == 'council'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ steps.ctx.outputs.pr }}
         run: node .sdlc/bin/post-review.mjs
+
+      # Where the PR goes next. Runs for BOTH modes and is NOT conditional on the verdict —
+      # a condition is one more thing that can quietly match nothing, which is exactly how QA
+      # came to be skipped on every PR.
+      - name: Route on the verdict
+        if: steps.ctx.outputs.issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.ctx.outputs.pr }}
+          VERDICT: ${{ steps.council.outputs.verdict }}
+        run: node .sdlc/bin/route-review.mjs

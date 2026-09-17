@@ -48,6 +48,28 @@ export function detect(repo) {
 
   const verify = { typecheck: '', lint: '', unit: '', build: '', e2e: '' };
 
+  // --- the convention, checked before anything is inferred ---------------------
+  //
+  // A project can declare what the pipeline needs instead of being guessed at. Four verbs,
+  // and everything else is detection working around their absence:
+  //
+  //   sdlc:verify   everything CI should run
+  //   sdlc:serve    start the app for QA
+  //   sdlc:seed     create known fixtures QA can log in as
+  //   sdlc:ready    exit 0 once the app is up
+  //
+  // Deliberately script names, not a folder layout. A layout convention only works for one
+  // stack and forces an existing repo to move files; a verb works for Go, Python and Rust
+  // through a Makefile target just as well as it works for npm.
+  const declared = Object.keys(scripts).filter((k) => k.startsWith('sdlc:'));
+  if (declared.length) {
+    confidence.contract = 'declared';
+    notes.push(
+      `this project declares ${declared.join(', ')}, so those are used verbatim — nothing ` +
+      'about the build is being guessed at.',
+    );
+  }
+
   if (stack === 'node') {
     verify.typecheck = script('typecheck', 'type-check', 'tsc', 'types');
     if (!verify.typecheck && (has('tsconfig.json') || deps.typescript)) {
@@ -92,6 +114,13 @@ export function detect(repo) {
     confidence.unit = 'guessed';
   }
 
+  // The contract wins over everything inferred above: a project that declares these knows
+  // its own build better than any scan does.
+  if (scripts['sdlc:verify']) {
+    Object.assign(verify, { typecheck: '', lint: '', unit: 'npm run sdlc:verify', build: '', e2e: '' });
+    confidence.unit = 'declared';
+  }
+
   // --- QA environment --------------------------------------------------------
   // A library has no URL to drive, and browser QA against it is meaningless. Saying so is
   // far better than emitting a compose config with an empty boot command, which fails at
@@ -103,6 +132,21 @@ export function detect(repo) {
 
   const hasPreviewHost =
     has('vercel.json') || has('netlify.toml') || has('render.yaml') || has('fly.toml');
+  // A declared serve verb settles the QA environment outright.
+  if (scripts['sdlc:serve']) {
+    const declaredEnv = {
+      mode: 'compose',
+      base_url: 'http://localhost:3000',
+      url_allowlist: ['localhost:*'],
+      api_allowlist: ['localhost:*'],
+      boot: scripts['sdlc:seed'] ? 'npm run sdlc:serve & npm run sdlc:seed' : 'npm run sdlc:serve',
+      ready: '/',
+    };
+    confidence.env = 'declared';
+    notes.push('sdlc:serve is declared, so QA boots the app through it rather than a guessed command.');
+    return { stack, framework, verify, verifyMode: (repo.workflows ?? []).filter((w) => !w.startsWith('sdlc-') && w !== 'ci-verify.yml').length ? 'existing' : 'own', existingWorkflows: [], env: declaredEnv, confidence, notes, size: files.size };
+  }
+
   const env = isLibrary && !hasPreviewHost && !framework
     ? { mode: 'none', url_allowlist: [], ready: '' }
     : hasPreviewHost || framework
@@ -164,7 +208,10 @@ export function detect(repo) {
     if (!verify[k] && !confidence[k]) confidence[k] = 'none found';
   }
 
-  return { stack, framework, verify, verifyMode, existingWorkflows: existing, env, confidence, notes };
+  // No turn budgets are emitted. The action validates the count after the run, so a cap
+  // that is exceeded discards completed work rather than truncating it — and a repo large
+  // enough to need more turns is exactly where that waste is most expensive.
+  return { stack, framework, verify, verifyMode, existingWorkflows: existing, env, confidence, notes, size: files.size };
 }
 
 function previewHostsFor({ files, framework }) {
@@ -183,7 +230,23 @@ function previewHostsFor({ files, framework }) {
  */
 export function forbiddenFor(repo) {
   const files = repo.files ?? [];
-  const base = ['.github/**', '.sdlc/config.yml', '**/*.env*'];
+  // The pipeline must not be able to rewrite its own rules — and that means all of them,
+  // not just the workflows. An agent that can edit .sdlc/agents/qa.md weakens the adversary
+  // testing its work; one that can edit .sdlc/bin/ disables the kill switch; one that can
+  // edit .sdlc/schemas/ loosens the validation of its own output.
+  //
+  // .sdlc/memory/ is deliberately NOT reserved: the Librarian's whole job is writing there,
+  // and it does so through a reviewed pull request.
+  const base = [
+    '.github/**',
+    '.sdlc/config.yml',
+    '.sdlc/agents/**',
+    '.sdlc/bin/**',
+    '.sdlc/schemas/**',
+    '.sdlc/templates/**',
+    'bin/sdlc',
+    '**/*.env*',
+  ];
 
   // Matched ANYWHERE in the path, not just at the root. A monorepo keeps its migrations at
   // apps/api/prisma/migrations/, and anchoring to the start silently reserves nothing —

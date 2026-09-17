@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Executes an authorized /sdlc command. parseCommand already proved the author may do this.
 import { gh, die } from './lib/actions.js';
+import { advance } from './lib/advance.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
@@ -11,14 +12,13 @@ const ctl = (...args) => exec('node', ['.sdlc/bin/sdlc-ctl.mjs', ...args]);
 
 switch (cmd) {
   case 'approve':
-    await gh(['issue', 'edit', issue, '--remove-label', 'sdlc:plan-review', '--add-label', 'sdlc:implementing']);
-    await ctl('transition', '--issue', issue, '--to', 'implementing', '--agent', 'human');
+    await advance(issue, 'implementing', { agent: 'human', alsoRemove: ['sdlc:plan-review'] });
     await gh(['workflow', 'run', 'sdlc-implement.yml', '-f', `issue=${issue}`]);
     await gh(['issue', 'comment', issue, '--body', 'Approved. Implementing.']);
     break;
 
   case 'reject':
-    await gh(['issue', 'edit', issue, '--remove-label', 'sdlc:plan-review', '--add-label', 'sdlc:planning']);
+    await advance(issue, 'planning', { agent: 'human', alsoRemove: ['sdlc:plan-review'] });
     await gh(['workflow', 'run', 'sdlc-plan.yml', '-f', `issue=${issue}`]);
     await gh(['issue', 'comment', issue, '--body', 'Work order rejected — replanning with the feedback above.']);
     break;
@@ -30,7 +30,7 @@ switch (cmd) {
     const to = process.env.ARGS?.trim() || 'implementing';
     await ctl('reset', '--issue', issue, '--to', to);
     const workflow = to === 'planning' ? 'sdlc-plan.yml' : 'sdlc-implement.yml';
-    await gh(['issue', 'edit', issue, '--add-label', `sdlc:${to}`]);
+    await advance(issue, to, { agent: 'human' });
     await gh(['workflow', 'run', workflow, '-f', `issue=${issue}`]);
     await gh(['issue', 'comment', issue, '--body',
       `Attempt counters cleared and restarted at **${to}**. The budget is full again — ` +
@@ -39,9 +39,8 @@ switch (cmd) {
   }
 
   case 'stop':
-    await ctl('transition', '--issue', issue, '--to', 'needs-human', '--agent', 'human');
+    await advance(issue, 'needs-human', { agent: 'human' });
     await ctl('unlock', '--issue', issue);
-    await gh(['issue', 'edit', issue, '--add-label', 'sdlc:needs-human']);
     await gh(['issue', 'comment', issue, '--body', 'Halted. No agent will pick this up until a label moves it.']);
     break;
 

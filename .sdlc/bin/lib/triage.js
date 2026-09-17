@@ -59,14 +59,32 @@ export function hasReproSteps(body = '') {
     || /\bwhen i\b|\bgo to\b|\bnavigate to\b/i.test(b);
 }
 
-/** Cheap title-overlap duplicate check. No model. */
-export function findDuplicate(title, openIssues = [], { threshold = 0.7, minWords = 3 } = {}) {
-  const words = new Set(String(title).toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+/**
+ * Cheap title-overlap duplicate check. No model.
+ *
+ * Tuned deliberately conservative, and the result is a SUGGESTION — never a close.
+ *
+ * A vertical epic split produces siblings that read almost identically: "Record an expense
+ * with an equal split" and "Record an expense with a shares split" share every word that
+ * matters and are entirely different pieces of work. At 0.7 this closed one of them, and
+ * three other issues depended on it — so the chain broke at the second link, silently,
+ * because a closed issue looks like a finished one.
+ *
+ * The asymmetry decides the tuning: a wrong close destroys a dependency chain and is
+ * invisible; a wrong suggestion costs someone a glance.
+ */
+export function findDuplicate(title, openIssues = [], { threshold = 0.9, minWords = 4 } = {}) {
+  const norm = (t) => new Set(String(t).toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+  const words = norm(title);
   if (words.size < minWords) return null;        // too short to judge
+
   for (const other of openIssues) {
-    const theirs = new Set(String(other.title).toLowerCase().split(/\W+/).filter((w) => w.length > 3));
+    const theirs = norm(other.title);
     const shared = [...words].filter((w) => theirs.has(w)).length;
-    if (shared / words.size > threshold) return other;
+    // Symmetric: "Add export" inside "Add export to CSV and PDF with filters" is a subset,
+    // not a duplicate, and one-directional overlap calls it one.
+    const overlap = shared / Math.max(words.size, theirs.size);
+    if (overlap >= threshold) return other;
   }
   return null;
 }

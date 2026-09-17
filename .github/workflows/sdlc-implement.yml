@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       issue: { required: true, type: string }
+      # Set when the branch already exists and was rejected — by review or by QA. It stops
+      # the "is the work already done?" check reading that branch as finished work, and it
+      # tells the agent to answer the findings rather than start again.
+      rework: { required: false, type: string }
 
 concurrency:
   group: sdlc-${{ github.event.issue.number || inputs.issue }}
@@ -17,6 +21,7 @@ permissions:
   issues: write
   pull-requests: write
   id-token: write
+  actions: write          # required to dispatch the gate with `gh workflow run`
 
 jobs:
   implement:
@@ -29,7 +34,11 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
 
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
@@ -42,13 +51,22 @@ jobs:
           fi
           node .sdlc/bin/ensure-deps.mjs
 
-      - name: Refuse to start if another issue is touching the same files
+      # Advisory, NOT blocking.
+      #
+      # This used to refuse to start. That was wrong: two people edit the same file every
+      # day, git merges it or someone resolves a conflict in two minutes, and serialising
+      # every overlap costs throughput permanently to avoid a cheap, well-understood problem.
+      # The overlap is also predicted from a PLAN, and the implementer routinely touches
+      # files the planner never listed — so it blocks on a guess.
+      #
+      # What overlap is actually worth: telling the reviewer where to look.
+      - name: Note any overlap with work already in flight
+        continue-on-error: true
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: |
           COLLIDES=$(node .sdlc/bin/sdlc-ctl.mjs collisions --issue "$ISSUE" | sed -n 's/^collides_with=//p')
           if [ -n "$COLLIDES" ]; then
-            gh issue comment "$ISSUE" --body "Deferred: issue(s) #${COLLIDES} are already changing these files. Serialising to avoid two PRs fighting over the same code."
-            exit 1
+            gh issue comment "$ISSUE" --body "Heads up: issue(s) #${COLLIDES} are changing some of the same files. Proceeding anyway — this is worth knowing at review time, not a reason to wait."
           fi
 
       - name: Take the lock
@@ -73,11 +91,28 @@ jobs:
         id: rt
         run: node .sdlc/bin/claude-args.mjs implement
 
+      # Has this already been implemented?
+      #
+      # The first run on tabs wrote the whole slice, pushed the branch, and then failed at
+      # "Open the PR" because Actions could not create one. Re-dispatching re-ran the agent
+      # from scratch — twenty minutes of work redone to recover from a permissions setting.
+      #
+      # A branch that is already ahead of base, for the same work order version, is finished
+      # work. Re-running the agent over it produces a different implementation of the same
+      # plan, which is strictly worse than the one already reviewed.
+      - name: Is the work already done?
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REWORK: ${{ inputs.rework }}
+        run: node .sdlc/bin/already-implemented.mjs
+
       # The implementer checks its own fix in a browser before pushing — not adversarial QA,
       # just "does the thing I changed actually work". Cheapest possible place to catch a fix
       # that fixes nothing, before a CI run, a review and a QA cycle are spent on it.
       - name: Boot the app for the developer's own check
         id: devenv
+        if: steps.existing.outputs.done != 'true'
         continue-on-error: true
         run: |
           MODE=$(node .sdlc/bin/read-config.mjs env.mode)
@@ -92,9 +127,11 @@ jobs:
           fi
 
       - name: Implement
+        if: steps.existing.outputs.done != 'true'
         uses: anthropics/claude-code-action@v1
         env:
           PREVIEW_URL: ${{ steps.devenv.outputs.url }}
+          REWORK: ${{ inputs.rework }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Passed explicitly so the action does NOT try to exchange its OIDC token for a
@@ -113,6 +150,13 @@ jobs:
             Apply work-order.json for issue #${{ github.event.issue.number || inputs.issue }} EXACTLY.
             Do not redesign it, do not expand scope. If it is wrong or under-specified,
             stop and comment why instead of guessing.
+
+            If $REWORK is set, this is NOT a fresh implementation. The branch already exists
+            and was rejected — read why before you touch anything:
+              gh pr view --head sdlc/issue-${{ github.event.issue.number || inputs.issue }} --json number
+              gh pr view <that number> --comments
+            Address every blocking finding on the SAME branch. Do not restart, do not redesign
+            the parts nobody objected to, and do not widen scope while you are in there.
 
             Commit your work to branch sdlc/issue-${{ github.event.issue.number || inputs.issue }}
             and push it. Do NOT open a pull request — the workflow does that deterministically
@@ -139,7 +183,18 @@ jobs:
       - name: Record the PR on the ledger
         if: steps.pr.outputs.pr != ''
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-        run: node .sdlc/bin/sdlc-ctl.mjs link --issue "$ISSUE" --pr "${{ steps.pr.outputs.pr }}"
+        run: |
+          node .sdlc/bin/sdlc-ctl.mjs link --issue "$ISSUE" --pr "${{ steps.pr.outputs.pr }}" \
+            --implemented-version "${{ steps.pr.outputs.work_order_version }}"
+
+      # The gate does not start itself here. GitHub will not trigger a workflow from an event
+      # its own token caused, so the `pull_request` opened/synchronize event that is supposed
+      # to start the gate never fires for a PR this pipeline opened or pushed to. Every stage
+      # dispatches the next; this is that dispatch.
+      - name: Start the gate on the PR
+        if: steps.pr.outputs.pr != ''
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: node .sdlc/bin/dispatch.mjs sdlc-gate.yml -f pr="${{ steps.pr.outputs.pr }}"
 
       - name: Stop the developer's app
         if: always()

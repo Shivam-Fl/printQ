@@ -2,6 +2,7 @@
 // Renders the QA report as a PR comment and routes the state machine on next_action.
 import { readFileSync } from 'node:fs';
 import { gh, setOutput, die } from './lib/actions.js';
+import { advance } from './lib/advance.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
@@ -90,23 +91,25 @@ lines.push('', '---', '[Evidence, traces and video](' + runUrl + ')',
 await gh(['pr', 'comment', pr, '--body', lines.join('\n')]);
 
 // Route on next_action alone — no natural-language parsing in the control flow.
-const ctl = (args) => exec('node', ['.sdlc/bin/sdlc-ctl.mjs', ...args]);
-const route = {
-  merge:    ['transition', '--issue', issue, '--to', 'qa-pass',     '--agent', 'qa'],
-  revise:   ['transition', '--issue', issue, '--to', 'qa-fail',     '--agent', 'qa'],
-  escalate: ['transition', '--issue', issue, '--to', 'needs-human', '--agent', 'qa'],
-}[r.next_action];
-if (!route) die('unknown next_action "' + r.next_action + '"');
-await ctl(route);
+const state = { merge: 'qa-pass', revise: 'qa-fail', escalate: 'needs-human' }[r.next_action];
+if (!state) die('unknown next_action "' + r.next_action + '"');
+await advance(issue, state, { agent: 'qa' });
 
-const label = { merge: 'sdlc:qa-pass', revise: 'sdlc:qa-fail', escalate: 'sdlc:needs-human' }[r.next_action];
-await gh(['issue', 'edit', issue, '--add-label', label]);
-
-// A QA failure re-enters implementation with a revised work order. Dispatched explicitly,
-// because the label change alone will not start it.
+// A QA failure re-enters implementation with a REVISED work order — which means it goes to
+// root-cause first, not straight back to the implementer.
+//
+// It used to dispatch the implementer directly, so attempt N+1 was the same agent re-reading
+// the same report against an unchanged plan. Three of those exhaust the budget having tried
+// one idea. Root-cause's job is the one the implementer cannot do from inside the fix: decide
+// whether the original diagnosis was wrong, and rewrite it if it was. It posts the new work
+// order, which routes onward to implementation by itself.
+//
+// The QA run id goes with it: the report says what failed, the trace and video usually say why.
 if (r.next_action === 'revise') {
   // A 404 here on a fresh install means the workflow is not on the default branch yet.
-await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-implement.yml', '-f', `issue=${issue}`]).catch(() => {});
+  const args = ['-f', `issue=${issue}`, '-f', `pr=${pr}`];
+  if (process.env.RUN_ID) args.push('-f', `qa_run=${process.env.RUN_ID}`);
+  await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-root-cause.yml', ...args]).catch(() => {});
 }
 setOutput('next_action', r.next_action);
 setOutput('bugs', String((r.bugs ?? []).length));

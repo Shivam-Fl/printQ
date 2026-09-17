@@ -28,13 +28,14 @@ const TOOLS = {
   root_cause:        'Bash,Read,Write,Grep,Glob',
   librarian:         'Bash,Read,Edit,Write,Grep,Glob',
   release:           'Bash,Read,Edit,Write',
+  maintainer:        'Bash,Read,Grep,Glob,Write',
 };
 
 const DEFAULT_TURNS = {
   plan: 40, plan_proposer: 40, plan_critic: 40, plan_arbiter: 40, plan_reviewer: 30,
   debug: 60, implement: 60,
   review: 40, review_correctness: 40, review_design: 40,
-  qa: 120, root_cause: 40, librarian: 50, release: 25,
+  qa: 120, root_cause: 40, librarian: 50, release: 25, maintainer: 60,
 };
 
 // A council member with no explicit setting inherits the stage's, so configuring just
@@ -58,15 +59,23 @@ function setting(map, fallbacks) {
   return fallbacks;
 }
 
-const turns = setting(cfg.runtime?.max_turns, DEFAULT_TURNS[role]) ?? DEFAULT_TURNS[role];
+// 0, empty or absent means NO LIMIT, and that is the default on purpose.
+//
+// claude-code-action validates the turn count AFTER the run: the agent used 54 turns against
+// a cap of 40, produced a valid work order, and the action threw it away. Paying for work and
+// then discarding it is strictly worse than not capping. Runaway is already prevented by the
+// ledger's attempt counter and the job's timeout-minutes, both of which stop work BEFORE it
+// is paid for rather than after.
+const configured = setting(cfg.runtime?.max_turns, undefined);
+const turns = Number(configured) > 0 ? Number(configured) : 0;
 const model = setting(cfg.runtime?.model, '') ?? '';
 
 const args = [
-  `--max-turns ${turns}`,
+  turns ? `--max-turns ${turns}` : '',
   `--allowedTools ${TOOLS[role]}`,
   model ? `--model ${model}` : '',
 ].filter(Boolean).join(' ');
 
 setOutput('args', args);
 setOutput('model', model || '(action default)');
-setOutput('turns', String(turns));
+setOutput('turns', turns ? String(turns) : '(no limit)');
