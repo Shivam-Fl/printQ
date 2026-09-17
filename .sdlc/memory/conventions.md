@@ -4,9 +4,14 @@
 - ES modules, Node 22, no transpiler. `.js` for libraries, `.mjs` for executable scripts.
 - Pure logic in `scripts/lib/`, IO at the edges. Anything worth testing must be importable
   without a network.
-- No dependencies unless a few lines genuinely cannot do it. The only runtime dep is
-  `js-yaml`, added because hand-rolling YAML parsing is the kind of clever that breaks at 3am.
+- No dependencies unless a few lines genuinely cannot do it. `js-yaml` is the one exception,
+  and it is installed at runtime by `ensure-deps.mjs` (`--no-save`, only if missing) so the
+  pipeline works in a host repo with no `package.json` at all. **It must never appear in the
+  host repo's own `package.json`/`package-lock.json`** — that happened once from committing a
+  local `npm install` wholesale (PR #7) and had to be reverted.
 - Shell out to `gh` rather than adding an API SDK.
+- `.sdlc/bin/lib/*.js` is the only copy of pipeline logic — a duplicate at `.sdlc/bin/*.js`
+  with the same name is a stray, not a second implementation to keep in sync (PR #7).
 
 ## Guards fail closed
 Every validator, allowlist and parser refuses on input it does not understand. A guard that
