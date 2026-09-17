@@ -54,12 +54,13 @@ const issueData = await ghJson(['issue', 'view', issue, '--json', 'title,comment
 // Pull the acceptance criteria out of the posted work order so review and QA can see what
 // they are checking against without opening the issue.
 let acceptance = [];
+let workOrderVersion = 1;
 for (const c of (issueData.comments ?? []).slice().reverse()) {
   const m = c.body?.match(/```json\s*\n([\s\S]*?)\n```/);
   if (!m) continue;
   try {
     const wo = JSON.parse(m[1]);
-    if (wo.acceptance) { acceptance = wo.acceptance; break; }
+    if (wo.acceptance) { acceptance = wo.acceptance; workOrderVersion = wo.version ?? 1; break; }
   } catch { /* not a work order block */ }
 }
 
@@ -93,4 +94,7 @@ const url = await gh([
 const num = url.trim().split('/').pop();
 setOutput('pr', num);
 setOutput('created', 'true');
+// Which plan this branch answers. A later revision bumps the version, and that is the signal
+// that tells a re-run whether the existing work is still the right work.
+setOutput('work_order_version', String(workOrderVersion));
 process.stdout.write(`opened PR #${num}: ${url.trim()}\n`);

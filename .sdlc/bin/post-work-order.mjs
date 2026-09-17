@@ -3,8 +3,10 @@
 import { readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-const exec = promisify(execFile);
 import { gh, setOutput, loadConfig } from './lib/actions.js';
+import { advance } from './lib/advance.js';
+
+const exec = promisify(execFile);
 
 const issue = process.env.ISSUE;
 const cfg = await loadConfig();
@@ -34,13 +36,26 @@ const body = [
 
 await gh(['issue', 'comment', issue, '--body', body]);
 
+// Record which files this plan expects to touch. Used only to flag overlap with other work
+// in flight — never to block it. A plan's file list is a forecast, and forecasts should
+// inform a reviewer rather than gate a pipeline.
+const paths = [...(wo.files ?? []), ...(wo.tests ?? [])].map((f) => f.path).filter(Boolean);
+if (paths.length) {
+  await exec('node', ['.sdlc/bin/sdlc-ctl.mjs', 'link', '--issue', String(issue), '--paths', paths.join(',')])
+    .catch(() => {});   // advisory data; never fail a plan over it
+}
+
 if (cfg.gates?.plan_approval) {
   await gh(['issue', 'edit', issue, '--remove-label', 'sdlc:planning', '--add-label', 'sdlc:plan-review']);
   await gh(['issue', 'comment', issue, '--body',
     'Waiting for approval before any code is written. Comment `/sdlc approve` to proceed, or `/sdlc reject` with what to change.']);
   setOutput('gated', 'true');
 } else {
-  await gh(['issue', 'edit', issue, '--remove-label', 'sdlc:planning', '--add-label', 'sdlc:implementing']);
+  // Ledger AND labels. This line used to move only the labels, so the ledger stayed at
+  // `planning` for the entire life of the issue and every transition after it was illegal.
+  // sdlc:plan-review goes too: left over from a run when the human gate was still on, it
+  // says "waiting for you" on an issue that is waiting for nobody.
+  await advance(issue, 'implementing', { agent: 'planner', alsoRemove: ['sdlc:plan-review'] });
   // Explicit dispatch: the label will not start anything on its own (GITHUB_TOKEN events
   // do not trigger workflows).
   // A 404 here on a fresh install means the workflow is not on the default branch yet.

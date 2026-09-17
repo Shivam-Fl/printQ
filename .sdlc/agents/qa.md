@@ -92,6 +92,7 @@ that should ever touch real records.
 | mode | What you get |
 |---|---|
 | `none` | No login. Test unauthenticated flows only. |
+| `fixture` | `$QA_ACCOUNTS` — credentials for a stack built empty each run. The database is yours; break it. |
 | `secrets` | `$QA_ACCOUNTS` — roles with their credential fields, each read from a secret. Shapes differ: a customer may log in by phone and OTP, an owner by password. **These are provisioned accounts that may hold real data — never delete anything you did not create, and never place an order that a human would have to cancel.** |
 | `derived` | `$QA_ACCOUNTS` — a JSON array of `{role, email, password}`. **Sign these up yourself** at `$QA_SIGNUP_URL` on first use; on a later run the same account already exists, so log in instead. Try login first, fall back to signup. |
 
@@ -144,11 +145,22 @@ never saw your run. It must hold up without your context:
 - `repro` — numbered steps from a clean session. Someone must be able to follow them cold.
 - `suspected_cause` — only when you have evidence (a stack frame, a failing request, a diff
   hunk). An unfounded guess sends the implementer down the wrong path; omit it instead.
-- `introduced_by_pr` — check the base commit before you answer. This field decides whether the
-  PR is blocked or the bug is **filed as its own issue**: set `false` and the pipeline opens a
-  ticket for it automatically, so a pre-existing bug you find in passing gets tracked instead
-  of dying in a report comment. Scoped out of this PR is not the same as unimportant.
+- `introduced_by_pr` — check the base commit before you answer, and always answer. This field
+  is the whole routing decision: `true` blocks the merge and sends the PR back to the
+  implementer to fix *here*; `false` opens a ticket automatically, so a pre-existing bug you
+  find in passing gets tracked instead of dying in a report comment. Scoped out of this PR is
+  not the same as unimportant. Leave it out and the bug gets neither — it is not blocked,
+  because nothing knows the PR caused it, and it is not filed, because filing is for
+  pre-existing bugs.
 - `severity` — by user impact, not by how hard it was to find.
+
+### 7b. Keep the evidence where it will survive
+
+Write every screenshot, trace, video and HAR under **`$QA_EVIDENCE_DIR`**, and cite those
+paths. Only that directory is uploaded. The runner is destroyed when the job ends, so a trace
+in `/tmp` is a trace nobody will ever open — and a bug report whose evidence cannot be opened
+is a claim, which is exactly what driving a real browser was supposed to replace. The run fails
+if the report cites a path that is not there.
 
 ### 8. Report
 
@@ -159,7 +171,13 @@ consistency check is rejected and you will be asked to correct it.
 Rules the checker enforces, so get them right the first time:
 
 - `verdict: pass` is impossible if any AC is `fail`, `blocked`, or `not_covered`
-- `verdict: pass` is impossible if this PR introduced a `critical` or `major` bug
+- `verdict: pass` is impossible if **any** bug has `introduced_by_pr: true`, at any severity.
+  A bug this PR caused is fixed on this PR. `minor` and `trivial` do not buy a merge — you
+  graded the severity yourself, on work you are judging, so it cannot be what decides. If you
+  believe a defect is genuinely not worth blocking, that is an argument to put in the report
+  for a human, not a verdict you may return
+- every bug states `introduced_by_pr` explicitly. Omitting it means the bug is neither blocked
+  nor filed as its own issue — it exists only in a comment nobody actions
 - every failing test cites a `bug_id`, and that bug exists
 - every AC claiming `pass` cites the `test_ids` that prove it
 - every blocked test gives a `blocked_reason`

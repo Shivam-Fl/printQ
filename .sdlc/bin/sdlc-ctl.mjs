@@ -96,7 +96,26 @@ const commands = {
   /** Validate an agent artifact against its schema before anything downstream trusts it. */
   async validate(flags) {
     const schema = loadSchema(need(flags, 'schema'));
-    const data = JSON.parse(readFileSync(need(flags, 'file'), 'utf8'));
+    const file = need(flags, 'file');
+
+    // A missing artifact is the most common agent failure, and a raw ENOENT stack says
+    // nothing about what went wrong: the agent ran, reported success, and wrote the file
+    // somewhere else. Say that, and show what it did write.
+    if (!existsSync(file)) {
+      const { readdirSync } = await import('node:fs');
+      const near = [];
+      for (const dir of ['.', 'plan', 'review', '.sdlc']) {
+        try {
+          for (const f of readdirSync(dir)) if (f.endsWith('.json')) near.push(dir === '.' ? f : `${dir}/${f}`);
+        } catch { /* directory does not exist */ }
+      }
+      fail(
+        `the agent did not write ${file}.\n` +
+        'It reported success, so it ran — it just put the file somewhere else, or never wrote one.\n' +
+        (near.length ? `JSON files that do exist: ${near.join(', ')}` : 'No JSON files were written at all.'),
+      );
+    }
+    const data = JSON.parse(readFileSync(file, 'utf8'));
 
     const shape = validate(schema, data);
     if (!shape.ok) {
@@ -264,6 +283,11 @@ const commands = {
       return {
         ...base,
         pr: flags.pr ? Number(flags.pr) : base.pr,
+        // Which work order version the branch answers, so a re-run can tell finished work
+        // from work that a revised plan has made stale.
+        implemented_version: flags['implemented-version']
+          ? Number(flags['implemented-version'])
+          : base.implemented_version,
         touch_paths: flags.paths ? String(flags.paths).split(',').map((s) => s.trim()).filter(Boolean) : base.touch_paths,
       };
     });

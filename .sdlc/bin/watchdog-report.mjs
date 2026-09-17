@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Turns the watchdog sweep into comments. Only speaks when something needs a human.
 import { gh } from './lib/actions.js';
+import { advance } from './lib/advance.js';
 
 const report = JSON.parse(process.env.REPORT || '{}');
 
@@ -11,7 +12,7 @@ for (const { issue, reason } of report.exceeded ?? []) {
     'The attempt counter increments on dispatch, so this also catches an agent that kept ' +
     'crashing before it could do any work.\n\n' +
     'Resume with `/sdlc retry`, or `/sdlc stop` to leave it parked.']);
-  await gh(['issue', 'edit', String(issue), '--add-label', 'sdlc:budget-exceeded']);
+  await advance(issue, 'budget-exceeded', { agent: 'watchdog' });
 }
 
 for (const { issue, hours } of report.stalled ?? []) {

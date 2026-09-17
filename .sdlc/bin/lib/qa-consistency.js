@@ -50,11 +50,31 @@ export function checkQaConsistency(r) {
   if (r.verdict === 'pass' && acBlocking.length) {
     bad(`verdict is "pass" but ${acBlocking.map((a) => `${a.id}=${a.status}`).join(', ')}`);
   }
-  const blockingBugs = (r.bugs ?? []).filter(
-    (b) => b.introduced_by_pr !== false && (b.severity === 'critical' || b.severity === 'major'),
-  );
-  if (r.verdict === 'pass' && blockingBugs.length) {
-    bad(`verdict is "pass" but this PR introduced ${blockingBugs.length} critical/major bug(s)`);
+  // A bug this PR introduced does not merge. No severity carve-out, deliberately.
+  //
+  // This used to block only `critical` and `major`, and severity is the agent's own judgement
+  // of its own work: QA found a real, reproducible, always-repeating bug it had just written,
+  // graded it `minor`, and returned "pass — worth a follow-up fix". Nothing filed it either,
+  // because filing is for PRE-EXISTING bugs, so the finding went in a comment and the PR went
+  // to merge. Gating a guard on a field the thing being guarded chooses is not a guard.
+  //
+  // The cost of the strict rule is one rework loop on a cosmetic defect. The cost of the loose
+  // one is shipping bugs the pipeline itself found, catalogued and reproduced.
+  const introduced = (r.bugs ?? []).filter((b) => b.introduced_by_pr !== false);
+  if (r.verdict === 'pass' && introduced.length) {
+    bad(`verdict is "pass" but this PR introduced ${introduced.length} bug(s): ` +
+        `${introduced.map((b) => `${b.id} (${b.severity})`).join(', ')} — a bug this PR caused ` +
+        'is fixed here, not filed for later');
+  }
+
+  // Every bug must say where it came from. Absent, it is neither blocked (that reads it as
+  // introduced only by luck of the `!== false` default) nor filed as its own issue (that
+  // requires an explicit `false`) — it falls between the two and exists only in a comment.
+  for (const b of r.bugs ?? []) {
+    if (typeof b.introduced_by_pr !== 'boolean') {
+      bad(`${b.id} does not say whether this PR introduced it — that decides whether it blocks ` +
+          'the merge or becomes its own issue, so it cannot be left out');
+    }
   }
 
   // next_action must agree with the verdict — it is what the orchestrator acts on.

@@ -2,6 +2,7 @@
 // Renders the QA report as a PR comment and routes the state machine on next_action.
 import { readFileSync } from 'node:fs';
 import { gh, setOutput, die } from './lib/actions.js';
+import { advance } from './lib/advance.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
@@ -90,23 +91,16 @@ lines.push('', '---', '[Evidence, traces and video](' + runUrl + ')',
 await gh(['pr', 'comment', pr, '--body', lines.join('\n')]);
 
 // Route on next_action alone — no natural-language parsing in the control flow.
-const ctl = (args) => exec('node', ['.sdlc/bin/sdlc-ctl.mjs', ...args]);
-const route = {
-  merge:    ['transition', '--issue', issue, '--to', 'qa-pass',     '--agent', 'qa'],
-  revise:   ['transition', '--issue', issue, '--to', 'qa-fail',     '--agent', 'qa'],
-  escalate: ['transition', '--issue', issue, '--to', 'needs-human', '--agent', 'qa'],
-}[r.next_action];
-if (!route) die('unknown next_action "' + r.next_action + '"');
-await ctl(route);
-
-const label = { merge: 'sdlc:qa-pass', revise: 'sdlc:qa-fail', escalate: 'sdlc:needs-human' }[r.next_action];
-await gh(['issue', 'edit', issue, '--add-label', label]);
+const state = { merge: 'qa-pass', revise: 'qa-fail', escalate: 'needs-human' }[r.next_action];
+if (!state) die('unknown next_action "' + r.next_action + '"');
+await advance(issue, state, { agent: 'qa' });
 
 // A QA failure re-enters implementation with a revised work order. Dispatched explicitly,
 // because the label change alone will not start it.
 if (r.next_action === 'revise') {
   // A 404 here on a fresh install means the workflow is not on the default branch yet.
-await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-implement.yml', '-f', `issue=${issue}`]).catch(() => {});
+await exec('node', ['.sdlc/bin/dispatch.mjs', 'sdlc-implement.yml',
+    '-f', `issue=${issue}`, '-f', 'rework=qa']).catch(() => {});
 }
 setOutput('next_action', r.next_action);
 setOutput('bugs', String((r.bugs ?? []).length));

@@ -26,7 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
       # Works in a repo with no package.json: install the repo's own deps when there is a
@@ -66,7 +70,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
       # Works in a repo with no package.json: install the repo's own deps when there is a
       # manifest, then make sure the framework's single dependency is available either way.
       - name: Bootstrap

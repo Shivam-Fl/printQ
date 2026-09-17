@@ -12,8 +12,15 @@
  * @returns {'debugger'|'planner'}
  */
 export function agentForIssue(issue = {}, config = {}) {
+  const labelNames = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name).toLowerCase());
+
+  // An epic is too large for one work order by definition — that is what the label means.
+  // Sending it to the planner produces either a plan that covers a fraction of it, or one
+  // so broad no implementer can apply it. It goes to the maintainer to be split first.
+  if (labelNames.includes('sdlc:epic') || labelNames.includes('epic')) return 'maintainer';
+
   if (config.route_bugs_to_debugger === false) return 'planner';
-  const labels = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name).toLowerCase());
+  const labels = labelNames;
   if (labels.includes('bug') || labels.includes('defect') || labels.includes('regression')) {
     return 'debugger';
   }
@@ -109,3 +116,33 @@ export function mergeReviewFindings(correctness = {}, design = {}) {
 }
 
 const rank = (s) => ({ blocking: 0, major: 1, minor: 2 }[s] ?? 3);
+
+/**
+ * What did review decide, and therefore where does the PR go next?
+ *
+ * Until this existed the answer was "nowhere". The reviewer requested changes on the first
+ * real PR, said so clearly, and nothing read it — `post-review.mjs` set an output no step
+ * consumed. A review nobody routes on is a comment.
+ *
+ * Two shapes to read, because there are two review modes:
+ *   council — `declared` carries the merged verdict, computed from cross-verified findings.
+ *   single  — the agent posted a formal review, so GitHub holds the verdict, not us.
+ *
+ * Returns null when there is nothing to read at all. That is NOT an approval: an agent that
+ * finished without reviewing is the absent-value bug this pipeline keeps producing, and the
+ * caller escalates it to a human instead of letting silence merge code.
+ */
+export function reviewVerdict({ declared = null, reviews = [] } = {}) {
+  if (declared === 'approve' || declared === 'request-changes') return declared;
+
+  // Latest wins deliberately: a human approving after the bot requested changes is exactly
+  // how someone overrides a finding they disagree with, and it must not be outvoted by an
+  // older review that is still sitting in the list.
+  const states = reviews.map((r) => r?.state).filter(Boolean);
+  if (!states.length) return null;
+
+  // COMMENTED is the interesting case. The Actions token cannot submit a formal approval, so
+  // a reviewer with nothing blocking to say can only leave a comment — treating that as
+  // "no verdict" would strand every clean PR. CHANGES_REQUESTED is the only stop signal.
+  return states[states.length - 1] === 'CHANGES_REQUESTED' ? 'request-changes' : 'approve';
+}

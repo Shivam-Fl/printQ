@@ -1,4 +1,4 @@
-// Per-issue state. Pure functions over a plain object — IO lives in scripts/lib/state-io.js
+// Per-issue state. Pure functions over a plain object — IO lives in lib/state-io.js
 // so the state machine can be tested without a network or a git branch.
 //
 // This is the file that decides whether a runaway agent stops. Attempt counters increment on
@@ -22,7 +22,11 @@ const LEGAL = {
   'review':          ['qa', 'implementing', 'needs-human'],
   'qa':              ['qa-pass', 'qa-fail', 'needs-human', 'blocked'],
   'qa-fail':         ['implementing', 'needs-human', 'budget-exceeded'],
-  'qa-pass':         ['merged', 'needs-human'],
+  // qa-pass is not an end state, it is "waiting to merge". A PR sitting there can still take
+  // a new commit, be re-reviewed, or be re-QA'd — which is exactly what happened when a QA
+  // rule was corrected and the old verdict had to be re-taken. Modelled as one-way, the
+  // re-run's transition was illegal and the ledger silently stopped tracking the PR.
+  'qa-pass':         ['merged', 'needs-human', 'qa', 'review', 'ci-green', 'implementing'],
   'merged':          ['done'],
   'done':            [],
   'blocked':         ['triage', 'planning', 'needs-human'],
@@ -148,7 +152,16 @@ function globToRegExp(glob) {
   return new RegExp('^' + out + '$');
 }
 
-/** Two issues heading for the same files must be serialised, not raced. */
+/**
+ * Do two issues expect to touch the same files?
+ *
+ * ADVISORY ONLY. An earlier version blocked the second issue, which was wrong twice over:
+ * overlapping edits are ordinary and git handles them, and the overlap is predicted from a
+ * plan whose file list is a forecast the implementer routinely departs from. Blocking on a
+ * forecast costs throughput permanently to avoid a two-minute merge conflict.
+ *
+ * What it is good for: telling a reviewer that another PR is moving the same ground.
+ */
 export function pathsCollide(a = [], b = []) {
   return a.some((x) => b.some((y) => x === y || globToRegExp(x).test(y) || globToRegExp(y).test(x)));
 }

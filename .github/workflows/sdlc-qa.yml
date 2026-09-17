@@ -6,14 +6,14 @@ name: sdlc-qa
 on:
   # preview mode: a real deployment finished and has a URL to drive
   deployment_status:
-  # compose mode: no deployment exists, so QA runs after REVIEW, not after CI.
+  # compose mode: no deployment exists, so QA runs after REVIEW, not after CI — review is
+  # cheaper and can reject the diff outright.
   #
-  # These two used to both trigger on ci-verify completing, so they raced: a PR could be
-  # QA'd while the reviewer was still requesting changes on it. Review is cheaper than QA
-  # and can reject the diff outright, so it goes first.
-  workflow_run:
-    workflows: [sdlc-review]
-    types: [completed]
+  # Dispatched by the reviewer, never chained on it completing. Chaining ran QA on PRs the
+  # reviewer had just rejected, because `workflow_run` cannot see a verdict — and then it
+  # stopped running at all: the condition also demanded `workflow_run.event == 'pull_request'`,
+  # which stopped being true the day the gate started dispatching review instead of chaining
+  # to it. A trigger that silently matches nothing is the worst of the two failures.
   workflow_dispatch:
     inputs:
       pr:  { required: true, type: string }
@@ -36,9 +36,6 @@ jobs:
     # Only on a successful preview deployment, never on a production environment.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'pull_request') ||
       (github.event_name == 'deployment_status' &&
        github.event.deployment_status.state == 'success' &&
        github.event.deployment_status.environment != 'production')
@@ -48,7 +45,11 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
 
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
@@ -157,6 +158,10 @@ jobs:
         env:
           PREVIEW_URL: ${{ steps.ctx.outputs.url }}
           BASE_BRANCH: ${{ steps.base.outputs.branch }}
+          # Named explicitly, because "with trace/video on" does not say where. QA wrote its
+          # screenshots and traces to /tmp on the first real run, the upload globbed the
+          # workspace, and the report shipped citing three files that no longer existed.
+          QA_EVIDENCE_DIR: ${{ github.workspace }}/qa-evidence
           QA_USER_EMAIL: ${{ secrets.QA_USER_EMAIL }}
           QA_USER_PASSWORD: ${{ secrets.QA_USER_PASSWORD }}
           QA_AUTH_MODE: ${{ steps.creds.outputs.mode }}
@@ -184,6 +189,12 @@ jobs:
             Use Playwright CLI, headless, with trace/video/HAR on. Not the MCP server —
             the CLI costs a fraction of the tokens for the same browser work.
 
+            Write EVERY screenshot, trace, video and HAR under $QA_EVIDENCE_DIR, and cite
+            those paths in the report. Only that directory is uploaded; anything you leave
+            in /tmp or elsewhere on this runner is destroyed with it, and a bug report whose
+            evidence cannot be opened is just a claim. The run fails if you cite a path that
+            is not there.
+
             The code under test is checked out in _pr/ at the PR's exact commit
             (${{ steps.ctx.outputs.sha }}); the app is served from there. This repo root is
             the framework at main — do not read the app from it, it is the WRONG commit.
@@ -206,6 +217,12 @@ jobs:
       - name: Validate the report (shape and honesty)
         run: node .sdlc/bin/sdlc-ctl.mjs validate --schema qa-report --file qa-report.json
 
+      - name: Did the evidence survive?
+        env:
+          QA_EVIDENCE_DIR: ${{ github.workspace }}/qa-evidence
+          REPORT: qa-report.json
+        run: node .sdlc/bin/check-evidence.mjs
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -213,10 +230,11 @@ jobs:
           name: qa-evidence-pr${{ steps.ctx.outputs.pr }}-${{ github.run_attempt }}
           path: |
             qa-report.json
+            qa-evidence/
             test-results/
             playwright-report/
-            **/*.webm
-            **/*.zip
+            _pr/test-results/
+            _pr/playwright-report/
           retention-days: 30
           if-no-files-found: warn
 

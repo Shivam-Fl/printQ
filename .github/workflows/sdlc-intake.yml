@@ -4,9 +4,15 @@ name: sdlc-intake
 on:
   issues:
     types: [opened, reopened]
+  # An issue created by an agent does NOT fire `issues.opened` — GitHub refuses to trigger a
+  # workflow from a GITHUB_TOKEN event. The maintainer splits an epic into six issues and
+  # every one of them lands in a void unless something dispatches intake explicitly.
+  workflow_dispatch:
+    inputs:
+      issue: { required: true, type: string }
 
 concurrency:
-  group: sdlc-${{ github.event.issue.number }}
+  group: sdlc-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false      # never cancel a state write mid-flight
 
 permissions:
@@ -21,7 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          # Only cache when there is a lockfile. Without this, setup-node fails outright on a
+          # zero-dependency project or any non-Node repo, before a single step has run.
+          cache: ${{ hashFiles('**/package-lock.json') != '' && 'npm' || '' }}
 
       - name: Kill switch
         run: node .sdlc/bin/sdlc-ctl.mjs guard
@@ -38,29 +48,29 @@ jobs:
       - name: Open the ledger
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .sdlc/bin/sdlc-ctl.mjs init --issue ${{ github.event.issue.number }}
+        run: node .sdlc/bin/sdlc-ctl.mjs init --issue ${{ github.event.issue.number || inputs.issue }}
 
       - name: Triage
         id: triage
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           AUTHOR: ${{ github.event.issue.user.login }}
           ASSOCIATION: ${{ github.event.issue.author_association }}
         run: node .sdlc/bin/intake.mjs
 
-      - name: Route
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node .sdlc/bin/sdlc-ctl.mjs transition \
-            --issue ${{ github.event.issue.number }} \
-            --to "${{ steps.triage.outputs.next_state }}" --agent intake
-
       # Explicit hand-off. The label alone would not start the planner — see the note in
       # sdlc-plan.yml about GITHUB_TOKEN not triggering workflows.
-      - name: Start the planner
+      # An epic goes to the maintainer to be split; everything else to the planner. Decided
+      # here so nothing downstream spends an attempt discovering the issue is too big.
+      - name: Hand off
         if: steps.triage.outputs.next_state == 'planning'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .sdlc/bin/dispatch.mjs sdlc-plan.yml -f issue=${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+        run: |
+          if [ "${{ steps.triage.outputs.agent }}" = "maintainer" ]; then
+            node .sdlc/bin/dispatch.mjs sdlc-maintainer.yml -f epic="$ISSUE"
+          else
+            node .sdlc/bin/dispatch.mjs sdlc-plan.yml -f issue="$ISSUE"
+          fi

@@ -230,7 +230,8 @@
           "title",
           "expected",
           "actual",
-          "repro"
+          "repro",
+          "introduced_by_pr"
         ],
         "additionalProperties": false,
         "properties": {
@@ -288,7 +289,7 @@
             "maxLength": 1000
           },
           "introduced_by_pr": {
-            "description": "true = this PR caused it. false = pre-existing, found in passing. Drives whether it blocks the merge or becomes its own issue.",
+            "description": "true = this PR caused it, so it is fixed on this PR and does NOT merge \u2014 no severity gets a pass. false = pre-existing, found in passing, filed as its own issue. Required: a bug that says neither is neither blocked nor filed.",
             "type": "boolean"
           },
           "reproducible": {
