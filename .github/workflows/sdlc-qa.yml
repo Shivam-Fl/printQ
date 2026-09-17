@@ -244,6 +244,9 @@ jobs:
           PR: ${{ steps.ctx.outputs.pr }}
           ISSUE: ${{ steps.ctx.outputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Not only for the link: root-cause downloads this run's artifact to read the trace,
+          # the video and the HAR, which exist nowhere else.
+          RUN_ID: ${{ github.run_id }}
         run: node .sdlc/bin/post-qa-report.mjs
 
       # A critical finding recorded in prose nobody actions is a finding that was not made.
