@@ -19,6 +19,7 @@ import {
 import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
 import { reconcilePrintEarnings, runPayoutSweep } from '../modules/earnings/service.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
+import { publishPendingRealtimeProjections } from '../realtime/projections.js';
 
 const STALE_AGENT_MS = 2 * 60_000;
 
@@ -103,6 +104,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
         }
         else if (job.name === 'staleAgents') await detectStaleAgents();
         else if (job.name === 'payoutSweep') await runPayoutSweep();
+        else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
       },
       { connection: bullConnection(), concurrency: 1 },
     ));
@@ -113,6 +115,10 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     await maintenanceQueue.upsertJobScheduler('file-retention-minute', { every: 60_000 }, { name: 'fileRetention' });
     await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 60_000 }, { name: 'staleAgents' });
     await maintenanceQueue.upsertJobScheduler('payout-sweep', { every: 3_600_000 }, { name: 'payoutSweep' });
+    // The worker is a no-op until the explicitly isolated Firebase projection
+    // target is enabled. Once enabled, it repairs temporary Firebase outages
+    // from PostgreSQL's durable transactional outbox.
+    await maintenanceQueue.upsertJobScheduler('firebase-projections', { every: 10_000 }, { name: 'firebaseProjections' });
   }
 
   logger.info({ role }, 'workers_started');

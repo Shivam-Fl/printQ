@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Firebase Auth students may read only their own minimal projection. All
+    // privileged writes are server-side Admin SDK writes from the transactional
+    // PostgreSQL outbox, which bypass these rules by design.
+    match /studentProjections/{firebaseUid}/jobs/{jobId} {
+      allow read: if request.auth != null && request.auth.uid == firebaseUid;
+      allow write: if false;
+    }
+
+    // Shop projections are materialized for a future Firebase-authenticated
+    // shop client. The existing shop JWT/socket path remains authoritative;
+    // never make this collection publicly readable while that identity link is
+    // absent.
+    match /shopProjections/{shopId}/jobs/{jobId} {
+      allow read, write: if false;
+    }
+  }
+}

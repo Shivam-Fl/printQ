@@ -166,6 +166,9 @@ model Student {
   id        String   @id @default(uuid())
   /// E.164, e.g. +919876543210
   phone     String   @unique
+  /// Firebase Auth UID for the server-published, per-student projection.
+  /// Local-development students intentionally have no Firebase identity.
+  firebaseUid String? @unique
   name      String?
   createdAt DateTime @default(now())
 
@@ -397,6 +400,7 @@ model Job {
 
   events JobEvent[]
   ledgerEntries ShopLedgerEntry[]
+  realtimeOutbox RealtimeOutbox[]
 
   @@index([shopId, status])
   @@index([shopId, releaseCodeDigest])
@@ -418,6 +422,26 @@ model JobEvent {
   actorId    String?
   createdAt  DateTime @default(now())
 
+  realtimeOutbox RealtimeOutbox?
+
+  @@index([jobId, createdAt])
+}
+
+/// Rebuildable Firebase projection delivery record. It is inserted in the
+/// same PostgreSQL transaction as its JobEvent, then published at-least-once
+/// by the maintenance worker. It contains no document, location or money data.
+model RealtimeOutbox {
+  id          String   @id @default(uuid())
+  jobEventId  String   @unique
+  jobEvent    JobEvent @relation(fields: [jobEventId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  publishedAt DateTime?
+  attempts    Int      @default(0)
+  lastError   String?
+
+  @@index([publishedAt, createdAt])
   @@index([jobId, createdAt])
 }
 

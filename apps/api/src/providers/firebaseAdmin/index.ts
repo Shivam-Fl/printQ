@@ -10,7 +10,7 @@ let firebaseAdminApp: App | null = null;
  * narrowly scoped runtime identity; service-account JSON is intentionally
  * unsupported in PrintQs configuration.
  */
-function getFirebaseAdminApp(): App {
+export function getFirebaseAdminApp(): App {
   if (firebaseAdminApp) return firebaseAdminApp;
   if (!env.FIREBASE_PROJECT_ID) throw new Error('Firebase server feature requires FIREBASE_PROJECT_ID');
 

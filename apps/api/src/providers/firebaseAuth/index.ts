@@ -7,12 +7,14 @@ type FirebaseAccountLookup = {
   }>;
 };
 
+export type FirebasePhoneIdentity = { uid: string; phone: string };
+
 /**
  * Ask Google's Identity Toolkit to validate the Firebase ID token and return
  * its verified phone number. The web API key identifies the Firebase project;
  * no service-account private key is needed on the PrintQ server.
  */
-export async function verifyFirebasePhoneIdToken(idToken: string): Promise<string | null> {
+export async function verifyFirebasePhoneIdToken(idToken: string): Promise<FirebasePhoneIdentity | null> {
   const key = env.FIREBASE_AUTH_API_KEY;
   if (!key) throw new Error('Firebase phone authentication is not configured');
 
@@ -34,6 +36,11 @@ export async function verifyFirebasePhoneIdToken(idToken: string): Promise<strin
   }
 
   const payload = (await response.json()) as FirebaseAccountLookup;
-  const phone = payload.users?.[0]?.phoneNumber;
-  return typeof phone === 'string' && /^\+91[6-9]\d{9}$/.test(phone) ? phone : null;
+  const user = payload.users?.[0];
+  const phone = user?.phoneNumber;
+  const uid = user?.localId;
+  return typeof phone === 'string' && /^\+91[6-9]\d{9}$/.test(phone)
+    && typeof uid === 'string' && uid.length > 0
+    ? { uid, phone }
+    : null;
 }

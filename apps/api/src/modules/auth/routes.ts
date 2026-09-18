@@ -128,13 +128,25 @@ authRouter.post(
   validateBody(z.object({ idToken: z.string().min(100).max(8_000) })),
   asyncHandler(async (req, res) => {
     if (env.STUDENT_AUTH_PROVIDER !== 'firebase') throw notFound();
-    const phone = await verifyFirebasePhoneIdToken((req.body as { idToken: string }).idToken);
-    if (!phone) throw unauthorized('Phone verification expired — request a new code');
+    const identity = await verifyFirebasePhoneIdToken((req.body as { idToken: string }).idToken);
+    if (!identity) throw unauthorized('Phone verification expired — request a new code');
 
-    const student = await prisma.student.upsert({
-      where: { phone },
-      create: { phone },
-      update: {},
+    const student = await prisma.$transaction(async (tx) => {
+      const [byUid, byPhone] = await Promise.all([
+        tx.student.findUnique({ where: { firebaseUid: identity.uid } }),
+        tx.student.findUnique({ where: { phone: identity.phone } }),
+      ]);
+      // A UID/phone mismatch is an account-security event; never silently
+      // rebind an internal student record to a different Firebase identity.
+      if (byUid && byUid.phone !== identity.phone) throw unauthorized('Firebase account identity changed');
+      if (byPhone?.firebaseUid && byPhone.firebaseUid !== identity.uid) {
+        throw unauthorized('This phone is linked to a different Firebase account');
+      }
+      if (byUid) return byUid;
+      if (byPhone) {
+        return tx.student.update({ where: { id: byPhone.id }, data: { firebaseUid: identity.uid } });
+      }
+      return tx.student.create({ data: { phone: identity.phone, firebaseUid: identity.uid } });
     });
     res.json({
       token: signStudentToken(student.id),
