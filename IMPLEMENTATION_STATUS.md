@@ -4,7 +4,7 @@ Last updated: 2026-09-18 (Asia/Kolkata)
 
 ## Current phase
 
-Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced. Phase 2 isolation is partially complete: a distinct Firebase development project and GitHub development environment exist, while durable development database, queue, object storage, Cloud Run, Resend, and Razorpay TEST endpoints still require their own provider resources. The verified-print retention candidate in PR #9 has its exact required-check evidence; the active stacked branch adds code-enforced environment namespaces and provider-mode guardrails before any development deployment is permitted.
+Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced. Phase 2 isolation is partially complete: a distinct Firebase development project and GitHub development environment exist, while durable development database, queue, object storage, Cloud Run, Resend, and Razorpay TEST endpoints still require their own provider resources. The verified-print retention candidate in PR #9 has its exact required-check evidence; the active stacked branch adds code-enforced environment namespaces and provider-mode guardrails before any development deployment is permitted. A separate, unmerged Cloud Run branch now supplies an API service, isolated conversion/maintenance worker-pool templates, an explicit migration job, and a manual SHA-guarded development deployment workflow; it has not been deployed.
 
 ## Ownership and release source
 
@@ -16,6 +16,7 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Verified retention branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
 | Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
 | Active stacked isolation branch / PR | `codex/environment-isolation` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (code fix `9ef164e`; stacked on the retention candidate and not mergeable until its prerequisite and a development deployment path are verified) |
+| Active Cloud Run runtime branch | `codex/cloud-run-runtime` (based on the isolation candidate; unmerged and undeployed) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
@@ -54,13 +55,14 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Isolation branch local suite | Passed | API 16 files / 40 tests, all-workspace typecheck, web production build, root JUnit suite with zero failures/errors, and Prisma schema validation. |
 | PR #10 CI regression reproduction | Passed locally and in CI | GitHub run `35133141729` correctly caught a test that hard-coded `printq-test` while the CI environment uses `printq-ci-test`; the assertion now derives `QUEUE_NAMESPACE`. The affected test and API suite (16 files / 40 tests) pass under the exact CI namespace, followed by API typecheck and the GitHub rerun below. |
 | GitHub Actions `35347722899` | Passed | Required CI and secret scan passed for `9ef164e`: disposable PostgreSQL/Redis readiness, Prisma deploy/status, all builds/typechecks, JUnit suite, agent simulator, dependency audit, and retained artifacts. The user-owned non-required `qa` workflow failed again because its workflow expects an artifact it does not create; it was not modified. |
+| Cloud Run runtime branch local suite | Passed | API role contract: 17 files / 42 tests; API and all-workspace typechecks; API production build; root JUnit reports with zero failures/errors. Cloud Run API/worker/job templates rendered with dummy development-only values and passed YAML structural validation. No Docker Desktop use or cloud deployment occurred. |
 
 ## Environment/provider status and blockers
 
 | Area | Current status | Required next action / owner |
 | --- | --- | --- |
 | Development Firebase | Isolated project and GitHub environment secrets created | Enable Auth/App Check/realtime/FCM after application wiring; use only development configuration. |
-| Development PostgreSQL/Redis/R2 | Not yet provisioned | The code now requires a matching database namespace, physically namespaces every Redis queue and storage key, and blocks wrong provider modes. Create distinct durable resources, credentials, and private bucket; this requires a selected provider account/billing or existing approved resources. |
+| Development PostgreSQL/Redis/R2 | Not yet provisioned | The code now requires a matching database namespace, physically namespaces every Redis queue and storage key, and blocks wrong provider modes. User authorized development billing on 2026-09-18, but the Google Cloud console requires a fresh sign-in and no local `gcloud` authentication exists. After reauthentication, create distinct durable resources, credentials, private bucket, Artifact Registry, runtime/deploy identities, and workload identity federation; do not create or reuse production resources. |
 | Production compute/storage | Render combined/local-storage configuration remains legacy | Do not use for real orders; Cloud Run + separate workers + private object storage remain required. |
 | Historical secret scan | Full-history scan detects an old Firebase browser key in Git history | Coordinate key restriction/rotation before history remediation; do not expose its value. |
 | Razorpay AutoPay | UPI AutoPay approval is not evidenced and must remain unclaimed | Founder must authorize an accurate enablement request; no mandate/debit is permitted. |
@@ -75,4 +77,4 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 
 ## Next action
 
-Keep PR #9 unmerged until an isolated development deployment path exists, then validate its exact SHA outside CI before any `master` promotion. Rebase the stacked isolation branch on that verified merge, run its own CI/PR, and provision only the missing isolated development resources or document the paid-provider approval needed before creating them.
+Complete Google Cloud reauthentication, provision only the approved development resources, store no credential in Git, and run the SHA-guarded development deployment workflow against the required-check-passing stacked candidate. Validate that deployment end-to-end before merging its PR into `master`; do not let the legacy Render deployment become a substitute for the isolated Cloud Run gate.

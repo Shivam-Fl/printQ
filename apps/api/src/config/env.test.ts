@@ -90,4 +90,8 @@ describe('environment isolation contract', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Development cannot use a production Firebase project');
   });
+
+  it('rejects an unrecognised worker role before it can start a mixed worker process', () => {
+    expect(loadConfig({ WORKER_ROLE: 'everything' }).status).toBe(1);
+  });
 });

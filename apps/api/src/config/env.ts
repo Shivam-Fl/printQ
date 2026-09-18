@@ -40,6 +40,9 @@ const envSchema = z.object({
   DATABASE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,48}$/).optional(),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   QUEUE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9-]{1,48}$/).optional(),
+  // `all` preserves local/legacy operation. Cloud Run deploys conversion and
+  // maintenance as separate worker pools so conversion crashes stay isolated.
+  WORKER_ROLE: z.enum(['all', 'conversion', 'maintenance']).default('all'),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
   OTP_PEPPER: z.string().min(16, 'OTP_PEPPER must be at least 16 chars'),

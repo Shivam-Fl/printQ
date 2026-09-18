@@ -1,0 +1,111 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: printqs-development-api
+  namespace: ${PRINTQ_PROJECT_ID}
+  labels:
+    cloud.googleapis.com/location: ${PRINTQ_REGION}
+    printqs.io/environment: development
+  annotations:
+    run.googleapis.com/description: PrintQs development API and web bundle
+    run.googleapis.com/ingress: all
+    run.googleapis.com/invoker-iam-disabled: "true"
+spec:
+  template:
+    metadata:
+      labels:
+        printqs.io/environment: development
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 40
+      timeoutSeconds: 60
+      serviceAccountName: printqs-development-runtime@${PRINTQ_PROJECT_ID}.iam.gserviceaccount.com
+      containers:
+        - name: api
+          image: ${PRINTQ_IMAGE_URI}
+          command: [node]
+          args: [apps/api/dist/server.js]
+          ports:
+            - name: http1
+              containerPort: 4000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: NODE_ENV
+              value: development
+            - name: PRINTQ_ENVIRONMENT
+              value: development
+            - name: RUN_WORKERS
+              value: "false"
+            - name: DATABASE_NAMESPACE
+              value: development
+            - name: QUEUE_NAMESPACE
+              value: printq-development
+            - name: STORAGE_NAMESPACE
+              value: printq-development
+            - name: STORAGE_DRIVER
+              value: s3
+            - name: S3_ENDPOINT
+              value: ${PRINTQ_S3_ENDPOINT}
+            - name: S3_REGION
+              value: auto
+            - name: S3_BUCKET
+              value: ${PRINTQ_S3_BUCKET}
+            - name: S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: STUDENT_AUTH_PROVIDER
+              value: firebase
+            - name: FIREBASE_PROJECT_ID
+              value: ${PRINTQ_FIREBASE_PROJECT_ID}
+            - name: PAYMENT_PROVIDER
+              value: mock
+            - name: SHOP_PAYOUT_PROVIDER
+              value: mock
+            - name: EMAIL_PROVIDER
+              value: console
+            - name: SMS_PROVIDER
+              value: console
+            - name: PUBLIC_WEB_URL
+              value: ${PRINTQ_PUBLIC_WEB_URL}
+            - name: CORS_ORIGINS
+              value: ${PRINTQ_PUBLIC_WEB_URL}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-database-url
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-redis-url
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-jwt-secret
+                  key: latest
+            - name: OTP_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-otp-pepper
+                  key: latest
+            - name: FIREBASE_AUTH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-firebase-api-key
+                  key: latest
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-s3-access-key-id
+                  key: latest
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-s3-secret-access-key
+                  key: latest
