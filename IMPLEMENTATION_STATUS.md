@@ -15,7 +15,7 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-phase2-master` |
 | Verified retention branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
 | Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
-| Active stacked isolation branch / PR | `codex/environment-isolation` at `9ef164e` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (stacked on the retention candidate; not mergeable until its prerequisite and a development deployment path are verified) |
+| Active stacked isolation branch / PR | `codex/environment-isolation` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (code fix `9ef164e`; stacked on the retention candidate and not mergeable until its prerequisite and a development deployment path are verified) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
