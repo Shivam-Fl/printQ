@@ -6,7 +6,7 @@ import { logger } from '../lib/logger.js';
 import { getFirebaseAdminApp } from '../providers/firebaseAdmin/index.js';
 import { getJobLiveMetrics } from '../modules/queue/engine.js';
 import { isCounterCodeAvailable } from '../modules/queue/visibility.js';
-import type { JobStatus } from '@printq/shared';
+import { ACTIVE_QUEUE_STATUSES, type JobStatus } from '@printq/shared';
 
 interface ProjectionDocument {
   set(data: Record<string, unknown>): Promise<unknown>;
@@ -20,6 +20,19 @@ export type ProjectionJob = Pick<
   Job,
   'id' | 'shopId' | 'status' | 'assignedPrinterId' | 'updatedAt' | 'nearFrontNotifiedAt'
 > & { student: { firebaseUid: string | null } };
+
+/**
+ * A queue transition changes every following job's position, not only the
+ * transitioned job's. Keep the just-transitioned job (including terminal
+ * state) and every currently active job in a stable, de-duplicated delivery
+ * set. The caller marks the outbox row complete only after this whole set is
+ * written, so a retry repairs a partial Firebase outage.
+ */
+export function projectionTargets(eventJob: ProjectionJob, activeJobs: ProjectionJob[]): ProjectionJob[] {
+  const targets = new Map<string, ProjectionJob>([[eventJob.id, eventJob]]);
+  for (const job of activeJobs) targets.set(job.id, job);
+  return [...targets.values()];
+}
 
 export function projectionPayload(
   job: ProjectionJob,
@@ -92,8 +105,18 @@ export async function publishPendingRealtimeProjections(
 
   for (const event of pending) {
     try {
-      const metrics = await getJobLiveMetrics(event.job.id);
-      await activeWriter.write(event.job, metrics);
+      const activeJobs = await prisma.job.findMany({
+        where: {
+          shopId: event.job.shopId,
+          status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] },
+        },
+        include: { student: { select: { firebaseUid: true } } },
+        orderBy: { queuedAt: 'asc' },
+      });
+      for (const job of projectionTargets(event.job, activeJobs)) {
+        const metrics = await getJobLiveMetrics(job.id);
+        await activeWriter.write(job, metrics);
+      }
       const marked = await prisma.realtimeOutbox.updateMany({
         where: { id: event.id, publishedAt: null },
         data: { publishedAt: new Date(), attempts: { increment: 1 }, lastError: null },

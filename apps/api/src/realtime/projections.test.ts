@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FirebaseProjectionWriter, projectionPayload } from './projections.js';
+import { FirebaseProjectionWriter, projectionPayload, projectionTargets } from './projections.js';
 
 const job = {
   id: 'job-1',
@@ -40,5 +40,17 @@ describe('Firebase realtime projections', () => {
     await writer.write({ ...job, student: { firebaseUid: null } }, { position: 2, etaMinutes: 4 });
     expect(doc).toHaveBeenCalledTimes(1);
     expect(doc).toHaveBeenCalledWith('shopProjections/shop-1/jobs/job-1');
+  });
+
+  it('refreshes every active queue projection when another job leaves the queue', () => {
+    const completed = { ...job, id: 'job-0', status: 'completed' } as const;
+    const laterQueuedJob = {
+      ...job,
+      id: 'job-2',
+      student: { firebaseUid: 'firebase-user-2' },
+    } as const;
+
+    expect(projectionTargets(completed, [job, laterQueuedJob]).map((target) => target.id))
+      .toEqual(['job-0', 'job-1', 'job-2']);
   });
 });
