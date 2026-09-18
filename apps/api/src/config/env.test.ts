@@ -94,4 +94,20 @@ describe('environment isolation contract', () => {
   it('rejects an unrecognised worker role before it can start a mixed worker process', () => {
     expect(loadConfig({ WORKER_ROLE: 'everything' }).status).toBe(1);
   });
+
+  it('accepts a namespaced private GCS bucket without static cloud credentials', () => {
+    expect(loadConfig({ STORAGE_DRIVER: 'gcs', GCS_BUCKET: 'printqs-development-private' }).status).toBe(0);
+  });
+
+  it('requires a bucket when GCS is selected', () => {
+    const result = loadConfig({ STORAGE_DRIVER: 'gcs', GCS_BUCKET: '' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('STORAGE_DRIVER=gcs requires GCS_BUCKET');
+  });
+
+  it('rejects a GCS bucket that does not declare the active environment', () => {
+    const result = loadConfig({ STORAGE_DRIVER: 'gcs', GCS_BUCKET: 'printqs-shared-private' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('gcs bucket must include PRINTQ_ENVIRONMENT');
+  });
 });

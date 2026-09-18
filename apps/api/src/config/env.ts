@@ -54,8 +54,11 @@ const envSchema = z.object({
   FIREBASE_AUTH_API_KEY: z.string().optional(),
   FIREBASE_PROJECT_ID: z.string().regex(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/).optional(),
 
-  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  STORAGE_DRIVER: z.enum(['local', 's3', 'gcs']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
+  // GCS uses the attached Cloud Run service identity through ADC. Do not add
+  // a service-account JSON or HMAC key to application configuration.
+  GCS_BUCKET: z.string().optional(),
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('auto'),
   S3_BUCKET: z.string().optional(),
@@ -195,6 +198,21 @@ if (env.STORAGE_DRIVER === 's3') {
     process.exit(1);
   }
 }
+if (env.STORAGE_DRIVER === 'gcs' && !env.GCS_BUCKET) {
+  // eslint-disable-next-line no-console
+  console.error('STORAGE_DRIVER=gcs requires GCS_BUCKET');
+  process.exit(1);
+}
+if (env.STORAGE_DRIVER === 's3' || env.STORAGE_DRIVER === 'gcs') {
+  const bucket = env.STORAGE_DRIVER === 's3' ? env.S3_BUCKET! : env.GCS_BUCKET!;
+  if (!bucket.toLowerCase().includes(env.PRINTQ_ENVIRONMENT)) {
+    // A namespace inside a shared bucket is insufficient isolation. Require
+    // the backing bucket identity itself to declare its environment.
+    // eslint-disable-next-line no-console
+    console.error(`${env.STORAGE_DRIVER} bucket must include PRINTQ_ENVIRONMENT`);
+    process.exit(1);
+  }
+}
 if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.some((o) => o === '*')) {
   // eslint-disable-next-line no-console
   console.error('Wildcard CORS origin is not allowed in production');
@@ -260,8 +278,8 @@ try {
   console.error('DATABASE_URL must be a valid URL with an environment-specific database name');
   process.exit(1);
 }
-if (env.NODE_ENV === 'production' && env.STORAGE_DRIVER !== 's3') {
+if (env.NODE_ENV === 'production' && env.STORAGE_DRIVER !== 's3' && env.STORAGE_DRIVER !== 'gcs') {
   // eslint-disable-next-line no-console
-  console.error('Production requires private durable S3-compatible object storage');
+  console.error('Production requires private durable S3-compatible or Google Cloud Storage');
   process.exit(1);
 }

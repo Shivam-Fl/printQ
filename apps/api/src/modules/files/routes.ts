@@ -209,7 +209,8 @@ filesRouter.get(
 
 /**
  * Print-ready PDF preview ("what you see is what prints"). Local driver
- * streams through the API; s3 driver redirects to a short-lived signed URL.
+ * streams through the API; object-store drivers redirect to a short-lived
+ * signed URL.
  */
 filesRouter.get(
   '/:id/preview',

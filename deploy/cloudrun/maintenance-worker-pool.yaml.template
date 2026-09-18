@@ -39,15 +39,9 @@ spec:
             - name: STORAGE_NAMESPACE
               value: printq-development
             - name: STORAGE_DRIVER
-              value: s3
-            - name: S3_ENDPOINT
-              value: ${PRINTQ_S3_ENDPOINT}
-            - name: S3_REGION
-              value: auto
-            - name: S3_BUCKET
-              value: ${PRINTQ_S3_BUCKET}
-            - name: S3_FORCE_PATH_STYLE
-              value: "true"
+              value: gcs
+            - name: GCS_BUCKET
+              value: ${PRINTQ_GCS_BUCKET}
             - name: STUDENT_AUTH_PROVIDER
               value: firebase
             - name: FIREBASE_PROJECT_ID
@@ -88,14 +82,4 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: printqs-development-firebase-api-key
-                  key: latest
-            - name: S3_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: printqs-development-s3-access-key-id
-                  key: latest
-            - name: S3_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: printqs-development-s3-secret-access-key
                   key: latest

@@ -27,18 +27,21 @@ Before the first render/deploy, create the following in the `development`
 GitHub environment; do not place values in a repository file:
 
 - Variables: `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_ARTIFACT_REPOSITORY`,
-  `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `DEV_S3_ENDPOINT`, and
-  `DEV_S3_BUCKET`.
+  `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, and `DEV_GCS_BUCKET`.
 - Secrets: `DEV_DATABASE_URL`, `DEV_REDIS_URL`, `DEV_JWT_SECRET`,
   `DEV_OTP_PEPPER`, `DEV_FIREBASE_API_KEY`, `DEV_FIREBASE_PROJECT_ID`,
-  `DEV_S3_ACCESS_KEY_ID`, and `DEV_S3_SECRET_ACCESS_KEY`.
+  and the existing Firebase development web configuration secrets.
 
 The deployment identity must use GitHub Actions workload identity federation,
-not a service-account JSON key. The runtime identity receives only
-`Secret Manager Secret Accessor` on the named development secrets. A future
-production setup must use a separate GCP project, service account, Artifact
-Registry repository, database, Redis, bucket, Firebase project, and GitHub
-environment; it must not reuse any resource named here.
+not a service-account JSON key. The private, uniform-bucket-level-access GCS
+bucket has public access prevention enabled. The runtime identity receives
+`roles/storage.objectUser` on that bucket and `roles/iam.serviceAccountTokenCreator`
+on itself solely to create V4 signed preview URLs; it receives no HMAC key or
+service-account JSON credential. It receives `Secret Manager Secret Accessor`
+only on the named development secrets. A future production setup must use a
+separate GCP project, service account, Artifact Registry repository, database,
+Redis, bucket, Firebase project, and GitHub environment; it must not reuse any
+resource named here.
 
 ## Deployment guardrails
 
