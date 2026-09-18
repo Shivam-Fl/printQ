@@ -4,8 +4,10 @@
 - ES modules, Node 22, no transpiler. `.js` for libraries, `.mjs` for executable scripts.
 - Pure logic in `scripts/lib/`, IO at the edges. Anything worth testing must be importable
   without a network.
-- No dependencies unless a few lines genuinely cannot do it. The only runtime dep is
-  `js-yaml`, added because hand-rolling YAML parsing is the kind of clever that breaks at 3am.
+- No dependencies unless a few lines genuinely cannot do it. Root `package.json` carries
+  **no runtime dependencies at all** — `js-yaml` was tried as one and reverted (#7) because it
+  polluted the host manifest. `.sdlc/bin/ensure-deps.mjs` installs it lazily at run time
+  instead, precisely so the framework never touches a host project's dependency tree.
 - Shell out to `gh` rather than adding an API SDK.
 
 ## Guards fail closed
