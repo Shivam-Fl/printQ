@@ -15,7 +15,7 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-phase2-master` |
 | Verified retention branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
 | Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
-| Active stacked isolation branch / PR | `codex/environment-isolation` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (stacked on the retention candidate; not mergeable until its prerequisite and a development deployment path are verified) |
+| Active stacked isolation branch / PR | `codex/environment-isolation` at `9ef164e` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (stacked on the retention candidate; not mergeable until its prerequisite and a development deployment path are verified) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
@@ -52,7 +52,8 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | GitHub Actions `35131203760` | Rejected | Simulator correctly caught the initial premature legacy earning credit. Commit `2b2c630` moves the credit to verified physical print status and the full rerun above passes. |
 | User-owned SDLC `qa` `35131698781` | Not a release gate; failed | Its validation expects `qa-report.json`, but its own workflow did not produce one for this master-targeted PR. `gh pr checks --required` confirms only `CI / check` and `CI / secret scan`, both passed. The workflow is preserved unchanged. |
 | Isolation branch local suite | Passed | API 16 files / 40 tests, all-workspace typecheck, web production build, root JUnit suite with zero failures/errors, and Prisma schema validation. |
-| PR #10 CI regression reproduction | Passed locally after fix | GitHub run `35133141729` correctly caught a test that hard-coded `printq-test` while the CI environment uses `printq-ci-test`; the assertion now derives `QUEUE_NAMESPACE`. The affected test and API suite (16 files / 40 tests) pass under the exact CI namespace, followed by API typecheck. A fresh GitHub run is required. |
+| PR #10 CI regression reproduction | Passed locally and in CI | GitHub run `35133141729` correctly caught a test that hard-coded `printq-test` while the CI environment uses `printq-ci-test`; the assertion now derives `QUEUE_NAMESPACE`. The affected test and API suite (16 files / 40 tests) pass under the exact CI namespace, followed by API typecheck and the GitHub rerun below. |
+| GitHub Actions `35347722899` | Passed | Required CI and secret scan passed for `9ef164e`: disposable PostgreSQL/Redis readiness, Prisma deploy/status, all builds/typechecks, JUnit suite, agent simulator, dependency audit, and retained artifacts. The user-owned non-required `qa` workflow failed again because its workflow expects an artifact it does not create; it was not modified. |
 
 ## Environment/provider status and blockers
 
