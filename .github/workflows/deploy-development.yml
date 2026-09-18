@@ -70,7 +70,11 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin master
           base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ inputs.candidate_pr }}" --jq .base.sha)"
-          git merge-base --is-ancestor "$base_sha" origin/master
+          current_master="$(git rev-parse origin/master)"
+          [[ "$base_sha" == "$current_master" ]] || {
+            echo 'Candidate is based on stale master history; update the PR and rerun its required checks first'
+            exit 1
+          }
 
       - id: auth
         uses: google-github-actions/auth@v3
