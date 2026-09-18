@@ -17,7 +17,7 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
 | Active stacked isolation branch / PR | `codex/environment-isolation` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (code fix `9ef164e`; stacked on the retention candidate and not mergeable until its prerequisite and a development deployment path are verified) |
 | Active Cloud Run runtime branch / PR | `codex/cloud-run-runtime` / [PR #12](https://github.com/Shivam-Fl/printQ/pull/12) (based on the isolation candidate; unmerged and undeployed) |
-| Active GCS storage branch / PR | `codex/gcs-storage-runtime` / pending (stacked on the Cloud Run candidate; unmerged and undeployed) |
+| Active GCS storage branch / PR | `codex/gcs-storage-runtime` / [PR #13](https://github.com/Shivam-Fl/printQ/pull/13) (stacked on the Cloud Run candidate; unmerged and undeployed) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
