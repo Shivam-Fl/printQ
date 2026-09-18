@@ -1,5 +1,11 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
+  getToken as getAppCheckToken,
+  initializeAppCheck,
+  ReCaptchaV3Provider,
+  type AppCheck,
+} from 'firebase/app-check';
+import {
   browserLocalPersistence,
   getAuth,
   RecaptchaVerifier,
@@ -16,12 +22,17 @@ const firebaseConfig = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
   appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
 };
+const appCheckMode = import.meta.env.VITE_FIREBASE_APP_CHECK_MODE as string | undefined;
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
 
 export const firebasePhoneAuthEnabled =
   provider === 'firebase' && Object.values(firebaseConfig).every((value) => Boolean(value));
 
+const firebaseAppConfigured = Object.values(firebaseConfig).every((value) => Boolean(value));
+
 let verifier: RecaptchaVerifier | null = null;
 let confirmation: ConfirmationResult | null = null;
+let appCheck: AppCheck | null = null;
 const OTP_SEND_COOLDOWN_MS = 60_000;
 const OTP_SEND_KEY = 'printq:student:otp-sent-at';
 
@@ -31,6 +42,22 @@ function auth() {
   const instance = getAuth(app);
   instance.useDeviceLanguage();
   return instance;
+}
+
+/**
+ * Returns an App Check assertion for the custom API without ever placing it
+ * in a URL. This is deliberately opt-in: monitor mode is enabled only after
+ * the matching Firebase web provider has been configured in that environment.
+ */
+export async function getFirebaseAppCheckToken(): Promise<string | null> {
+  if (appCheckMode === 'disabled' || !appCheckMode || !appCheckSiteKey || !firebaseAppConfigured) return null;
+  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  appCheck ??= initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(appCheckSiteKey),
+    isTokenAutoRefreshEnabled: true,
+  });
+  const token = await getAppCheckToken(appCheck, false);
+  return token.token;
 }
 
 /** Reuse Firebase's trusted-device session so returning students do not need

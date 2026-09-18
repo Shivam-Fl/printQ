@@ -91,6 +91,12 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('Development cannot use a production Firebase project');
   });
 
+  it('requires a Firebase project before App Check can be monitored or enforced', () => {
+    const result = loadConfig({ FIREBASE_APP_CHECK_MODE: 'monitor' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('FIREBASE_APP_CHECK_MODE requires FIREBASE_PROJECT_ID');
+  });
+
   it('rejects an unrecognised worker role before it can start a mixed worker process', () => {
     expect(loadConfig({ WORKER_ROLE: 'everything' }).status).toBe(1);
   });

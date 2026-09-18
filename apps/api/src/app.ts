@@ -8,6 +8,7 @@ import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { generalLimiter } from './middleware/rateLimit.js';
+import { createAppCheckMiddleware } from './middleware/appCheck.js';
 import { errorHandler } from './middleware/error.js';
 import { HttpError } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
@@ -63,6 +64,7 @@ export function createApp(): express.Express {
 
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', generalLimiter);
+  app.use('/api', createAppCheckMiddleware());
 
   app.use('/api/auth', authRouter);
   app.use('/api/public', publicRouter);

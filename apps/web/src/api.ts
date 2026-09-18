@@ -18,8 +18,23 @@ type Role = 'student' | 'shop';
 
 const tokenKey = (role: Role) => `printq:${role}:token`;
 const firebaseStudentAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase';
+const firebaseAppCheckEnabled = import.meta.env.VITE_FIREBASE_APP_CHECK_MODE !== 'disabled'
+  && Boolean(import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY);
 
 let studentRenewal: Promise<string | null> | null = null;
+
+async function appCheckHeaders(): Promise<Record<string, string>> {
+  if (!firebaseAppCheckEnabled) return {};
+  try {
+    const { getFirebaseAppCheckToken } = await import('./firebasePhoneAuth.js');
+    const token = await getFirebaseAppCheckToken();
+    return token ? { 'X-Firebase-AppCheck': token } : {};
+  } catch {
+    // Monitor mode records the absence server-side. In enforce mode, surface
+    // the API's generic app-attestation error rather than leaking SDK detail.
+    return {};
+  }
+}
 
 export function getToken(role: Role): string | null {
   return localStorage.getItem(tokenKey(role));
@@ -98,6 +113,7 @@ async function requestJson<T>(
     const token = getToken(options.role);
     if (token) headers.Authorization = `Bearer ${token}`;
   }
+  Object.assign(headers, await appCheckHeaders());
   let body: BodyInit | undefined;
   if (options.formData) {
     body = options.formData;
@@ -131,11 +147,16 @@ export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}
 /** Fetch an authenticated binary response (e.g. a receipt PDF) and save it. */
 export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {
   let token = getToken(role);
-  let res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const appCheck = await appCheckHeaders();
+  let res = await fetch(`${API_URL}${path}`, {
+    headers: { ...appCheck, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
   if (res.status === 401 && role === 'student') {
     token = await renewStudentSession();
     if (token) {
-      res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      res = await fetch(`${API_URL}${path}`, {
+        headers: { ...appCheck, Authorization: `Bearer ${token}` },
+      });
     }
   }
   if (res.status === 401) clearToken(role);

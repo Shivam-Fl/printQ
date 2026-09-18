@@ -11,6 +11,8 @@ declare global {
       student?: { id: string };
       shopUser?: { id: string; shopId: string; role: 'owner' | 'staff' };
       agent?: { id: string; shopId: string; connectedPrinterIds: string[] };
+      /** Firebase App Check claim, populated only after server verification. */
+      firebaseAppCheck?: { appId: string };
     }
   }
 }

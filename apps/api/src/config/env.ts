@@ -53,6 +53,9 @@ const envSchema = z.object({
   STUDENT_AUTH_PROVIDER: z.enum(['local', 'firebase']).default('local'),
   FIREBASE_AUTH_API_KEY: z.string().optional(),
   FIREBASE_PROJECT_ID: z.string().regex(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/).optional(),
+  // Start in monitor mode to measure legitimate web traffic before rejecting
+  // unattested requests. Firebase Admin uses Cloud Run ADC, never JSON keys.
+  FIREBASE_APP_CHECK_MODE: z.enum(['disabled', 'monitor', 'enforce']).default('disabled'),
 
   STORAGE_DRIVER: z.enum(['local', 's3', 'gcs']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
@@ -170,6 +173,11 @@ if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
 if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_PROJECT_ID) {
   // eslint-disable-next-line no-console
   console.error('STUDENT_AUTH_PROVIDER=firebase requires FIREBASE_PROJECT_ID');
+  process.exit(1);
+}
+if (env.FIREBASE_APP_CHECK_MODE !== 'disabled' && !env.FIREBASE_PROJECT_ID) {
+  // eslint-disable-next-line no-console
+  console.error('FIREBASE_APP_CHECK_MODE requires FIREBASE_PROJECT_ID');
   process.exit(1);
 }
 if (env.SMS_PROVIDER === 'msg91') {
