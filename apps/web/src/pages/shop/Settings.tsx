@@ -24,11 +24,19 @@ interface ShopProfile {
   name: string;
   address: string;
   campusName: string | null;
+  campusId: string | null;
+  campus: { id: string; name: string; slug: string } | null;
   slug: string;
   latitude: number | null;
   longitude: number | null;
   checkInRadiusM: number;
   locationUpdatedAt: string | null;
+}
+interface Campus {
+  id: string;
+  slug: string;
+  name: string;
+  address: string;
 }
 interface LocationSearchResult {
   id: string;
@@ -58,26 +66,33 @@ export default function Settings() {
   const [locationQuery, setLocationQuery] = useState('');
   const [locationSearchBusy, setLocationSearchBusy] = useState(false);
   const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
+  const [campuses, setCampuses] = useState<Campus[]>([]);
 
   useEffect(() => {
     if (!getToken('shop')) {
       navigate('/dashboard/login');
       return;
     }
-    api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean; cashPaymentsEnabled: boolean } }>('/api/shop/me', { role: 'shop' })
-      .then((r) => {
+    Promise.all([
+      api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean; cashPaymentsEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
+      api<{ campuses: Campus[] }>('/api/public/campuses'),
+    ])
+      .then(([r, campusResult]) => {
         setOpts(r.shop.printOptions);
+        setCampuses(campusResult.campuses);
         setProfile({
           name: r.shop.name,
           address: r.shop.address,
           campusName: r.shop.campusName,
+          campusId: r.shop.campusId,
+          campus: r.shop.campus,
           slug: r.shop.slug,
           latitude: r.shop.latitude,
           longitude: r.shop.longitude,
           checkInRadiusM: r.shop.checkInRadiusM,
           locationUpdatedAt: r.shop.locationUpdatedAt,
         });
-        setLocationQuery([r.shop.address, r.shop.campusName].filter(Boolean).join(', '));
+        setLocationQuery([r.shop.address, r.shop.campus?.name ?? r.shop.campusName].filter(Boolean).join(', '));
         setAutoAssign(r.shop.autoAssignEnabled);
         setCashPayments(r.shop.cashPaymentsEnabled);
       })
@@ -218,7 +233,7 @@ export default function Settings() {
         body: {
           name: profile.name,
           address: profile.address,
-          campusName: profile.campusName?.trim() || null,
+          campusId: profile.campusId,
           latitude: profile.latitude,
           longitude: profile.longitude,
           checkInRadiusM: profile.checkInRadiusM,
@@ -250,7 +265,21 @@ export default function Settings() {
           <div className="settings-surface stack">
             <div className="form-row">
               <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
-              <div className="field grow"><label htmlFor="profile-campus">Campus</label><input id="profile-campus" placeholder="Optional" value={profile.campusName ?? ''} onChange={(event) => setProfile({ ...profile, campusName: event.target.value })} /></div>
+              <div className="field grow">
+                <label htmlFor="profile-campus">Approved campus</label>
+                <select
+                  id="profile-campus"
+                  value={profile.campusId ?? ''}
+                  onChange={(event) => {
+                    const campus = campuses.find((item) => item.id === event.target.value) ?? null;
+                    setProfile({ ...profile, campusId: campus?.id ?? null, campus, campusName: campus?.name ?? null });
+                  }}
+                >
+                  <option value="">Choose a campus before requesting verification</option>
+                  {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
+                </select>
+                <span className="field-help">Only a platform-approved campus can be published to students.</span>
+              </div>
             </div>
             <div className="field"><label htmlFor="profile-address">Counter address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
           </div>

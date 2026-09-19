@@ -11,6 +11,12 @@ const envBoolean = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+/** Empty deployment fields are absent, not malformed credentials. */
+const optionalSecret = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+  schema.optional(),
+);
+
 // Load ./.env when present (dev convenience); production uses real env vars.
 try {
   loadEnvFile();
@@ -107,6 +113,12 @@ const envSchema = z.object({
   // Header injection is never valid. A display-name plus verified address is
   // allowed because Resend supports it, so do not over-constrain its format.
   EMAIL_FROM: z.string().min(3).max(320).regex(/^[^\r\n]+$/).optional(),
+
+  // The first platform administrator is inserted idempotently at API boot
+  // from an argon2id hash. This is a deployment secret, never a browser value
+  // and never a plaintext password or service-account credential.
+  ADMIN_BOOTSTRAP_EMAIL: optionalSecret(z.string().trim().toLowerCase().email().max(254)),
+  ADMIN_BOOTSTRAP_PASSWORD_HASH: optionalSecret(z.string().min(40).regex(/^\$argon2(?:id|i|d)\$/)),
 
   // Web Push (PWA notifications). Generate once: npx web-push generate-vapid-keys
   VAPID_PUBLIC_KEY: z.string().optional(),
@@ -218,6 +230,13 @@ if (env.NODE_ENV === 'production' && env.EMAIL_PROVIDER !== 'resend') {
   // shop owner must receive a password reset through a verified sender.
   // eslint-disable-next-line no-console
   console.error('Production requires EMAIL_PROVIDER=resend');
+  process.exit(1);
+}
+if (env.NODE_ENV === 'production' && (!env.ADMIN_BOOTSTRAP_EMAIL || !env.ADMIN_BOOTSTRAP_PASSWORD_HASH)) {
+  // Production must have a separately authenticated platform administrator
+  // before a shop can be verified or published.
+  // eslint-disable-next-line no-console
+  console.error('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
   process.exit(1);
 }
 if ((env.VAPID_PUBLIC_KEY && !env.VAPID_PRIVATE_KEY) || (!env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY)) {

@@ -29,6 +29,8 @@ function loadConfig(overrides: Record<string, string>) {
       EMAIL_PROVIDER: 'resend',
       RESEND_API_KEY: 'resend-test-key-that-is-long-enough',
       EMAIL_FROM: 'PrintQs <security@printqs.test>',
+      ADMIN_BOOTSTRAP_EMAIL: 'admin@printqs.test',
+      ADMIN_BOOTSTRAP_PASSWORD_HASH: '$argon2id$v=19$m=65536,t=3,p=4$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       CORS_ORIGINS: 'http://localhost:5173',
       ...overrides,
     },
@@ -81,6 +83,26 @@ describe('environment isolation contract', () => {
       ALLOW_SIMULATED_PRINT_COMPLETION: 'false',
     });
     expect(result.status).toBe(0);
+  });
+
+  it('requires a separately bootstrapped platform administrator in production', () => {
+    const result = loadConfig({
+      NODE_ENV: 'production',
+      PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production',
+      QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production',
+      CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      ADMIN_BOOTSTRAP_EMAIL: '',
+      ADMIN_BOOTSTRAP_PASSWORD_HASH: '',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
   });
 
   it('rejects a production Firebase project in development', () => {

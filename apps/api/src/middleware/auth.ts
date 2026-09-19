@@ -10,6 +10,7 @@ declare global {
     interface Request {
       student?: { id: string };
       shopUser?: { id: string; shopId: string; role: 'owner' | 'staff' };
+      admin?: { id: string; role: 'platform_admin' };
       agent?: { id: string; shopId: string; connectedPrinterIds: string[] };
       /** Firebase App Check claim, populated only after server verification. */
       firebaseAppCheck?: { appId: string };
@@ -61,6 +62,17 @@ export function requireShopOwner(req: Request, res: Response, next: NextFunction
     if (req.shopUser?.role !== 'owner') return next(unauthorized('Owner access required'));
     next();
   });
+}
+
+/** Platform administrators are never derived from a shop user or student token. */
+export async function requireAdmin(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const token = bearer(req);
+  const claims = token ? verifyToken(token) : null;
+  if (!claims || claims.typ !== 'admin' || claims.role !== 'platform_admin') return next(unauthorized());
+  const admin = await prisma.adminUser.findUnique({ where: { id: claims.sub }, select: { active: true, role: true } });
+  if (!admin?.active || admin.role !== 'platform_admin') return next(unauthorized());
+  req.admin = { id: claims.sub, role: admin.role };
+  next();
 }
 
 /** Agents authenticate with their opaque token (x-agent-token header). */

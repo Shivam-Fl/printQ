@@ -19,6 +19,7 @@ import { shopRouter } from './modules/shops/routes.js';
 import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
+import { adminRouter } from './modules/admin/routes.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -73,6 +74,7 @@ export function createApp(): express.Express {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/push', pushRouter);
   app.use('/api/shop', shopRouter);
+  app.use('/api/admin', adminRouter);
   app.use('/api/agent', agentRouter);
 
   // Single-domain production deploy: serve the built web app from the API so

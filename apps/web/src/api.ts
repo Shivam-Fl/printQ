@@ -14,7 +14,7 @@ export function normalizeBaseUrl(value: unknown): string {
 
 export const API_URL = normalizeBaseUrl(import.meta.env.VITE_API_URL);
 
-type Role = 'student' | 'shop';
+type Role = 'student' | 'shop' | 'admin';
 
 const tokenKey = (role: Role) => `printq:${role}:token`;
 const firebaseStudentAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase';

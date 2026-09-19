@@ -81,6 +81,19 @@ enum ShopUserRole {
   staff
 }
 
+/// A shop must be both independently verified and explicitly published before
+/// it can be returned by any student/public discovery route.
+enum ShopVerificationStatus {
+  draft
+  submitted
+  verified
+  rejected
+}
+
+enum AdminRole {
+  platform_admin
+}
+
 enum FileStatus {
   uploaded
   converting
@@ -102,7 +115,17 @@ model Shop {
   slug              String   @unique
   name              String
   address           String
+  /// Legacy free-text campus label is retained only for migration/display of
+  /// old records. New discovery uses the canonical Campus relationship.
   campusName        String?
+  campusId          String?
+  campus            Campus?  @relation(fields: [campusId], references: [id])
+  verificationStatus ShopVerificationStatus @default(draft)
+  verificationSubmittedAt DateTime?
+  verifiedAt        DateTime?
+  publishedAt       DateTime?
+  /// Private reviewer context. It is never selected by public or shop routes.
+  verificationNotes String?
   /// Owner-captured counter coordinates. Used for one-time arrival checks and
   /// nearby discovery; students' coordinates are never persisted.
   latitude          Float?
@@ -131,6 +154,58 @@ model Shop {
   ledgerEntries ShopLedgerEntry[]
   payouts       ShopPayout[]
   balancePayments ShopBalancePayment[]
+
+  @@index([campusId])
+  @@index([verificationStatus, publishedAt])
+}
+
+/// Platform-curated campuses. A shop owner selects an active record rather
+/// than inventing a public campus label; only staff can curate this catalogue.
+model Campus {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  address   String
+  latitude  Float?
+  longitude Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shops     Shop[]
+
+  @@index([isActive, name])
+}
+
+/// Separate platform identity: shop credentials never confer launch-admin
+/// access. Bootstrap credentials are argon2id hashes, injected only at deploy.
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         AdminRole @default(platform_admin)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditEvents  AdminAuditEvent[]
+}
+
+/// Append-only operational audit trail for campus and shop-verification
+/// decisions. Metadata must remain content-free and contain no secrets.
+model AdminAuditEvent {
+  id          String    @id @default(uuid())
+  adminId     String
+  admin       AdminUser @relation(fields: [adminId], references: [id])
+  action      String
+  subjectType String
+  subjectId   String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([subjectType, subjectId, createdAt])
+  @@index([adminId, createdAt])
 }
 
 /// A discount code — platform-wide (shopId null) or scoped to one shop.

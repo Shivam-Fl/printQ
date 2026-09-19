@@ -60,6 +60,12 @@ shopRouter.get(
         name: true,
         address: true,
         campusName: true,
+        campusId: true,
+        campus: { select: { id: true, name: true, slug: true } },
+        verificationStatus: true,
+        verificationSubmittedAt: true,
+        verifiedAt: true,
+        publishedAt: true,
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
@@ -120,12 +126,30 @@ shopRouter.get(
 
     res.json({
       setup: {
-        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
+        profileReady: Boolean(shop.name.trim() && shop.address.trim() && shop.campusId),
         locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
         agentReady,
-        ready: locationReady && pricingReady && readyPrinters.length > 0 && agentReady,
+        ready: locationReady
+          && pricingReady
+          && readyPrinters.length > 0
+          && agentReady
+          && shop.verificationStatus === 'verified'
+          && shop.publishedAt != null,
+        verification: {
+          status: shop.verificationStatus,
+          submittedAt: shop.verificationSubmittedAt,
+          verifiedAt: shop.verifiedAt,
+          publishedAt: shop.publishedAt,
+          canSubmit: locationReady
+            && pricingReady
+            && readyPrinters.length > 0
+            && agentReady
+            && Boolean(shop.campusId)
+            && shop.verificationStatus !== 'submitted'
+            && shop.verificationStatus !== 'verified',
+        },
         acceptingOrders: shop.acceptingOrders,
         counts: {
           printers: printers.length,
@@ -144,9 +168,10 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
+  campusId: z.string().uuid().nullable().optional(),
   latitude: z.number().finite().min(-90).max(90).nullable().optional(),
   longitude: z.number().finite().min(-180).max(180).nullable().optional(),
-  checkInRadiusM: z.number().int().min(20).max(500).optional(),
+  checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100)]).optional(),
   autoAssignEnabled: z.boolean().optional(),
   cashPaymentsEnabled: z.boolean().optional(),
   acceptingOrders: z.boolean().optional(),
@@ -169,14 +194,30 @@ shopRouter.patch(
   requireShopOwner,
   validateBody(shopPatchSchema),
   asyncHandler(async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    if (typeof body.campusId === 'string') {
+      const campus = await prisma.campus.findFirst({ where: { id: body.campusId, isActive: true }, select: { id: true } });
+      if (!campus) throw badRequest('Choose an active campus from the approved list');
+    }
+    // Any material profile, location, campus or menu change must go through
+    // review again. An old publish decision cannot silently cover new facts.
+    const verificationReset = ['name', 'address', 'campusId', 'campusName', 'latitude', 'longitude', 'printOptions']
+      .some((key) => key in body);
     const shop = await prisma.shop.update({
       where: { id: req.shopUser!.shopId },
       data: {
-        ...(req.body as object),
-        ...('latitude' in req.body ? {
-          locationUpdatedAt: typeof req.body.latitude === 'number' && typeof req.body.longitude === 'number'
+        ...(body as object),
+        ...('latitude' in body ? {
+          locationUpdatedAt: typeof body.latitude === 'number' && typeof body.longitude === 'number'
             ? new Date()
             : null,
+        } : {}),
+        ...(verificationReset ? {
+          verificationStatus: 'draft',
+          verificationSubmittedAt: null,
+          verifiedAt: null,
+          publishedAt: null,
+          verificationNotes: null,
         } : {}),
       },
       select: {
@@ -184,6 +225,12 @@ shopRouter.patch(
         name: true,
         address: true,
         campusName: true,
+        campusId: true,
+        campus: { select: { id: true, name: true, slug: true } },
+        verificationStatus: true,
+        verificationSubmittedAt: true,
+        verifiedAt: true,
+        publishedAt: true,
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
@@ -195,6 +242,42 @@ shopRouter.patch(
       },
     });
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+  }),
+);
+
+/** Submit a complete shop profile for independent platform verification. */
+shopRouter.post(
+  '/verification/submit',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const shop = await prisma.shop.findUnique({
+      where: { id: req.shopUser!.shopId },
+      include: { campus: true, printers: true, agents: true },
+    });
+    if (!shop) throw notFound();
+    const hasCoordinates = shop.latitude != null && shop.longitude != null;
+    const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
+    const hasAgent = shop.agents.length > 0;
+    const hasMenu = shopOptions(shop).papers.length > 0;
+    if (!shop.campus || !shop.campus.isActive || !hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
+      throw badRequest('Complete campus, location, printer, agent, and print-menu setup before requesting verification');
+    }
+    if (shop.verificationStatus === 'verified') {
+      res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
+      return;
+    }
+    const updated = await prisma.shop.update({
+      where: { id: shop.id },
+      data: {
+        verificationStatus: 'submitted',
+        verificationSubmittedAt: new Date(),
+        verifiedAt: null,
+        publishedAt: null,
+        verificationNotes: null,
+      },
+      select: { verificationStatus: true, verificationSubmittedAt: true },
+    });
+    res.json({ verification: { status: updated.verificationStatus, submittedAt: updated.verificationSubmittedAt } });
   }),
 );
 
