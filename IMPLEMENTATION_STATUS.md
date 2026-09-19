@@ -22,7 +22,7 @@ Phase 0 is frozen and Phase 1 CI/release controls are implemented and evidenced.
 | Active Firebase outbox branch / PR | `codex/firebase-outbox` / [PR #15](https://github.com/Shivam-Fl/printQ/pull/15) (stacked on the App Check candidate; unmerged and undeployed) |
 | Active FCM branch / PR | `codex/fcm-notifications` / [PR #16](https://github.com/Shivam-Fl/printQ/pull/16) (stacked on the Firebase outbox candidate; unmerged and undeployed) |
 | Active Resend branch / PR | `codex/resend-password-recovery` / [PR #17](https://github.com/Shivam-Fl/printQ/pull/17) (stacked on the FCM candidate; unmerged and undeployed) |
-| Active campus/discovery branch / PR | `codex/campus-verification` / pending PR creation (stacked on Resend; unmerged and undeployed) |
+| Active campus/discovery branch / PR | `codex/campus-verification` / [PR #18](https://github.com/Shivam-Fl/printQ/pull/18), SHA `fef01ba` (stacked on Resend; unmerged and undeployed) |
 | Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
 | Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
 | Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
