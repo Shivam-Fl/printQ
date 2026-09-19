@@ -29,6 +29,13 @@ enum PrinterStatus {
   jammed
 }
 
+/// A setup-page spool result. This never represents customer-print completion.
+enum PrinterTestStatus {
+  requested
+  spool_accepted
+  failed
+}
+
 enum AgentStatus {
   online
   offline
@@ -362,6 +369,14 @@ model Printer {
   osPrinterName        String?
   /// shop paper id -> { paperSize: Windows driver paper size, bin?: tray name }
   mediaConfig          Json          @default("{}")
+  /// Diagnostics only. A spool acceptance remains distinct from physical or
+  /// customer-job completion and is safe to expose to the shop dashboard.
+  lastTestRequestId    String?
+  lastTestRequestedAt  DateTime?
+  lastTestedAt         DateTime?
+  lastTestStatus       PrinterTestStatus?
+  lastTestError        String?
+  lastTestAgentId      String?
   createdAt            DateTime      @default(now())
 
   jobs Job[]

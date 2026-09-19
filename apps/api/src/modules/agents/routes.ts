@@ -185,6 +185,43 @@ const completePrintSchema = z.object({
   outcome: z.enum(['spool_accepted', 'simulator_complete']),
 });
 
+const printerTestResultSchema = z.object({
+  testId: z.string().uuid(),
+  printerId: z.string().uuid(),
+  status: z.enum(['spool_accepted', 'failed']),
+  error: z.string().trim().max(200).optional(),
+});
+
+/** Record a setup-page spool result without ever creating or advancing a Job. */
+agentRouter.post(
+  '/printer-tests/result',
+  validateBody(printerTestResultSchema),
+  asyncHandler(async (req, res) => {
+    const agent = req.agent!;
+    const result = req.body as z.infer<typeof printerTestResultSchema>;
+    const changed = await prisma.printer.updateMany({
+      where: {
+        id: result.printerId,
+        shopId: agent.shopId,
+        lastTestRequestId: result.testId,
+        lastTestAgentId: agent.id,
+      },
+      data: {
+        lastTestedAt: new Date(),
+        lastTestStatus: result.status,
+        lastTestError: result.status === 'failed' ? (result.error || 'The printer rejected the setup page') : null,
+      },
+    });
+    if (changed.count === 0) throw conflict('Printer test is no longer current');
+    publishEvent(`shop:${agent.shopId}`, 'printer:test_result', {
+      printerId: result.printerId,
+      testId: result.testId,
+      status: result.status,
+    });
+    res.json({ ok: true });
+  }),
+);
+
 agentRouter.post(
   '/jobs/:id/complete',
   validateBody(completePrintSchema),

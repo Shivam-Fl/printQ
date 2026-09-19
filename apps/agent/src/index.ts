@@ -2,10 +2,9 @@
 /**
  * PrintQ print agent — runs on a shop PC that can reach one or more printers.
  *
- * First run: paste the agent token shown once on the dashboard's Agents page.
- * It's saved locally (~/.printq-agent/config.json) so you never enter it
- * again — just start the agent the same way each time (e.g. a desktop
- * shortcut running `npm start`).
+ * For a persistent Windows setup, use the PrintQs Shop desktop installer. It
+ * stores the one-time token in the Windows secure store. The standalone CLI
+ * intentionally keeps a manually entered token only for its current process.
  *
  * Printers are auto-detected from the OS — no more hand-typed printer-name
  * mapping. The agent reports every installed printer it can see; the
@@ -21,17 +20,16 @@
  * claim (first agent wins) -> download converted PDF -> hand to OS spooler ->
  * report complete/fail.
  */
-import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { io, type Socket } from 'socket.io-client';
 import { detectPrinters, isSimulationMode, sendToPrinter } from './printerRuntime.js';
+import { createPrinterTestPage } from './printerTestPage.js';
+import { loadEphemeralAgentToken } from './cliToken.js';
 
 const API_URL = process.env.PRINTQ_API_URL ?? 'http://localhost:4000';
-const CONFIG_DIR = path.join(homedir(), '.printq-agent');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HEARTBEAT_MS = 30_000;
 
 interface DispatchPayload {
@@ -45,32 +43,27 @@ interface DriverMedia {
   bin?: string | null;
 }
 
-/** First run: prompt once for the token and remember it; every run after, just read it. */
+interface PrinterTestPayload {
+  testId: string;
+  printerId: string;
+  printerLabel: string;
+  osPrinterName: string;
+  options: { paperSize: string; bin: string | null; color: boolean; duplex: boolean };
+}
+
+/** A CLI-entered token never touches disk; use the desktop app for a persistent setup. */
 async function loadToken(): Promise<string> {
-  if (process.env.PRINTQ_AGENT_TOKEN) return process.env.PRINTQ_AGENT_TOKEN;
-
-  if (existsSync(CONFIG_FILE)) {
-    try {
-      const saved = JSON.parse(await readFile(CONFIG_FILE, 'utf8')) as { token?: string };
-      if (saved.token) return saved.token;
-    } catch {
-      // corrupt config — fall through and re-prompt
-    }
+  if (!process.env.PRINTQ_AGENT_TOKEN?.trim()) {
+    console.log('PrintQ agent — first-time setup on this PC.');
+    console.log('Use the PrintQs Shop desktop app for a persistent, Windows-secure setup.');
   }
-
-  console.log('PrintQ agent — first-time setup on this PC.');
-  console.log("Paste the token shown once on your shop dashboard's Agents page.");
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const token = (await rl.question('Agent token: ')).trim();
-  rl.close();
-  if (!token) {
-    console.error('No token entered — exiting.');
-    process.exit(1);
-  }
-  await mkdir(CONFIG_DIR, { recursive: true });
-  await writeFile(CONFIG_FILE, JSON.stringify({ token }, null, 2), { mode: 0o600 });
-  console.log(`Saved — you won't need to enter this again on this PC (${CONFIG_FILE}).`);
-  return token;
+  return loadEphemeralAgentToken(process.env.PRINTQ_AGENT_TOKEN, async () => {
+    console.log("Paste the token shown once on your shop dashboard's Agents page.");
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const token = await rl.question('Agent token: ');
+    rl.close();
+    return token;
+  });
 }
 
 const TOKEN = await loadToken();
@@ -164,6 +157,59 @@ async function printJob(job: DispatchPayload): Promise<void> {
   }
 }
 
+function isPrinterTestPayload(value: unknown): value is PrinterTestPayload {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as Partial<PrinterTestPayload>;
+  return typeof payload.testId === 'string'
+    && typeof payload.printerId === 'string'
+    && typeof payload.printerLabel === 'string'
+    && typeof payload.osPrinterName === 'string'
+    && Boolean(payload.options)
+    && typeof payload.options?.paperSize === 'string'
+    && typeof payload.options?.color === 'boolean'
+    && typeof payload.options?.duplex === 'boolean'
+    && (payload.options?.bin === null || typeof payload.options?.bin === 'string');
+}
+
+/** Print only a local setup page; this has no Job, order, or customer content. */
+async function printTestPage(payload: PrinterTestPayload): Promise<void> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'printq-agent-test-'));
+  try {
+    const pdfPath = path.join(dir, 'printer-test-page.pdf');
+    await writeFile(pdfPath, await createPrinterTestPage({
+      printerLabel: payload.printerLabel,
+      paperSize: payload.options.paperSize,
+      color: payload.options.color,
+      duplex: payload.options.duplex,
+      bin: payload.options.bin,
+    }));
+    await sendToPrinter(pdfPath, {
+      printer: payload.osPrinterName,
+      copies: 1,
+      duplex: payload.options.duplex,
+      color: payload.options.color,
+      paperSize: payload.options.paperSize,
+      bin: payload.options.bin,
+      jobId: `test-${payload.testId}`,
+    });
+    const result = await api('/api/agent/printer-tests/result', {
+      method: 'POST',
+      body: JSON.stringify({ testId: payload.testId, printerId: payload.printerId, status: 'spool_accepted' }),
+    });
+    if (!result.ok) throw new Error(`test result update failed: ${result.status}`);
+    console.log(`Printer setup page accepted by the spooler for ${payload.printerLabel}.`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message.slice(0, 200) : 'unknown printer test failure';
+    console.error('Printer setup page failed —', reason);
+    await api('/api/agent/printer-tests/result', {
+      method: 'POST',
+      body: JSON.stringify({ testId: payload.testId, printerId: payload.printerId, status: 'failed', error: reason }),
+    }).catch(() => undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 /** Jobs dispatched while this agent was offline. */
 async function drainPending(): Promise<void> {
   try {
@@ -190,6 +236,13 @@ function connect(): Socket {
   });
   socket.on('job:dispatch', (payload: DispatchPayload) => {
     void printJob(payload);
+  });
+  socket.on('printer:test_page', (payload: unknown) => {
+    if (!isPrinterTestPayload(payload)) {
+      console.warn('Ignored an invalid printer setup request.');
+      return;
+    }
+    void printTestPage(payload);
   });
   socket.on('disconnect', (reason) => console.warn('Disconnected:', reason));
   socket.on('connect_error', (err) => console.error('Connection error:', err.message));

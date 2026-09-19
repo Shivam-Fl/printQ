@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import argon2 from 'argon2';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   createStaffSchema,
@@ -42,6 +43,7 @@ import {
 } from '../earnings/service.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
+import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
 
@@ -242,6 +244,62 @@ shopRouter.patch(
       },
     });
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+  }),
+);
+
+/**
+ * Send a locally generated, non-customer setup page to one specific online
+ * computer. A test spool result is never a customer-print completion signal.
+ */
+shopRouter.post(
+  '/printers/:id/test-print',
+  requireShopUser,
+  validateBody(z.object({ agentId: z.string().uuid().optional() })),
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const printer = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!printer) throw notFound();
+    if (printer.status !== 'online') throw conflict('Mark this printer online before running a test page');
+    if (!printer.osPrinterName) throw conflict('Link this printer to a Windows printer before running a test page');
+
+    const agents = await prisma.agent.findMany({
+      where: { shopId },
+      select: { id: true, status: true, connectedPrinterIds: true },
+    });
+    const requestedAgentId = (req.body as { agentId?: string }).agentId;
+    const agent = selectPrinterTestAgent(agents, printer.id, requestedAgentId);
+    if (!agent) {
+      throw conflict(requestedAgentId
+        ? 'That computer is no longer online or linked to this printer'
+        : 'Choose an online connected computer for this printer');
+    }
+
+    const testId = randomUUID();
+    const paperSize = printer.paperSizesLoaded[0] ?? 'A4';
+    const configuredMedia = (printer.mediaConfig as Record<string, { paperSize?: string; bin?: string | null }>)[paperSize];
+    const media = { paperSize: configuredMedia?.paperSize || paperSize, bin: configuredMedia?.bin ?? null };
+    await prisma.printer.update({
+      where: { id: printer.id },
+      data: {
+        lastTestRequestId: testId,
+        lastTestRequestedAt: new Date(),
+        lastTestStatus: 'requested',
+        lastTestError: null,
+        lastTestAgentId: agent.id,
+      },
+    });
+    publishEvent(`agent:${agent.id}`, 'printer:test_page', {
+      testId,
+      printerId: printer.id,
+      printerLabel: printer.label,
+      osPrinterName: printer.osPrinterName,
+      options: { paperSize: media.paperSize, bin: media.bin, color: printer.colorSupport, duplex: false },
+    });
+    res.status(202).json({
+      ok: true,
+      testId,
+      message: 'Test page sent to the Windows spooler. Inspect the physical page before accepting orders.',
+    });
   }),
 );
 
