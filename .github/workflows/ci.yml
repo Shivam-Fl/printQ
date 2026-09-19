@@ -80,8 +80,18 @@ jobs:
         run: |
           set -o pipefail
           npm run test:e2e:sim | tee .tmp/ci-results/agent-simulator.log
-      # Supply-chain check — fails only on high+ severity in production deps.
-      - run: npm audit --omit=dev --audit-level=high
+      # Audit every deployable workspace separately. npm's root-workspace audit
+      # endpoint rejects this monorepo's valid workspace-link tree with HTTP 400;
+      # running each published runtime independently preserves a hard production
+      # dependency gate instead of ignoring or downgrading the failed audit.
+      - name: Audit production dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm audit --workspace @printq/shared --omit=dev --audit-level=high
+          npm audit --workspace @printq/api --omit=dev --audit-level=high
+          npm audit --workspace @printq/agent --omit=dev --audit-level=high
+          npm audit --workspace @printq/web --omit=dev --audit-level=high
       - name: Upload CI evidence
         if: always()
         uses: actions/upload-artifact@v4
