@@ -254,13 +254,17 @@ model LoginOtp {
 
 /// Shop-owner forgot-password codes. Hashed (argon2 + pepper), same as LoginOtp.
 model PasswordResetOtp {
-  id         String    @id @default(uuid())
-  email      String
-  otpHash    String
-  attempts   Int       @default(0)
-  expiresAt  DateTime
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  email               String
+  otpHash             String
+  attempts            Int       @default(0)
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  deliveryProvider    String?
+  deliveryMessageId   String?
+  deliveryAttemptedAt DateTime?
+  deliveryError       String?
+  createdAt           DateTime  @default(now())
 
   @@index([email, createdAt])
 }

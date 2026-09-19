@@ -290,6 +290,8 @@ authRouter.post(
 
 const RESET_OTP_TTL_MS = 15 * 60_000;
 const MAX_RESET_OTP_ATTEMPTS = 5;
+const RESET_OTP_RESEND_MS = 60_000;
+const MAX_RESET_OTP_SENDS_PER_EMAIL_PER_DAY = 10;
 
 /** Step 1 of forgot-password: email a 6-digit reset code (always 200 — no email enumeration). */
 authRouter.post(
@@ -301,15 +303,50 @@ authRouter.post(
     const user = await prisma.shopUser.findUnique({ where: { email } });
 
     if (user) {
-      const otp = generateOtp();
-      await prisma.passwordResetOtp.create({
-        data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(Date.now() + RESET_OTP_TTL_MS) },
+      const now = new Date();
+      const recent = await prisma.passwordResetOtp.findFirst({
+        where: { email, createdAt: { gt: new Date(now.getTime() - RESET_OTP_RESEND_MS) } },
+        select: { id: true },
       });
-      // dev: the code appears in the API console; launch: wire EMAIL_PROVIDER=resend
-      logger.info({ email, resetCode: otp }, 'password_reset_otp');
-      await emailProvider
-        .send(email, 'Reset your PrintQ password', `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`)
-        .catch((err) => logger.error({ err, email }, 'password_reset_email_failed'));
+      const sentToday = await prisma.passwordResetOtp.count({
+        where: { email, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
+      });
+      if (recent || sentToday >= MAX_RESET_OTP_SENDS_PER_EMAIL_PER_DAY) {
+        // Preserve the non-enumerating success response. The existing valid
+        // code remains usable, while the per-email ceiling caps sender spend.
+        return res.json({ ok: true });
+      }
+
+      const otp = generateOtp();
+      const reset = await prisma.passwordResetOtp.create({
+        data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(now.getTime() + RESET_OTP_TTL_MS) },
+      });
+      try {
+        const result = await emailProvider.send(
+          email,
+          'Reset your PrintQ password',
+          `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`,
+        );
+        await prisma.passwordResetOtp.update({
+          where: { id: reset.id },
+          data: {
+            deliveryProvider: emailProvider.name,
+            deliveryMessageId: result.providerMessageId ?? null,
+            deliveryAttemptedAt: new Date(),
+            deliveryError: null,
+          },
+        });
+      } catch (error) {
+        await prisma.passwordResetOtp.update({
+          where: { id: reset.id },
+          data: {
+            deliveryProvider: emailProvider.name,
+            deliveryAttemptedAt: new Date(),
+            deliveryError: error instanceof Error ? error.message.slice(0, 300) : 'Email delivery failed',
+          },
+        });
+        logger.error({ error, resetId: reset.id, provider: emailProvider.name }, 'password_reset_email_failed');
+      }
     }
     res.json({ ok: true });
   }),

@@ -26,7 +26,9 @@ function loadConfig(overrides: Record<string, string>) {
       STORAGE_DRIVER: 'local',
       ALLOW_SIMULATED_PRINT_COMPLETION: 'false',
       SMS_PROVIDER: 'console',
-      EMAIL_PROVIDER: 'console',
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 'resend-test-key-that-is-long-enough',
+      EMAIL_FROM: 'PrintQs <security@printqs.test>',
       CORS_ORIGINS: 'http://localhost:5173',
       ...overrides,
     },
@@ -107,6 +109,25 @@ describe('environment isolation contract', () => {
     const result = loadConfig({ FIREBASE_FCM_ENABLED: 'true' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('FIREBASE_FCM_ENABLED requires FIREBASE_PROJECT_ID');
+  });
+
+  it('rejects the console password-reset provider in production', () => {
+    const result = loadConfig({
+      NODE_ENV: 'production',
+      PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production',
+      QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production',
+      CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      EMAIL_PROVIDER: 'console',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Production requires EMAIL_PROVIDER=resend');
   });
 
   it('rejects an unrecognised worker role before it can start a mixed worker process', () => {

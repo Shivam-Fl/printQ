@@ -103,8 +103,10 @@ const envSchema = z.object({
   // Shop-owner forgot-password codes — email delivery, same pluggable pattern
   // (REST API, no SDK — same style as the Razorpay/MSG91 providers above).
   EMAIL_PROVIDER: z.enum(['console', 'resend']).default('console'),
-  RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().optional(),
+  RESEND_API_KEY: z.string().min(20).optional(),
+  // Header injection is never valid. A display-name plus verified address is
+  // allowed because Resend supports it, so do not over-constrain its format.
+  EMAIL_FROM: z.string().min(3).max(320).regex(/^[^\r\n]+$/).optional(),
 
   // Web Push (PWA notifications). Generate once: npx web-push generate-vapid-keys
   VAPID_PUBLIC_KEY: z.string().optional(),
@@ -210,6 +212,13 @@ if (env.EMAIL_PROVIDER === 'resend') {
     console.error('EMAIL_PROVIDER=resend requires RESEND_API_KEY and EMAIL_FROM');
     process.exit(1);
   }
+}
+if (env.NODE_ENV === 'production' && env.EMAIL_PROVIDER !== 'resend') {
+  // A console reset provider is useful only for isolated local tests. A real
+  // shop owner must receive a password reset through a verified sender.
+  // eslint-disable-next-line no-console
+  console.error('Production requires EMAIL_PROVIDER=resend');
+  process.exit(1);
 }
 if ((env.VAPID_PUBLIC_KEY && !env.VAPID_PRIVATE_KEY) || (!env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY)) {
   // eslint-disable-next-line no-console
