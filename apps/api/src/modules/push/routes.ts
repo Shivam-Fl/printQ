@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler } from '../../lib/errors.js';
+import { asyncHandler, notFound, unauthorized } from '../../lib/errors.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { pushEnabled } from '../../providers/push/index.js';
@@ -35,6 +35,48 @@ pushRouter.post(
       // endpoint reused after re-login on a shared device → move it to the new owner
       update: { studentId: req.student!.id, p256dh: keys.p256dh, auth: keys.auth },
     });
+    res.json({ ok: true });
+  }),
+);
+
+const fcmSubscriptionSchema = z.object({
+  // FCM registration tokens are opaque and may evolve in length. They are
+  // stored only server-side and are never written to logs or API responses.
+  token: z.string().min(32).max(4_096),
+});
+
+/** Register the current Firebase-authenticated student's FCM web device. */
+pushRouter.post(
+  '/fcm-subscribe',
+  requireStudent,
+  validateBody(fcmSubscriptionSchema),
+  asyncHandler(async (req, res) => {
+    if (!env.FIREBASE_FCM_ENABLED) throw notFound();
+    const student = await prisma.student.findUnique({
+      where: { id: req.student!.id },
+      select: { firebaseUid: true },
+    });
+    if (!student?.firebaseUid) throw unauthorized('Firebase sign-in is required for notifications');
+
+    const { token } = req.body as z.infer<typeof fcmSubscriptionSchema>;
+    await prisma.fcmSubscription.upsert({
+      where: { token },
+      create: { studentId: req.student!.id, token },
+      // A browser can be signed out then used by a different student. Move
+      // the opaque device token to the authenticated current owner.
+      update: { studentId: req.student!.id },
+    });
+    res.json({ ok: true });
+  }),
+);
+
+pushRouter.post(
+  '/fcm-unsubscribe',
+  requireStudent,
+  validateBody(fcmSubscriptionSchema),
+  asyncHandler(async (req, res) => {
+    const { token } = req.body as z.infer<typeof fcmSubscriptionSchema>;
+    await prisma.fcmSubscription.deleteMany({ where: { token, studentId: req.student!.id } });
     res.json({ ok: true });
   }),
 );

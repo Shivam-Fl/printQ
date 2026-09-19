@@ -103,6 +103,12 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('FIREBASE_PROJECTIONS_ENABLED requires FIREBASE_PROJECT_ID');
   });
 
+  it('requires a Firebase project before FCM delivery can be enabled', () => {
+    const result = loadConfig({ FIREBASE_FCM_ENABLED: 'true' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('FIREBASE_FCM_ENABLED requires FIREBASE_PROJECT_ID');
+  });
+
   it('rejects an unrecognised worker role before it can start a mixed worker process', () => {
     expect(loadConfig({ WORKER_ROLE: 'everything' }).status).toBe(1);
   });

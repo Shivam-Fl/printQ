@@ -20,6 +20,7 @@ import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handle
 import { reconcilePrintEarnings, runPayoutSweep } from '../modules/earnings/service.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
 import { publishPendingRealtimeProjections } from '../realtime/projections.js';
+import { publishPendingFirebaseNotifications } from '../providers/fcm/outbox.js';
 
 const STALE_AGENT_MS = 2 * 60_000;
 
@@ -105,6 +106,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
         else if (job.name === 'staleAgents') await detectStaleAgents();
         else if (job.name === 'payoutSweep') await runPayoutSweep();
         else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
+        else if (job.name === 'firebaseNotifications') await publishPendingFirebaseNotifications();
       },
       { connection: bullConnection(), concurrency: 1 },
     ));
@@ -119,6 +121,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     // target is enabled. Once enabled, it repairs temporary Firebase outages
     // from PostgreSQL's durable transactional outbox.
     await maintenanceQueue.upsertJobScheduler('firebase-projections', { every: 10_000 }, { name: 'firebaseProjections' });
+    await maintenanceQueue.upsertJobScheduler('firebase-notifications', { every: 10_000 }, { name: 'firebaseNotifications' });
   }
 
   logger.info({ role }, 'workers_started');

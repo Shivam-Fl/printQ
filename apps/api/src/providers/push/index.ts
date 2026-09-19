@@ -14,6 +14,8 @@ export interface PushMessage {
   body: string;
   /** in-app path to open on tap, e.g. /jobs/<id> */
   url?: string;
+  /** Stable server-side event key for at-least-once delivery de-duplication. */
+  eventKey?: string;
 }
 
 /**

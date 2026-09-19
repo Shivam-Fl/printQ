@@ -59,6 +59,10 @@ const envSchema = z.object({
   // Firestore is a rebuildable delivery target; PostgreSQL remains the source
   // of truth and the maintenance worker drains its transactional outbox.
   FIREBASE_PROJECTIONS_ENABLED: envBoolean.default(false),
+  // FCM uses the same Cloud Run application-default identity as App Check and
+  // Firestore. It is intentionally off until the isolated Firebase project,
+  // Web Push certificate and delivery QA are ready.
+  FIREBASE_FCM_ENABLED: envBoolean.default(false),
 
   STORAGE_DRIVER: z.enum(['local', 's3', 'gcs']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage'),
@@ -186,6 +190,11 @@ if (env.FIREBASE_APP_CHECK_MODE !== 'disabled' && !env.FIREBASE_PROJECT_ID) {
 if (env.FIREBASE_PROJECTIONS_ENABLED && !env.FIREBASE_PROJECT_ID) {
   // eslint-disable-next-line no-console
   console.error('FIREBASE_PROJECTIONS_ENABLED requires FIREBASE_PROJECT_ID');
+  process.exit(1);
+}
+if (env.FIREBASE_FCM_ENABLED && !env.FIREBASE_PROJECT_ID) {
+  // eslint-disable-next-line no-console
+  console.error('FIREBASE_FCM_ENABLED requires FIREBASE_PROJECT_ID');
   process.exit(1);
 }
 if (env.SMS_PROVIDER === 'msg91') {

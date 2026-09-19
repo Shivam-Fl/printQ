@@ -59,6 +59,7 @@ export async function confirmSuccessfulPrint(
       title: 'Printing complete — finishing in progress',
       body: 'The shop is completing the requested binding. We’ll tell you when it is ready to collect.',
       url: `/jobs/${job.id}`,
+      eventKey: `printing-finished:${job.id}:${confirmedAt.toISOString()}`,
     }).catch((error) => logger.error({ error, jobId: job.id }, 'print_finishing_notification_failed'));
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'finishing' });
     publishEvent(`shop:${job.shopId}`, 'queue:finishing_required', { jobId: job.id, binding: specs.binding });
@@ -69,6 +70,7 @@ export async function confirmSuccessfulPrint(
     title: 'Print ready ✓',
     body: 'Collect it at the counter.',
     url: `/jobs/${job.id}`,
+    eventKey: `print-ready:${job.id}:${confirmedAt.toISOString()}`,
   }).catch((error) => logger.error({ error, jobId: job.id }, 'print_ready_notification_failed'));
   publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
   publishEvent(`shop:${job.shopId}`, 'queue:job_ready', { jobId: job.id });

@@ -703,6 +703,7 @@ shopRouter.post(
       title: 'Cash returned — order closed',
       body: 'The shop could not complete this print and returned your cash. The order has been cancelled.',
       url: `/jobs/${job.id}`,
+      eventKey: `cash-returned:${job.id}`,
     });
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'cancelled' });
     await emitQueueUpdate(shopId);
@@ -730,6 +731,7 @@ shopRouter.post(
       title: 'Print ready ✓',
       body: 'Printing and finishing are complete. Collect it at the counter.',
       url: `/jobs/${job.id}`,
+      eventKey: `finishing-ready:${job.id}:${updated.updatedAt.toISOString()}`,
     });
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
     publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });

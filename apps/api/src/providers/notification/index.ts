@@ -1,18 +1,26 @@
 import { logger } from '../../lib/logger.js';
 import { env } from '../../config/env.js';
 import { publishEvent } from '../../realtime/events.js';
+import { fcmEnabled } from '../fcm/index.js';
+import { enqueueFirebaseNotification, publishPendingFirebaseNotifications } from '../fcm/outbox.js';
 import { sendPush, type PushMessage } from '../push/index.js';
 import { smsProvider } from '../sms/index.js';
 
 /**
  * Student notifications are in-app first: a socket event for the open app and
- * a Web Push for the installed PWA. No external messaging provider needed.
- * Failures are logged, never thrown into a queue transition.
+ * FCM is the primary installed-PWA delivery channel when explicitly enabled;
+ * legacy Web Push remains a development-safe fallback until every client has
+ * migrated. Failures never break an authoritative queue transition.
  */
 export async function notifyStudent(studentId: string, message: PushMessage): Promise<void> {
   publishEvent(`student:${studentId}`, 'notify', message);
   try {
-    await sendPush(studentId, message);
+    if (fcmEnabled) {
+      await enqueueFirebaseNotification(studentId, message);
+      await publishPendingFirebaseNotifications(1);
+    } else {
+      await sendPush(studentId, message);
+    }
   } catch (err) {
     logger.error({ err, studentId }, 'notify_failed');
   }

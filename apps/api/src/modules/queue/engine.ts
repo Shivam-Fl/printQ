@@ -188,6 +188,7 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
           ? 'Your six-digit PrintQ code is ready. Show it at the counter.'
           : `${live.position - 1} ${live.position - 1 === 1 ? 'person is' : 'people are'} ahead of you. Your counter code is now available.`,
         url: `/jobs/${job.id}`,
+        eventKey: `near-front:${job.id}`,
       });
     }
   }
@@ -251,6 +252,7 @@ async function prepareRemoteOrder(jobId: string, paymentMode: 'online' | 'cash')
         ? `Your files are ready for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. Pay at the counter before printing.`
         : `Your files are ready for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. Check in after you physically arrive.`,
       url: `/jobs/${jobId}`,
+      eventKey: `prepared:${jobId}:${paymentMode}`,
     });
   } else {
     await notifyStudent(job.studentId, {
@@ -259,6 +261,7 @@ async function prepareRemoteOrder(jobId: string, paymentMode: 'online' | 'cash')
         ? 'Travel when convenient. Check in after arrival, then pay cash when staff verifies your counter code.'
         : 'Travel when convenient. Tap “I’m at the shop” only after you arrive to join the live walk-in line.',
       url: `/jobs/${jobId}`,
+      eventKey: `prepared:${jobId}:${paymentMode}`,
     });
   }
 
@@ -281,6 +284,7 @@ export async function handleScheduledDue(jobId: string): Promise<void> {
     title: 'Your planned arrival window is open',
     body: 'When you reach the shop, open this order and tap “I’m at the shop” to join the live line.',
     url: `/jobs/${job.id}`,
+    eventKey: `scheduled-arrival:${job.id}`,
   });
 }
 
@@ -387,6 +391,7 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
     title: 'Checked in at the shop ✓',
     body: `You are in the live walk-in line. Your counter code will appear automatically when you reach the first ${env.NEAR_FRONT_THRESHOLD}.`,
     url: `/jobs/${job.id}`,
+    eventKey: `checked-in:${job.id}:${job.checkInCount + 1}`,
   });
   publishEvent(`shop:${job.shopId}`, 'queue:arrival', { jobId: job.id });
   await emitQueueUpdate(job.shopId);
@@ -427,6 +432,7 @@ export async function removeFromLiveQueue(jobId: string, shopId: string, actorId
     title: 'You were removed from the live line',
     body: 'Your paid order is still safe. Re-checking in places you at the end of the current line; staff can still find it directly with your six-digit code.',
     url: `/jobs/${job.id}`,
+    eventKey: `queue-skipped:${job.id}:${job.checkInCount}`,
   });
   publishEvent(`student:${job.studentId}`, 'job:update', {
     jobId: job.id,
@@ -478,6 +484,7 @@ export async function handleGraceExpiry(jobId: string): Promise<void> {
     title: 'Your print order is ready when you are',
     body: 'Check in again after reaching the shop, or show your six-digit code to staff at the counter.',
     url: `/jobs/${job.id}`,
+    eventKey: `legacy-queue-skipped:${job.id}`,
   });
   await emitQueueUpdate(job.shopId);
 }
@@ -527,6 +534,7 @@ export async function expireStalePreparedOrders(): Promise<void> {
         ? `You did not check in within ${env.PREPARED_ORDER_TTL_HOURS / 24} days, so the unpaid cash order was cancelled.`
         : `You did not check in within ${env.PREPARED_ORDER_TTL_HOURS / 24} days, so the order was cancelled and its refund was started.`,
       url: `/jobs/${cancelled.id}`,
+      eventKey: `expired:${cancelled.id}`,
     });
     publishEvent(`student:${cancelled.studentId}`, 'job:update', {
       jobId: cancelled.id,

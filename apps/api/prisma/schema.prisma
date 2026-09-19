@@ -175,6 +175,8 @@ model Student {
   jobs              Job[]
   files             UploadedFile[]
   pushSubscriptions PushSubscription[]
+  fcmSubscriptions  FcmSubscription[]
+  notificationDeliveries NotificationDelivery[]
   openInterests     ShopOpenInterest[]
 }
 
@@ -201,6 +203,40 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([studentId])
+}
+
+/// Firebase Cloud Messaging registration for one student-controlled web
+/// device. Tokens are never logged or returned to clients after registration.
+model FcmSubscription {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+/// Durable, idempotent FCM delivery work. PostgreSQL owns the record and the
+/// last retryable error; Firebase is never the source of notification truth.
+model NotificationDelivery {
+  id             String    @id @default(uuid())
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  eventKey       String
+  title          String
+  body           String
+  url            String?
+  createdAt      DateTime  @default(now())
+  deliveredAt    DateTime?
+  leaseExpiresAt DateTime?
+  attempts       Int       @default(0)
+  lastError      String?
+
+  @@unique([studentId, eventKey])
+  @@index([deliveredAt, leaseExpiresAt, createdAt])
+  @@index([studentId, createdAt])
 }
 
 /// Phone-login OTPs. Hashed (argon2 + pepper); plaintext never stored.
