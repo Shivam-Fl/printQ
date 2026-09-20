@@ -1,5 +1,9 @@
 # Conventions
 
+**Scope: the `.sdlc/` pipeline's own tooling** (`.sdlc/bin/`, `scripts/`) — not the printQ
+product code. `apps/` and `packages/` are TypeScript on Express/Prisma/React/Vitest with
+plenty of dependencies; their conventions live in the root `CLAUDE.md`, not here.
+
 ## Code
 - ES modules, Node 22, no transpiler. `.js` for libraries, `.mjs` for executable scripts.
 - Pure logic in `scripts/lib/`, IO at the edges. Anything worth testing must be importable
