@@ -6,12 +6,14 @@
  * Run after `npm run build`, or use `npm run test:launch`.
  */
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import Redis from 'ioredis';
 import { createInterface } from 'node:readline/promises';
+import argon2 from 'argon2';
 
 const ROOT = process.cwd();
 const PORT = 4010;
@@ -134,6 +136,23 @@ async function main() {
   }
   await mkdir(outputDir, { recursive: true });
 
+  // CI creates a unique, in-memory platform-admin credential solely to prove
+  // that shops cannot self-publish. It is passed only to the spawned API and
+  // is never written to disk or printed. Remote development runs must supply
+  // a separate pre-provisioned test administrator through their secret store.
+  const remoteAdminEmail = process.env.PRINTQ_E2E_ADMIN_EMAIL;
+  const remoteAdminPassword = process.env.PRINTQ_E2E_ADMIN_PASSWORD;
+  if (remote && (!remoteAdminEmail || !remoteAdminPassword)) {
+    throw new Error('Remote simulator requires PRINTQ_E2E_ADMIN_EMAIL and PRINTQ_E2E_ADMIN_PASSWORD from the isolated development secret store');
+  }
+  const adminCredentials = remote
+    ? { email: remoteAdminEmail, password: remoteAdminPassword, passwordHash: undefined }
+    : (() => {
+      const password = randomBytes(32).toString('base64url');
+      return { email: `e2e-admin-${stamp}@printq.local`, password, passwordHash: undefined };
+    })();
+  if (!remote) adminCredentials.passwordHash = await argon2.hash(adminCredentials.password, { type: argon2.argon2id });
+
   if (!remote) {
 
   // A dedicated Redis DB prevents a concurrently running development worker
@@ -160,13 +179,34 @@ async function main() {
     LOG_LEVEL: 'info',
     REDIS_URL: isolatedRedisUrl,
     STORAGE_LOCAL_DIR: storageDir,
+    ADMIN_BOOTSTRAP_EMAIL: adminCredentials.email,
+    ADMIN_BOOTSTRAP_PASSWORD_HASH: adminCredentials.passwordHash,
   });
   }
   console.log(`Testing ${API}${remote ? ' (remote test deployment; no database/Redis resets)' : ''}`);
   await waitFor('API health', async () => fetch(`${API}/healthz`).then((response) => response.ok).catch(() => false));
   assert(true, 'built API is healthy');
 
-  console.log('\nShop onboarding and simulated printer setup');
+  console.log('\nPlatform campus verification, shop onboarding and simulated printer setup');
+  const adminLogin = await request('/api/admin/auth/login', {
+    method: 'POST',
+    body: { email: adminCredentials.email, password: adminCredentials.password },
+  });
+  assert(adminLogin.status === 200 && adminLogin.data.token, 'separately authenticated platform administrator signed in');
+  const adminToken = adminLogin.data.token;
+  const campusResult = await request('/api/admin/campuses', {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      name: `PrintQ Test Campus ${stamp}`,
+      address: 'Test Campus Road, New Delhi',
+      latitude: 28.6139,
+      longitude: 77.209,
+    },
+  });
+  assert(campusResult.status === 201 && campusResult.data.campus?.id, 'canonical active campus created by administrator');
+  const campusId = campusResult.data.campus.id;
+
   const email = `owner-${stamp}@printq.local`;
   const registered = await request('/api/auth/shop/register', {
     method: 'POST',
@@ -186,7 +226,7 @@ async function main() {
   const located = await request('/api/shop/me', {
     method: 'PATCH',
     token: shopToken,
-    body: { latitude: 28.6139, longitude: 77.209, checkInRadiusM: 50, cashPaymentsEnabled: true },
+    body: { campusId, latitude: 28.6139, longitude: 77.209, checkInRadiusM: 50, cashPaymentsEnabled: true },
   });
   assert(located.status === 200 && located.data.shop?.locationUpdatedAt, 'secure arrival zone configured');
 
@@ -230,6 +270,16 @@ async function main() {
     return result.data.agents?.some((agent) => agent.status === 'online' && agent.detectedPrinters?.length > 0);
   });
   assert(true, 'simulator connected and reported its virtual printer');
+  const submitted = await request('/api/shop/verification/submit', { method: 'POST', token: shopToken });
+  assert(submitted.status === 200 && submitted.data.verification?.status === 'submitted', 'shop independently requested verification');
+  const verifiedShop = await request(`/api/admin/shops/${registered.data.user.shopId}/verify`, {
+    method: 'POST', token: adminToken, body: { notes: 'CI simulator only' },
+  });
+  assert(verifiedShop.status === 200 && verifiedShop.data.shop?.verificationStatus === 'verified', 'administrator verified shop separately');
+  const publishedShop = await request(`/api/admin/shops/${registered.data.user.shopId}/publish`, {
+    method: 'POST', token: adminToken,
+  });
+  assert(publishedShop.status === 200 && publishedShop.data.shop?.publishedAt, 'administrator published verified shop');
   const setup = await request('/api/shop/setup-status', { token: shopToken });
   assert(setup.data.setup?.ready === true, 'setup checklist reports launch-ready');
   const publicShop = await request(`/api/public/shops/${shopSlug}`);
