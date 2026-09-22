@@ -9,6 +9,5 @@ whether to open the entry itself.
 
 ## Situational
 - [qa/environment.md](qa/environment.md) — env quirks and login recipes. Read before browser QA.
-- [qa/selectors.md](qa/selectors.md) — selectors known to be stable.
 - [patterns/](patterns/) — bug shapes this repo has produced before. Grep by symptom.
 - [decisions/](decisions/) — why things are as they are. Read before proposing a rewrite.
