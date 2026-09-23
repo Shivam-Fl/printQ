@@ -43,11 +43,19 @@ enum AgentStatus {
 
 enum PaymentStatus {
   pending
+  /// The student pays the shop directly; only authenticated staff can confirm it.
+  counter_due
+  /// Retained for pre-launch cash orders while rolling out pay-at-shop.
   cash_due
   paid
   refunding
   refunded
   failed
+}
+
+enum CounterPaymentMethod {
+  cash
+  shop_upi
 }
 
 enum PayoutSchedule {
@@ -70,6 +78,51 @@ enum ShopLedgerType {
   payout_reserved
   payout_released
   adjustment
+}
+
+/// Immutable entries in the amount a shop owes PrintQs for completed prints.
+/// Positive is a receivable; negative is a documented credit/reversal.
+enum CommissionEntryType {
+  print_commission
+  refund_credit
+  manual_credit
+  statement_settlement
+}
+
+enum CollectionMandateMethod {
+  upi_autopay
+  bank_emandate
+  card_recurring
+}
+
+enum CollectionMandateStatus {
+  pending
+  active
+  revoked
+  expired
+  failed
+}
+
+enum CollectionEnvironment {
+  test
+  live
+}
+
+enum CommissionStatementStatus {
+  draft
+  frozen
+  notice_sent
+  debit_pending
+  settled
+  failed
+  paused
+}
+
+enum CommissionCollectionAttemptStatus {
+  pending
+  submitted
+  settled
+  failed
 }
 
 enum ShopBalancePaymentStatus {
@@ -142,6 +195,11 @@ model Shop {
   payoutSchedule    PayoutSchedule @default(daily)
   razorpayLinkedAccountId String?  @unique
   cashPaymentsEnabled Boolean @default(false)
+  /// Merchant-owned UPI identity used only for attended, manual counter payment.
+  /// It is set after owner verification and never treated as an automated proof.
+  counterUpiVpa String?
+  counterUpiPayeeName String?
+  counterUpiVerifiedAt DateTime?
   autoAssignEnabled Boolean  @default(true)
   acceptingOrders   Boolean  @default(true)
   /// legacy RateCard JSON — superseded by printOptions
@@ -159,6 +217,9 @@ model Shop {
   openInterests ShopOpenInterest[]
   coupons       Coupon[]
   ledgerEntries ShopLedgerEntry[]
+  commissionEntries ShopCommissionEntry[]
+  collectionMandates ShopCollectionMandate[]
+  commissionStatements ShopCommissionStatement[]
   payouts       ShopPayout[]
   balancePayments ShopBalancePayment[]
 
@@ -471,6 +532,20 @@ model Job {
   paymentId       String?
   /// Set only after counter staff explicitly confirms physical cash receipt.
   cashCollectedAt DateTime?
+  /// Pay-at-shop evidence. These fields are private to shop/admin operations;
+  /// student responses expose only their final price and order state.
+  counterPaymentMethod CounterPaymentMethod?
+  counterPaymentConfirmedAt DateTime?
+  counterPaymentConfirmedById String?
+  counterPaymentReference String?
+  counterPaymentAmountPaise Int?
+  /// An admin/support-confirmed return after payment. The staff counter path
+  /// handles a pre-print return; this record covers audited post-print refunds.
+  refundConfirmedAt DateTime?
+  refundConfirmedByAdminId String?
+  refundAmountPaise Int?
+  refundReason String?
+  refundReference String?
 
   /// coupon code applied at checkout, if any — discount already folded into totalPaise
   couponCode    String?
@@ -530,6 +605,7 @@ model Job {
 
   events JobEvent[]
   ledgerEntries ShopLedgerEntry[]
+  commissionEntries ShopCommissionEntry[]
   realtimeOutbox RealtimeOutbox[]
 
   @@index([shopId, status])
@@ -647,4 +723,117 @@ model ShopLedgerEntry {
   @@unique([payoutId, type])
   @@unique([balancePaymentId, type])
   @@index([shopId, createdAt])
+}
+
+/// The authoritative weekly-collection source ledger. It is append-only and
+/// deliberately independent of the retired student-payment/payout ledger.
+model ShopCommissionEntry {
+  id          String              @id @default(uuid())
+  shopId      String
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  jobId       String?
+  job         Job?                @relation(fields: [jobId], references: [id])
+  type        CommissionEntryType
+  /// Positive = amount due to PrintQs; negative = approved credit/reversal.
+  amountPaise Int
+  /// Shop bears any discount that brings the final direct counter price below
+  /// its base rate: total = base + commission - shop-funded discount.
+  shopFundedDiscountPaise Int      @default(0)
+    description String
+    createdAt   DateTime            @default(now())
+
+    statementLines ShopCommissionStatementLine[]
+    settlementStatementId String? @unique
+    settlementStatement   ShopCommissionStatement? @relation("StatementSettlement", fields: [settlementStatementId], references: [id])
+
+  @@unique([jobId, type])
+  @@index([shopId, createdAt])
+}
+
+/// Shop-owner recurring collection authorization. Production mandates are
+/// never created from a test environment or without the approved Razorpay use case.
+model ShopCollectionMandate {
+  id                     String                   @id @default(uuid())
+  shopId                 String
+  shop                   Shop                     @relation(fields: [shopId], references: [id])
+  provider               String
+  environment            CollectionEnvironment
+  method                 CollectionMandateMethod
+  status                 CollectionMandateStatus  @default(pending)
+  maxAmountPaise         Int
+  frequency              String                   @default("weekly")
+  validFrom              DateTime
+  validUntil             DateTime
+  cancellationTermsAcceptedAt DateTime?
+  providerCustomerId     String?
+  providerMandateId      String?                  @unique
+  activatedAt            DateTime?
+  revokedAt              DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  statements ShopCommissionStatement[]
+
+  @@index([shopId, status, environment])
+}
+
+/// A frozen weekly statement is the sole source for one variable recurring debit.
+model ShopCommissionStatement {
+  id                     String                   @id @default(uuid())
+  shopId                 String
+  shop                   Shop                     @relation(fields: [shopId], references: [id])
+  mandateId              String?
+  mandate                ShopCollectionMandate?   @relation(fields: [mandateId], references: [id])
+  periodStart            DateTime
+  periodEnd              DateTime
+  grossCommissionPaise   Int
+  creditPaise            Int
+  amountDuePaise         Int
+  status                 CommissionStatementStatus @default(draft)
+  frozenAt               DateTime?
+  preDebitNoticeSentAt   DateTime?
+  debitNotBefore         DateTime?
+  pausedReason           String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+    lines    ShopCommissionStatementLine[]
+    attempts ShopCommissionCollectionAttempt[]
+    settlementEntry ShopCommissionEntry? @relation("StatementSettlement")
+
+  @@unique([shopId, periodStart, periodEnd])
+  @@index([shopId, status, periodEnd])
+}
+
+/// Links each immutable ledger entry to exactly one frozen weekly statement.
+model ShopCommissionStatementLine {
+  id          String                   @id @default(uuid())
+  statementId String
+  statement   ShopCommissionStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  entryId     String
+  entry       ShopCommissionEntry      @relation(fields: [entryId], references: [id])
+  amountPaise Int
+  createdAt   DateTime                 @default(now())
+
+  @@unique([statementId, entryId])
+  @@unique([entryId])
+}
+
+/// Provider attempts use one stable idempotency key per statement/attempt.
+model ShopCommissionCollectionAttempt {
+  id                     String                            @id @default(uuid())
+  statementId            String
+  statement              ShopCommissionStatement           @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  amountPaise            Int
+  status                 CommissionCollectionAttemptStatus @default(pending)
+  provider               String
+  providerCollectionId   String?                           @unique
+  idempotencyKey         String                            @unique
+  failureReason          String?
+  submittedAt            DateTime?
+  settledAt              DateTime?
+  createdAt              DateTime                          @default(now())
+  updatedAt              DateTime                          @updatedAt
+
+  @@index([statementId, status, createdAt])
 }

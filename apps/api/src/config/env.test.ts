@@ -67,6 +67,32 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('Production cannot use a Razorpay TEST key');
   });
 
+  it('permits recurring collection test mode only outside production', () => {
+    expect(loadConfig({ SHOP_COLLECTION_MODE: 'test' }).status).toBe(0);
+    const result = loadConfig({
+      NODE_ENV: 'production',
+      PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production',
+      QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production',
+      CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      SHOP_COLLECTION_MODE: 'test',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
+  });
+
+  it('fails closed for live recurring collection before explicit cutover code exists', () => {
+    const result = loadConfig({ SHOP_COLLECTION_MODE: 'live' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('SHOP_COLLECTION_MODE=live is not enabled by this release');
+  });
+
   it('parses a literal false simulator flag as false in production', () => {
     const result = loadConfig({
       NODE_ENV: 'production',

@@ -5,7 +5,7 @@ import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { publishEvent } from '../../realtime/events.js';
-import { creditPrintEarning } from '../earnings/service.js';
+import { postVerifiedPrintCommission } from '../commission/service.js';
 import { applyTransition, type ActorType } from './transitions.js';
 
 export type PrintConfirmationActor = { type: ActorType; id?: string };
@@ -47,11 +47,12 @@ export async function confirmSuccessfulPrint(
     logger.error({ error, fileId: updated.fileId, jobId: updated.id }, 'verified_print_deletion_schedule_failed');
   });
 
-  // A completed physical print, not pickup or a browser click, is the legacy
-  // earning event. The idempotent ledger upsert prevents a duplicate simulator
-  // callback or repeated staff action from posting twice.
-  await creditPrintEarning(updated.id).catch((error) => {
-    logger.error({ error, jobId: updated.id }, 'shop_earning_credit_deferred');
+  // A completed physical print, not pickup or a browser click, is the only
+  // event that can post the pay-at-shop commission receivable. The idempotent
+  // PostgreSQL upsert prevents duplicate simulator callbacks or staff actions
+  // from creating a second amount due.
+  await postVerifiedPrintCommission(updated.id).catch((error) => {
+    logger.error({ error, jobId: updated.id }, 'commission_receivable_post_deferred');
   });
 
   if (finishingRequired) {

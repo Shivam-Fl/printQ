@@ -7,7 +7,6 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
-import { canShopAcceptCash } from '../earnings/service.js';
 import { nearbyShops, publishedShopWhere } from './discovery.js';
 
 export const publicRouter = Router();
@@ -57,7 +56,6 @@ publicRouter.get(
         longitude: true,
         acceptingOrders: true,
         campus: { select: { name: true } },
-        cashPaymentsEnabled: true,
         printers: { select: { id: true, status: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
       },
@@ -158,7 +156,6 @@ publicRouter.get(
         latitude: true,
         longitude: true,
         acceptingOrders: true,
-        cashPaymentsEnabled: true,
         printOptions: true,
         printers: {
           select: {
@@ -181,14 +178,11 @@ publicRouter.get(
     const loadedBindings = new Set(online.flatMap((p) => p.finishingOptions));
     const colorAvailable = online.some((p) => p.colorSupport);
 
-    const [ratingAgg, cashWithinLimit] = await Promise.all([
-      prisma.job.aggregate({
-        where: { shopId: shop.id, rating: { not: null } },
-        _avg: { rating: true },
-        _count: { rating: true },
-      }),
-      shop.cashPaymentsEnabled ? canShopAcceptCash(shop.id) : Promise.resolve(false),
-    ]);
+    const ratingAgg = await prisma.job.aggregate({
+      where: { shopId: shop.id, rating: { not: null } },
+      _avg: { rating: true },
+      _count: { rating: true },
+    });
 
     res.json({
       shop: {
@@ -197,7 +191,6 @@ publicRouter.get(
         address: shop.address,
         campusName: shop.campus!.name,
         open: shop.acceptingOrders && shop.latitude != null && shop.longitude != null && online.length > 0,
-        cashPaymentsEnabled: shop.cashPaymentsEnabled && cashWithinLimit,
         colorAvailable,
         rating: {
           average: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 10) / 10 : null,

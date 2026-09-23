@@ -10,6 +10,13 @@ import { paymentProvider } from '../../providers/payment/index.js';
  */
 export async function refundIfPaid(job: Job): Promise<void> {
   if (job.paymentStatus !== 'paid' || !job.paymentId) return;
+  if (job.paymentProvider === 'pay_at_shop') {
+    // The shop holds the student's cash/merchant-UPI payment. A provider call
+    // cannot refund it, and an automated status flip would create unaudited
+    // money movement. Support/staff must record the returned amount instead.
+    logger.warn({ jobId: job.id }, 'pay_at_shop_refund_requires_human_confirmation');
+    return;
+  }
 
   // Reserve the refund before calling the provider. Doing this afterwards can
   // issue two real refunds when cancellation and an expiry worker race.

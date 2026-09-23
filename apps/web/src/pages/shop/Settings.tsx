@@ -31,6 +31,9 @@ interface ShopProfile {
   longitude: number | null;
   checkInRadiusM: number;
   locationUpdatedAt: string | null;
+  counterUpiVpa: string | null;
+  counterUpiPayeeName: string | null;
+  counterUpiVerifiedAt: string | null;
 }
 interface Campus {
   id: string;
@@ -55,7 +58,6 @@ export default function Settings() {
   const [opts, setOpts] = useState<Options | null>(null);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [autoAssign, setAutoAssign] = useState(true);
-  const [cashPayments, setCashPayments] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
@@ -74,7 +76,7 @@ export default function Settings() {
       return;
     }
     Promise.all([
-      api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean; cashPaymentsEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
+      api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
       api<{ campuses: Campus[] }>('/api/public/campuses'),
     ])
       .then(([r, campusResult]) => {
@@ -91,10 +93,12 @@ export default function Settings() {
           longitude: r.shop.longitude,
           checkInRadiusM: r.shop.checkInRadiusM,
           locationUpdatedAt: r.shop.locationUpdatedAt,
+          counterUpiVpa: r.shop.counterUpiVpa,
+          counterUpiPayeeName: r.shop.counterUpiPayeeName,
+          counterUpiVerifiedAt: r.shop.counterUpiVerifiedAt,
         });
         setLocationQuery([r.shop.address, r.shop.campus?.name ?? r.shop.campusName].filter(Boolean).join(', '));
         setAutoAssign(r.shop.autoAssignEnabled);
-        setCashPayments(r.shop.cashPaymentsEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
   }, [navigate]);
@@ -239,7 +243,8 @@ export default function Settings() {
           checkInRadiusM: profile.checkInRadiusM,
           printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
           autoAssignEnabled: autoAssign,
-          cashPaymentsEnabled: cashPayments,
+          counterUpiVpa: profile.counterUpiVpa,
+          counterUpiPayeeName: profile.counterUpiPayeeName,
         },
       });
       setOpts({ papers, bindings, duplexEnabled: opts.duplexEnabled });
@@ -247,6 +252,30 @@ export default function Settings() {
       setTimeout(() => setSaved(false), 1600);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Only the owner can change settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function verifyMerchantUpi() {
+    if (!profile?.counterUpiVpa || !profile.counterUpiPayeeName) {
+      setError('Save both the merchant UPI VPA and payee name first.');
+      return;
+    }
+    if (!confirm(`Check ${profile.counterUpiVpa} and “${profile.counterUpiPayeeName}” in the shop’s merchant app now. Continue only if they match exactly.`)) return;
+    setSaving(true);
+    setError('');
+    try {
+      const response = await api<{ counterUpi: Pick<ShopProfile, 'counterUpiVpa' | 'counterUpiPayeeName' | 'counterUpiVerifiedAt'> }>('/api/shop/counter-upi/verify', {
+        method: 'POST',
+        role: 'shop',
+        body: { merchantAppChecked: true },
+      });
+      setProfile({ ...profile, ...response.counterUpi });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1600);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not record merchant UPI verification');
     } finally {
       setSaving(false);
     }
@@ -413,13 +442,24 @@ export default function Settings() {
         <button className={autoAssign ? '' : 'ghost'} onClick={() => setAutoAssign((v) => !v)}>{autoAssign ? 'ON' : 'OFF'}</button>
       </div>
 
-      <div className="automation-panel">
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <strong>Accept cash at the counter</strong>
-          <p className="dim" style={{ margin: '4px 0 0' }}>Students can prepare an order without online payment. Staff must confirm the exact cash amount before it can print.</p>
-        </div>
-        <button className={cashPayments ? '' : 'ghost'} onClick={() => setCashPayments((value) => !value)}>{cashPayments ? 'ON' : 'OFF'}</button>
-      </div>
+      {profile && (
+        <section className="settings-section">
+          <div className="settings-section-copy">
+            <h2>Counter merchant UPI</h2>
+            <p>Students may pay the shop directly at the counter. A UPI screen, screenshot or typed reference never proves receipt—staff must check the merchant app first.</p>
+          </div>
+          <div className="settings-surface stack">
+            <div className="form-row">
+              <div className="field grow"><label htmlFor="merchant-upi-vpa">Merchant UPI VPA</label><input id="merchant-upi-vpa" placeholder="shop@bank" value={profile.counterUpiVpa ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiVpa: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
+              <div className="field grow"><label htmlFor="merchant-upi-payee">Payee name in merchant app</label><input id="merchant-upi-payee" placeholder="Shop legal/display name" value={profile.counterUpiPayeeName ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiPayeeName: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
+            </div>
+            <div className="row between">
+              <span className={`stamp ${profile.counterUpiVerifiedAt ? 'green' : 'yellow'}`}>{profile.counterUpiVerifiedAt ? `verified ${new Date(profile.counterUpiVerifiedAt).toLocaleDateString()}` : 'verification required'}</span>
+              <button className="ghost small" disabled={saving || !profile.counterUpiVpa || !profile.counterUpiPayeeName} onClick={() => void verifyMerchantUpi()}>I checked the merchant app</button>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="settings-surface">
         <div className="row between">

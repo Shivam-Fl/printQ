@@ -17,6 +17,8 @@ export async function applyTransition(
   event: JobEvent,
   actor: { type: ActorType; id?: string },
   extraData: Prisma.JobUncheckedUpdateInput = {},
+  /** Optional immutable audit label when one state transition has extra significance. */
+  auditEvent?: string,
 ): Promise<Job | null> {
   const to = transition(from, event); // throws InvalidTransitionError on bad input
 
@@ -37,7 +39,7 @@ export async function applyTransition(
         jobId,
         fromStatus: from,
         toStatus: to,
-        event,
+        event: auditEvent ?? event,
         actorType: actor.type,
         actorId: actor.id ?? null,
       },

@@ -98,6 +98,12 @@ const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  // Shop commission collection is isolated from the retired student-payment
+  // configuration. `test` can only be used outside production; `live` stays
+  // disabled until the final explicit cutover confirmation and use-case approval.
+  SHOP_COLLECTION_MODE: z.enum(['disabled', 'test', 'live']).default('disabled'),
+  SHOP_COLLECTION_PILOT_CAP_PAISE: z.coerce.number().int().min(100).max(1_500_000).default(1_500_000),
+  RAZORPAY_RECURRING_WEBHOOK_SECRET: z.string().optional(),
 
   // Student login OTPs happen pre-session, so they can't be in-app — an SMS
   // provider is required for a real launch (console just logs to the API).
@@ -185,6 +191,19 @@ if (env.SHOP_PAYOUT_PROVIDER === 'razorpay_route') {
     console.error('SHOP_PAYOUT_PROVIDER=razorpay_route requires RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET');
     process.exit(1);
   }
+}
+if (env.SHOP_COLLECTION_MODE === 'test' && env.PRINTQ_ENVIRONMENT === 'production') {
+  // eslint-disable-next-line no-console
+  console.error('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
+  process.exit(1);
+}
+if (env.SHOP_COLLECTION_MODE === 'live') {
+  // There is intentionally no source-controlled switch for live recurring
+  // money movement. This fail-closed guard remains until a separately audited
+  // cutover deployment implements the user-confirmed provider adapter.
+  // eslint-disable-next-line no-console
+  console.error('SHOP_COLLECTION_MODE=live is not enabled by this release');
+  process.exit(1);
 }
 if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
   // eslint-disable-next-line no-console

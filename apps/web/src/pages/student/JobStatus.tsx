@@ -20,9 +20,7 @@ interface JobDetail {
   counterCodeThreshold: number;
   otpExpiresAt: string | null;
   noShowCount: number;
-  paymentStatus: 'pending' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
-  paymentProvider: string | null;
-  cashCollectedAt: string | null;
+  paymentStatus: 'pending' | 'counter_due' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
   rating: number | null;
   printError: string | null;
   printAttempts: number;
@@ -32,7 +30,12 @@ interface JobDetail {
   checkInOpensAt: string | null;
   arrivedAt: string | null;
   checkInCount: number;
-  shop: { name: string; address: string; slug: string };
+  shop: {
+    name: string;
+    address: string;
+    slug: string;
+    counterUpi: { vpa: string; payeeName: string } | null;
+  };
   file: { originalName: string; pages: number | null };
 }
 
@@ -47,13 +50,10 @@ export interface PaymentSummary {
 /** Keep the order total truthful: an order is not a paid order until the API says so. */
 export function paymentSummary(
   paymentStatus: PaymentStatus,
-  paymentProvider: string | null,
-  cashCollectedAt: string | null,
 ): PaymentSummary {
-  const cashCollected = paymentProvider === 'cash' && Boolean(cashCollectedAt);
-  if (cashCollected || (paymentStatus === 'paid' && paymentProvider !== 'cash')) {
+  if (paymentStatus === 'paid') {
     return {
-      label: paymentProvider === 'cash' ? 'Cash collected' : 'Amount paid',
+      label: 'Paid at shop',
       receiptAvailable: true,
       receiptMessage: '',
     };
@@ -61,7 +61,8 @@ export function paymentSummary(
 
   switch (paymentStatus) {
     case 'cash_due':
-      return { label: 'Cash due', receiptAvailable: false, receiptMessage: 'Receipt will be available after cash is collected at the counter.' };
+    case 'counter_due':
+      return { label: 'Pay at shop', receiptAvailable: false, receiptMessage: 'Receipt will be available after staff verifies payment at the counter.' };
     case 'refunding':
       return { label: 'Refund processing', receiptAvailable: false, receiptMessage: 'The payment is being refunded. The receipt will be available once processing is complete.' };
     case 'refunded':
@@ -70,8 +71,26 @@ export function paymentSummary(
       return { label: 'Payment failed', receiptAvailable: false, receiptMessage: 'No receipt is available because the payment was not completed.' };
     case 'pending':
     default:
-      return { label: 'Payment pending', receiptAvailable: false, receiptMessage: 'Receipt will be available after payment is confirmed.' };
+      return { label: 'Order preparing', receiptAvailable: false, receiptMessage: 'Receipt will be available after staff verifies payment at the counter.' };
   }
+}
+
+/** Opens the shop's verified merchant VPA with the exact final amount. */
+export function counterUpiIntentUri(
+  vpa: string,
+  payeeName: string,
+  totalPaise: number,
+  jobId: string,
+): string {
+  if (!Number.isInteger(totalPaise) || totalPaise < 100) throw new RangeError('Invalid counter payment amount');
+  const params = new URLSearchParams({
+    pa: vpa,
+    pn: payeeName,
+    am: (totalPaise / 100).toFixed(2),
+    cu: 'INR',
+    tn: `PrintQ ${jobId.slice(0, 8)}`,
+  });
+  return `upi://pay?${params.toString()}`;
 }
 
 const slotLabel = (iso: string) =>
@@ -222,7 +241,7 @@ export default function JobStatus() {
   const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
   const reachedIdx = ORDER.indexOf(job.status);
-  const payment = paymentSummary(job.paymentStatus, job.paymentProvider, job.cashCollectedAt);
+  const payment = paymentSummary(job.paymentStatus);
 
   return (
     <StudentShell>
@@ -236,11 +255,19 @@ export default function JobStatus() {
           {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
         </div>
 
-        {job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due' && (
+        {(job.paymentStatus === 'counter_due' || job.paymentStatus === 'cash_due') && (
           <div className="notice cash-due-notice">
             <div>
-              <strong>Pay {rupees(job.totalPaise)} in cash at the counter</strong>
-              <p>Keep the exact total ready. Staff will confirm it before sending your document to the printer.</p>
+              <strong>Pay {rupees(job.totalPaise)} at the shop counter</strong>
+              <p>Pay by cash or the shop’s merchant UPI. Staff checks receipt and confirms the exact total before sending your document to the printer.</p>
+              {job.shop.counterUpi && (
+                <a
+                  className="full-button"
+                  href={counterUpiIntentUri(job.shop.counterUpi.vpa, job.shop.counterUpi.payeeName, job.totalPaise, job.id)}
+                >
+                  Open shop UPI for {rupees(job.totalPaise)}
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -325,7 +352,7 @@ export default function JobStatus() {
         )}
         {job.status === 'pending_payment' && (
           <div className="notice setup-notice">
-            <div><strong>Payment wasn’t completed</strong><p>No queue position has been reserved. Cancel this attempt, then start again when you’re ready.</p></div>
+            <div><strong>Order is still preparing</strong><p>No queue position has been reserved. Refresh once preparation completes, or cancel and start again.</p></div>
           </div>
         )}
 

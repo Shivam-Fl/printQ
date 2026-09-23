@@ -14,6 +14,7 @@ export const JOB_EVENTS = [
   'FINISHING_COMPLETED',
   'PRINT_FAILED',
   'CASH_RETURNED',
+  'COUNTER_PAYMENT_RETURNED',
   'HANDED_OVER',
   'CANCEL',
 ] as const;
@@ -43,7 +44,11 @@ const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
   // a student must check in again, or staff can release their stable code.
   no_show: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', QUEUE_SKIPPED: 'awaiting_arrival' },
   requeued: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', QUEUE_SKIPPED: 'awaiting_arrival' },
-  otp_verified: { PRINT_STARTED: 'printing', CASH_RETURNED: 'cancelled' },
+  otp_verified: {
+    PRINT_STARTED: 'printing',
+    CASH_RETURNED: 'cancelled',
+    COUNTER_PAYMENT_RETURNED: 'cancelled',
+  },
   // PRINT_FAILED returns to otp_verified so the shop can re-dispatch without a new OTP
   printing: {
     PRINT_COMPLETED: 'ready_for_pickup',

@@ -195,11 +195,11 @@ export async function emitQueueUpdate(shopId: string): Promise<void> {
 }
 
 /**
- * Payment confirms a prepared remote order, but never reserves a place in the
- * physical line. A stable counter code is issued now; queue time begins only
- * after an explicit arrival check-in.
+ * A pay-at-shop order receives a stable counter code but never a physical
+ * queue position. Counter staff—not a student browser—will later confirm the
+ * exact server-calculated total before the print is released.
  */
-async function prepareRemoteOrder(jobId: string, paymentMode: 'online' | 'cash'): Promise<void> {
+export async function preparePayAtShopOrder(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job || job.status !== 'pending_payment') return;
 
@@ -228,10 +228,11 @@ async function prepareRemoteOrder(jobId: string, paymentMode: 'online' | 'cash')
   const updated = await applyTransition(
     jobId,
     'pending_payment',
-    paymentMode === 'cash' ? 'CASH_SELECTED' : 'PAYMENT_CONFIRMED',
+    'CASH_SELECTED',
     { type: 'system' },
     {
-      paymentStatus: paymentMode === 'cash' ? 'cash_due' : 'paid',
+      paymentStatus: 'counter_due',
+      paymentProvider: 'pay_at_shop',
       releaseCodeDigest: codeDigest,
       releaseCodeEncrypted: encryptReleaseCode(job.shopId, code),
       releaseCodeGeneratedAt: new Date(),
@@ -247,33 +248,21 @@ async function prepareRemoteOrder(jobId: string, paymentMode: 'online' | 'cash')
       { delay: Math.max(wakeAt - Date.now(), 0), jobId: `due-${jobId}` },
     );
     await notifyStudent(job.studentId, {
-      title: paymentMode === 'cash' ? 'Cash order prepared ✓' : 'Slot booked ✓',
-      body: paymentMode === 'cash'
-        ? `Your files are ready for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. Pay at the counter before printing.`
-        : `Your files are ready for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. Check in after you physically arrive.`,
+      title: 'Print order prepared ✓',
+      body: `Your files are ready for ${job.scheduledTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}. Check in after you arrive and pay the shop at the counter before printing.`,
       url: `/jobs/${jobId}`,
-      eventKey: `prepared:${jobId}:${paymentMode}`,
+      eventKey: `prepared:${jobId}:pay-at-shop`,
     });
   } else {
     await notifyStudent(job.studentId, {
-      title: paymentMode === 'cash' ? 'Cash order prepared ✓' : 'Paid & ready for arrival ✓',
-      body: paymentMode === 'cash'
-        ? 'Travel when convenient. Check in after arrival, then pay cash when staff verifies your counter code.'
-        : 'Travel when convenient. Tap “I’m at the shop” only after you arrive to join the live walk-in line.',
+      title: 'Print order prepared ✓',
+      body: 'Travel when convenient. Check in only after you arrive, then pay the shop at the counter when staff verifies your counter code.',
       url: `/jobs/${jobId}`,
-      eventKey: `prepared:${jobId}:${paymentMode}`,
+      eventKey: `prepared:${jobId}:pay-at-shop`,
     });
   }
 
   await emitQueueUpdate(job.shopId);
-}
-
-export async function onPaymentConfirmed(jobId: string): Promise<void> {
-  await prepareRemoteOrder(jobId, 'online');
-}
-
-export async function onCashSelected(jobId: string): Promise<void> {
-  await prepareRemoteOrder(jobId, 'cash');
 }
 
 /** Timer handler: remind a scheduled student that their arrival window opened. */
@@ -315,8 +304,10 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
     throw conflict('This order cannot join the live line in its current state');
   }
   const paymentReady = job.paymentStatus === 'paid'
+    || (job.paymentProvider === 'pay_at_shop' && job.paymentStatus === 'counter_due')
+    // Compatibility only for pre-cutover cash orders that must still finish.
     || (job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due');
-  if (!paymentReady) throw conflict('Choose a payment method before check-in');
+  if (!paymentReady) throw conflict('This order is not prepared for counter payment yet');
 
   const locationAge = Date.now() - arrival.measuredAt.getTime();
   if (locationAge < -10_000 || locationAge > MAX_LOCATION_AGE_MS) {
@@ -503,14 +494,15 @@ export async function requeueJob(jobId: string, studentId: string): Promise<Job>
 
 /**
  * Hourly DB-backed safety sweep. It does not rely on a single delayed Redis
- * timer, so restarts cannot leave forgotten paid documents open forever.
+ * timer. It closes only unpaid counter-due documents; a staff-confirmed shop
+ * payment is never silently cancelled or refunded by a timer.
  */
 export async function expireStalePreparedOrders(): Promise<void> {
   const cutoff = new Date(Date.now() - env.PREPARED_ORDER_TTL_HOURS * 3_600_000);
   const stale = await prisma.job.findMany({
     where: {
       status: 'awaiting_arrival',
-      paymentStatus: { in: ['paid', 'cash_due'] },
+      paymentStatus: { in: ['counter_due', 'cash_due'] },
       updatedAt: { lt: cutoff },
     },
     take: 100,
@@ -521,7 +513,7 @@ export async function expireStalePreparedOrders(): Promise<void> {
       'awaiting_arrival',
       'CANCEL',
       { type: 'system' },
-      job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due'
+      ['counter_due', 'cash_due'].includes(job.paymentStatus)
         ? { paymentStatus: 'failed' }
         : {},
     );
@@ -530,9 +522,7 @@ export async function expireStalePreparedOrders(): Promise<void> {
     await scheduleFileDeletion(cancelled.fileId);
     await notifyStudent(cancelled.studentId, {
       title: 'Unused print order closed',
-      body: cancelled.paymentProvider === 'cash'
-        ? `You did not check in within ${env.PREPARED_ORDER_TTL_HOURS / 24} days, so the unpaid cash order was cancelled.`
-        : `You did not check in within ${env.PREPARED_ORDER_TTL_HOURS / 24} days, so the order was cancelled and its refund was started.`,
+      body: `You did not check in within ${env.PREPARED_ORDER_TTL_HOURS / 24} days, so this unpaid pay-at-shop order was cancelled.`,
       url: `/jobs/${cancelled.id}`,
       eventKey: `expired:${cancelled.id}`,
     });
@@ -542,13 +532,14 @@ export async function expireStalePreparedOrders(): Promise<void> {
     });
   }
 
-  // Provider outages can leave terminal jobs paid after the first refund call.
-  // The atomic paid→refunding reservation keeps this retry idempotent.
+  // Legacy online orders may still need their pre-cutover provider refund.
+  // Pay-at-shop refunds require an auditable human confirmation instead.
   const pendingRefunds = await prisma.job.findMany({
     where: {
       status: { in: ['cancelled', 'expired'] },
       paymentStatus: 'paid',
       paymentId: { not: null },
+      paymentProvider: { not: 'pay_at_shop' },
     },
     take: 100,
   });

@@ -1,7 +1,7 @@
 /**
  * Launch-grade E2E: boots the built API and the real PrintQ agent in simulator
- * mode, then proves onboarding -> upload -> payment -> queue -> OTP -> failed
- * print -> one-click retry -> pickup, plus cancellation/refund.
+ * mode, then proves onboarding -> upload -> attended counter payment ->
+ * queue -> code release -> failed print -> retry -> pickup and refunds.
  *
  * Run after `npm run build`, or use `npm run test:launch`.
  */
@@ -115,17 +115,20 @@ async function upload(token, shopSlug, pages, name) {
   return fileId;
 }
 
-async function createAndPay(token, fileId, specs) {
+async function createPayAtShop(token, fileId, specs) {
   const created = await request('/api/jobs', {
     method: 'POST',
     token,
     body: { fileId, specs, mode: 'instant' },
   });
-  assert(created.status === 201 && created.data.job?.id, 'job created');
-  const jobId = created.data.job.id;
-  const paid = await request('/api/payments/mock/confirm', { method: 'POST', token, body: { jobId } });
-  assert(paid.status === 200, 'mock payment confirmed');
-  return jobId;
+  assert(
+    created.status === 201
+      && created.data.job?.id
+      && created.data.checkout?.mode === 'pay_at_shop'
+      && created.data.checkout?.amountPaise === created.data.job.totalPaise,
+    'student receives one server-priced pay-at-shop checkout',
+  );
+  return created.data.job.id;
 }
 
 async function main() {
@@ -169,9 +172,7 @@ async function main() {
     CORS_ORIGINS: 'http://localhost:4173',
     PAYMENT_PROVIDER: 'mock',
     PLATFORM_MARKUP_BPS: '2500',
-    SHOP_PAYOUT_PROVIDER: 'mock',
-    MIN_SHOP_PAYOUT_PAISE: '100',
-    MAX_SHOP_CASH_DEBT_PAISE: '100',
+    SHOP_COLLECTION_MODE: 'disabled',
     SMS_PROVIDER: 'console',
     EMAIL_PROVIDER: 'console',
     // Explicit test-only opt-in. Production configuration rejects this value.
@@ -226,9 +227,20 @@ async function main() {
   const located = await request('/api/shop/me', {
     method: 'PATCH',
     token: shopToken,
-    body: { campusId, latitude: 28.6139, longitude: 77.209, checkInRadiusM: 50, cashPaymentsEnabled: true },
+    body: {
+      campusId,
+      latitude: 28.6139,
+      longitude: 77.209,
+      checkInRadiusM: 50,
+      counterUpiVpa: 'printq-e2e@upi',
+      counterUpiPayeeName: 'PrintQ E2E Shop',
+    },
   });
   assert(located.status === 200 && located.data.shop?.locationUpdatedAt, 'secure arrival zone configured');
+  const verifiedCounterUpi = await request('/api/shop/counter-upi/verify', {
+    method: 'POST', token: shopToken, body: {},
+  });
+  assert(verifiedCounterUpi.status === 200 && verifiedCounterUpi.data.counterUpi?.counterUpiVerifiedAt, 'owner verified the shop merchant UPI payee');
 
   const printerResult = await request('/api/shop/printers', {
     method: 'POST',
@@ -284,7 +296,7 @@ async function main() {
   assert(setup.data.setup?.ready === true, 'setup checklist reports launch-ready');
   const publicShop = await request(`/api/public/shops/${shopSlug}`);
   assert(publicShop.data.shop?.open === true, 'student storefront opens only with a reachable agent');
-  assert(publicShop.data.shop?.cashPaymentsEnabled === true, 'cash is shown only after the shop enables it');
+  assert(!('counterUpiVpa' in publicShop.data.shop), 'merchant UPI payee is visible only on a student’s own order');
   assert(
     publicShop.data.shop?.options?.papers?.every((paper) => !('bwPaise' in paper) && !('colorPaise' in paper)),
     'public storefront never exposes the owner base rate card',
@@ -317,7 +329,7 @@ async function main() {
     !('pagesTotalPaise' in quote.data.quote) && !('bindingPaise' in quote.data.quote),
     'student quote returns only the final payable amount',
   );
-  const jobId = await createAndPay(studentToken, fileId, specs);
+  const jobId = await createPayAtShop(studentToken, fileId, specs);
 
   const prepared = await waitFor('prepared remote order', async () => {
     const result = await request(`/api/jobs/${jobId}`, { token: studentToken });
@@ -325,6 +337,8 @@ async function main() {
   });
   assert(prepared.position === null, 'remote upload does not occupy the physical line');
   assert(prepared.otpCode === null, 'counter code stays hidden before physical check-in');
+  assert(prepared.paymentStatus === 'counter_due', 'upload does not mark counter payment received');
+  assert(prepared.shop.counterUpi?.vpa === 'printq-e2e@upi', 'own order shows the verified shop merchant UPI payee');
   const remoteCheckIn = await request(`/api/jobs/${jobId}/check-in`, {
     method: 'POST',
     token: studentToken,
@@ -339,18 +353,41 @@ async function main() {
   assert(checkedIn.status === 200 && checkedIn.data.job?.status === 'queued', 'arrival check-in joins the live walk-in line');
   const live = await request(`/api/jobs/${jobId}`, { token: studentToken });
   assert(live.data.job.position === 1 && /^\d{6}$/.test(live.data.job.otpCode ?? ''), 'check-in assigns a shop-wide position and automatically reveals the near-front code');
-  const released = await request('/api/shop/release', {
+  const counterPrompt = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
     body: { otp: live.data.job.otpCode },
   });
-  assert(released.status === 200 && released.data.ok, 'counter code dispatches the checked-in job');
+  assert(
+    counterPrompt.status === 200
+      && counterPrompt.data.requiresPaymentConfirmation === true
+      && counterPrompt.data.counterPaymentAmountPaise === 5000,
+    'counter code asks staff to verify the exact final amount before printing',
+  );
+  const beforeCounterPayment = await request(`/api/jobs/${jobId}`, { token: studentToken });
+  assert(beforeCounterPayment.data.job.paymentStatus === 'counter_due' && beforeCounterPayment.data.job.status === 'queued', 'code lookup alone cannot mark payment received or print');
+  const released = await request('/api/shop/release', {
+    method: 'POST',
+    token: shopToken,
+    body: {
+      otp: live.data.job.otpCode,
+      paymentConfirmation: { method: 'cash' },
+      ...(counterPrompt.data.selectedPrinterId ? { printerId: counterPrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  assert(released.status === 200 && released.data.ok, 'staff cash confirmation releases the checked-in job');
 
   await waitFor('simulated first-attempt failure', async () => {
     const result = await request(`/api/jobs/${jobId}`, { token: studentToken });
     return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
   });
   assert(agentOutput.includes('simulated printer jam on first attempt'), 'simulator exercised a printer-jam failure');
+  const beforeSuccessfulPrint = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    beforeSuccessfulPrint.data.earnings?.amountDuePaise === 0
+      && !beforeSuccessfulPrint.data.earnings.entries.some((entry) => entry.jobId === jobId),
+    'a failed spool attempt creates no commission receivable',
+  );
   const retried = await request(`/api/shop/jobs/${jobId}/retry-print`, { method: 'POST', token: shopToken, body: {} });
   assert(retried.status === 200, 'shop retried without asking the student for another OTP');
 
@@ -376,26 +413,16 @@ async function main() {
   const finished = await request(`/api/shop/jobs/${jobId}/finishing-complete`, { method: 'POST', token: shopToken });
   assert(finished.status === 200 && finished.data.job?.status === 'ready_for_pickup', 'staff confirms manual binding before student pickup notification');
 
-  const earned = await waitFor('shop earning credit', async () => {
+  const earned = await waitFor('completed-print commission receivable', async () => {
     const result = await request('/api/shop/earnings', { token: shopToken });
-    return result.data.earnings?.availablePaise === 4000 ? result : null;
+    return result.data.earnings?.entries?.some((entry) => entry.jobId === jobId && entry.type === 'print_commission') ? result : null;
   });
   assert(
     earned.status === 200
-      && earned.data.earnings?.availablePaise === 4000
-      && earned.data.earnings?.pendingPaise === 0
-      && earned.data.earnings?.lifetimeEarnedPaise === 4000,
-    'successful physical print credits exactly the shop-owned ₹40 base',
-  );
-  const payout = await request('/api/shop/earnings/payout', { method: 'POST', token: shopToken });
-  assert(
-    payout.status === 201 && payout.data.payout?.status === 'paid' && payout.data.payout?.amountPaise === 4000,
-    'owner can request one aggregated simulated payout',
-  );
-  const afterPayout = await request('/api/shop/earnings', { token: shopToken });
-  assert(
-    afterPayout.data.earnings?.availablePaise === 0 && afterPayout.data.earnings?.lifetimeEarnedPaise === 4000,
-    'payout reservation prevents double payment without erasing lifetime earnings',
+      && earned.data.earnings?.amountDuePaise === 1000
+      && earned.data.earnings?.entries?.filter((entry) => entry.jobId === jobId && entry.type === 'print_commission').length === 1
+      && earned.data.earnings.entries.find((entry) => entry.jobId === jobId && entry.type === 'print_commission').amountPaise === 1000,
+    'successful physical print posts one ₹10 PrintQs receivable',
   );
 
   const handedOver = await request(`/api/shop/jobs/${jobId}/handover`, { method: 'POST', token: shopToken });
@@ -404,173 +431,141 @@ async function main() {
   assert(completed.data.job.status === 'completed', 'student history shows a completed order');
   assert(!('priceBreakdown' in completed.data.job), 'student order API keeps the private pricing split hidden');
 
-  console.log('\nCash collection and shop settlement journey');
-  const cashSpecs = { copies: 2, paperSize: 'A4', color: false, duplex: false, binding: null, pageRange: '1' };
-  const cashCreated = await request('/api/jobs', {
+  console.log('\nShop UPI counter payment and accounting journey');
+  const upiSpecs = { copies: 2, paperSize: 'A4', color: false, duplex: false, binding: null, pageRange: '1' };
+  const retiredPaymentSelector = await request('/api/jobs', {
     method: 'POST',
     token: studentToken,
-    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+    body: { fileId, specs: upiSpecs, mode: 'instant', paymentMethod: 'online' },
   });
-  assert(
-    cashCreated.status === 201 && cashCreated.data.checkout?.mode === 'cash',
-    'student can prepare a cash order without an online checkout',
-  );
-  const cashJobId = cashCreated.data.job.id;
-  const cashPrepared = await waitFor('prepared cash order', async () => {
-    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  assert(retiredPaymentSelector.status === 400, 'retired student payment selectors are rejected');
+  const upiJobId = await createPayAtShop(studentToken, fileId, upiSpecs);
+  const upiPrepared = await waitFor('prepared shop UPI order', async () => {
+    const result = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
   assert(
-    cashPrepared.paymentStatus === 'cash_due' && cashPrepared.position === null && cashPrepared.otpCode === null,
-    'unpaid cash order stays outside the physical line with its code hidden',
+    upiPrepared.paymentStatus === 'counter_due' && upiPrepared.position === null && upiPrepared.otpCode === null,
+    'unpaid shop UPI order stays outside the physical line with its code hidden',
   );
-  const duplicateCash = await request('/api/jobs', {
-    method: 'POST',
-    token: studentToken,
-    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
-  });
-  assert(duplicateCash.status === 409, 'one active unpaid cash order per student limits counter spam');
-  const cashCheckIn = await request(`/api/jobs/${cashJobId}/check-in`, {
+  const upiCheckIn = await request(`/api/jobs/${upiJobId}/check-in`, {
     method: 'POST',
     token: studentToken,
     body: arrivalProof(),
   });
-  assert(cashCheckIn.status === 200, 'cash order can join only after the same arrival check');
-  const cashLive = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
-  const cashCode = cashLive.data.job.otpCode;
-  assert(/^\d{6}$/.test(cashCode ?? ''), 'cash order code unlocks automatically near the front');
-  const cashReleasePrompt = await request('/api/shop/release', {
+  assert(upiCheckIn.status === 200, 'shop UPI order joins only after arrival check-in');
+  const upiLive = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
+  const upiCode = upiLive.data.job.otpCode;
+  assert(/^\d{6}$/.test(upiCode ?? ''), 'shop UPI order code unlocks automatically near the front');
+  const upiReleasePrompt = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: cashCode },
+    body: { otp: upiCode },
   });
   assert(
-    cashReleasePrompt.status === 200
-      && cashReleasePrompt.data.requiresCashConfirmation === true
-      && cashReleasePrompt.data.cashAmountPaise === cashCreated.data.job.totalPaise,
-    'OTP lookup stops and shows the exact cash amount before printing',
+    upiReleasePrompt.status === 200
+      && upiReleasePrompt.data.requiresPaymentConfirmation === true
+      && upiReleasePrompt.data.counterPaymentAmountPaise === upiLive.data.job.totalPaise,
+    'code lookup asks staff to verify the exact shop UPI receipt amount',
   );
-  const stillUnpaid = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  const stillUnpaid = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
   assert(
-    stillUnpaid.data.job.paymentStatus === 'cash_due' && stillUnpaid.data.job.status === 'queued',
-    'looking up the OTP alone cannot mark cash paid or dispatch the document',
+    stillUnpaid.data.job.paymentStatus === 'counter_due' && stillUnpaid.data.job.status === 'queued',
+    'looking up the code alone cannot mark shop UPI received or dispatch the document',
   );
-  const cashReleased = await request('/api/shop/release', {
+  const upiReleased = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
     body: {
-      otp: cashCode,
-      cashReceived: true,
-      ...(cashReleasePrompt.data.selectedPrinterId ? { printerId: cashReleasePrompt.data.selectedPrinterId } : {}),
+      otp: upiCode,
+      paymentConfirmation: { method: 'shop_upi', reference: 'merchant-app-verified-e2e' },
+      ...(upiReleasePrompt.data.selectedPrinterId ? { printerId: upiReleasePrompt.data.selectedPrinterId } : {}),
     },
   });
-  assert(cashReleased.status === 200 && cashReleased.data.ok, 'staff cash confirmation atomically releases the print');
-  await waitFor('cash print simulated jam', async () => {
-    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  assert(upiReleased.status === 200 && upiReleased.data.ok, 'staff shop UPI confirmation releases the print');
+  await waitFor('shop UPI print simulated jam', async () => {
+    const result = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
     return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
   });
-  const cashRetry = await request(`/api/shop/jobs/${cashJobId}/retry-print`, { method: 'POST', token: shopToken, body: {} });
-  assert(cashRetry.status === 200, 'cash print retains the normal hardware-failure recovery');
-  await waitFor('cash print completion', async () => {
-    const result = await request(`/api/jobs/${cashJobId}`, { token: studentToken });
+  const upiRetry = await request(`/api/shop/jobs/${upiJobId}/retry-print`, { method: 'POST', token: shopToken, body: {} });
+  assert(upiRetry.status === 200, 'shop UPI print retains the hardware-failure recovery');
+  await waitFor('shop UPI print completion', async () => {
+    const result = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
     return result.data.job?.status === 'ready_for_pickup';
   });
-  const cashEarnings = await waitFor('cash settlement ledger', async () => {
+  const upiCommission = await waitFor('cash and shop UPI commission ledger', async () => {
     const result = await request('/api/shop/earnings', { token: shopToken });
-    return result.data.earnings?.amountDuePaise > 0 ? result : null;
+    return result.data.earnings?.entries?.some((entry) => entry.jobId === upiJobId && entry.type === 'print_commission') ? result : null;
   });
-  const cashTotalPaise = cashCreated.data.job.totalPaise;
-  const expectedCashFeePaise = cashTotalPaise - 400;
+  const expectedUpiCommissionPaise = upiLive.data.job.totalPaise - 400;
   assert(
-    cashEarnings.data.earnings.amountDuePaise === expectedCashFeePaise
-      && cashEarnings.data.earnings.availablePaise === 0
-      && cashEarnings.data.earnings.cashCollectedPaise === cashTotalPaise
-      && cashEarnings.data.earnings.entries.some((entry) => entry.type === 'cash_settlement' && entry.amountPaise === -expectedCashFeePaise),
-    'cash retained by the shop creates only the net platform-fee debit',
+    upiCommission.data.earnings.amountDuePaise === 1000 + expectedUpiCommissionPaise
+      && upiCommission.data.earnings.entries.filter((entry) => entry.jobId === upiJobId && entry.type === 'print_commission').length === 1
+      && upiCommission.data.earnings.entries.some((entry) => entry.jobId === upiJobId && entry.amountPaise === expectedUpiCommissionPaise),
+    'cash and shop UPI both create one post-print commission receivable',
   );
-  const cashPausedByDebt = await request(`/api/public/shops/${shopSlug}`);
-  assert(cashPausedByDebt.data.shop?.cashPaymentsEnabled === false, 'cash option pauses automatically at the shop credit limit');
-  const debtLimitedCash = await request('/api/jobs', {
-    method: 'POST',
-    token: studentToken,
-    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
-  });
-  assert(debtLimitedCash.status === 409, 'server rejects new cash exposure while the settlement limit is reached');
-  const dueOrder = await request('/api/shop/earnings/pay-due', { method: 'POST', token: shopToken });
-  assert(dueOrder.status === 201 && dueOrder.data.checkout?.mode === 'mock', 'owner can open one aggregated amount-due payment');
-  const dueConfirm = await request('/api/shop/earnings/pay-due/mock-confirm', {
-    method: 'POST',
-    token: shopToken,
-    body: { balancePaymentId: dueOrder.data.balancePayment.id },
-  });
-  assert(dueConfirm.status === 200, 'test settlement confirmation is accepted');
-  const afterCashSettlement = await request('/api/shop/earnings', { token: shopToken });
-  assert(
-    afterCashSettlement.data.earnings.amountDuePaise === 0
-      && afterCashSettlement.data.earnings.availablePaise === 0,
-    'captured shop payment clears the amount due exactly once',
-  );
-  const duplicateDueConfirm = await request('/api/shop/earnings/pay-due/mock-confirm', {
-    method: 'POST',
-    token: shopToken,
-    body: { balancePaymentId: dueOrder.data.balancePayment.id },
-  });
-  const afterDuplicateSettlement = await request('/api/shop/earnings', { token: shopToken });
-  assert(
-    duplicateDueConfirm.status === 200 && afterDuplicateSettlement.data.earnings.settlementBalancePaise === 0,
-    'duplicate provider confirmation cannot credit the shop twice',
-  );
-  await request(`/api/shop/jobs/${cashJobId}/handover`, { method: 'POST', token: shopToken });
-  const cashRestored = await request(`/api/public/shops/${shopSlug}`);
-  assert(cashRestored.data.shop?.cashPaymentsEnabled === true, 'cash option returns automatically after the shop settles its balance');
+  await request(`/api/shop/jobs/${upiJobId}/handover`, { method: 'POST', token: shopToken });
 
-  const returnCashCreated = await request('/api/jobs', {
-    method: 'POST',
-    token: studentToken,
-    body: { fileId, specs: cashSpecs, mode: 'instant', paymentMethod: 'cash' },
+  const supportRefund = await request(`/api/admin/jobs/${jobId}/confirm-counter-refund`, {
+    method: 'POST', token: adminToken,
+    body: { studentConfirmed: true, method: 'cash', reason: 'E2E support verified the student and full cash return' },
   });
-  const returnCashJobId = returnCashCreated.data.job.id;
-  await waitFor('cash-return order prepared', async () => {
-    const result = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
+  assert(supportRefund.status === 200 && supportRefund.data.job?.paymentStatus === 'refunded', 'support records the completed-job refund after student confirmation');
+  const duplicateSupportRefund = await request(`/api/admin/jobs/${jobId}/confirm-counter-refund`, {
+    method: 'POST', token: adminToken,
+    body: { studentConfirmed: true, method: 'cash', reason: 'Duplicate E2E refund must not create another credit' },
+  });
+  assert(duplicateSupportRefund.status === 409, 'completed-job refund cannot be credited twice');
+  const afterSupportRefund = await request('/api/shop/earnings', { token: shopToken });
+  assert(
+    afterSupportRefund.data.earnings.amountDuePaise === expectedUpiCommissionPaise
+      && afterSupportRefund.data.earnings.entries.filter((entry) => entry.jobId === jobId && entry.type === 'refund_credit').length === 1
+      && afterSupportRefund.data.earnings.entries.some((entry) => entry.jobId === jobId && entry.type === 'refund_credit' && entry.amountPaise === -1000),
+    'support refund posts one reversing credit with zero unexplained paise',
+  );
+
+  const returnJobId = await createPayAtShop(studentToken, fileId, upiSpecs);
+  await waitFor('counter-return order prepared', async () => {
+    const result = await request(`/api/jobs/${returnJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival';
   });
-  await request(`/api/jobs/${returnCashJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
-  const returnCashLive = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
-  const returnCashPrompt = await request('/api/shop/release', {
+  await request(`/api/jobs/${returnJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
+  const returnLive = await request(`/api/jobs/${returnJobId}`, { token: studentToken });
+  const returnPrompt = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: returnCashLive.data.job.otpCode },
+    body: { otp: returnLive.data.job.otpCode },
   });
   await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
     body: {
-      otp: returnCashLive.data.job.otpCode,
-      cashReceived: true,
-      ...(returnCashPrompt.data.selectedPrinterId ? { printerId: returnCashPrompt.data.selectedPrinterId } : {}),
+      otp: returnLive.data.job.otpCode,
+      paymentConfirmation: { method: 'cash' },
+      ...(returnPrompt.data.selectedPrinterId ? { printerId: returnPrompt.data.selectedPrinterId } : {}),
     },
   });
-  await waitFor('cash-return simulated failure', async () => {
-    const result = await request(`/api/jobs/${returnCashJobId}`, { token: studentToken });
+  await waitFor('counter-return simulated failure', async () => {
+    const result = await request(`/api/jobs/${returnJobId}`, { token: studentToken });
     return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
   });
-  const cashReturned = await request(`/api/shop/jobs/${returnCashJobId}/cash-returned`, { method: 'POST', token: shopToken });
+  const counterReturned = await request(`/api/shop/jobs/${returnJobId}/counter-payment-returned`, { method: 'POST', token: shopToken, body: {} });
   assert(
-    cashReturned.status === 200
-      && cashReturned.data.job?.status === 'cancelled'
-      && cashReturned.data.job?.paymentStatus === 'refunded',
-    'staff can close an unrecoverable print only after recording the physical cash return',
+    counterReturned.status === 200
+      && counterReturned.data.job?.status === 'cancelled'
+      && counterReturned.data.job?.paymentStatus === 'refunded',
+    'staff closes a failed print after recording the full counter payment return',
   );
-  const afterCashReturn = await request('/api/shop/earnings', { token: shopToken });
+  const afterCounterReturn = await request('/api/shop/earnings', { token: shopToken });
   assert(
-    !afterCashReturn.data.earnings.entries.some((entry) => entry.jobId === returnCashJobId),
-    'returned cash from an unprinted job never creates shop earnings or platform debt',
+    !afterCounterReturn.data.earnings.entries.some((entry) => entry.jobId === returnJobId),
+    'unprinted refunded job creates no PrintQs commission',
   );
 
   console.log('\nLate arrival, skip-safe counter lookup and refund journey');
   const queueFileId = await upload(studentToken, shopSlug, 1, 'arrival-model-test.pdf');
-  const missedJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
-  const waitingJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const missedJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const waitingJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   await waitFor('first prepared arrival order', async () => {
     const result = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
@@ -584,7 +579,7 @@ async function main() {
   assert(beforeSkipA.data.job.position === 1 && beforeSkipB.data.job.position === 2, 'arrivals receive one unambiguous shop-wide order');
 
   const skipped = await request(`/api/shop/jobs/${missedJobId}/no-show`, { method: 'POST', token: shopToken });
-  assert(skipped.status === 200 && skipped.data.job?.status === 'awaiting_arrival', 'shop removes an absent student without cancelling the paid order');
+  assert(skipped.status === 200 && skipped.data.job?.status === 'awaiting_arrival', 'shop removes an absent student without cancelling the prepared order');
   const afterSkipA = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
   const afterSkipB = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
   assert(afterSkipA.data.job.position === null && afterSkipA.data.job.otpCode === beforeSkipA.data.job.otpCode, 'skipped order keeps its stable counter code outside the line');
@@ -595,7 +590,27 @@ async function main() {
     token: shopToken,
     body: { otp: beforeSkipA.data.job.otpCode },
   });
-  assert(outOfOrderRelease.status === 200 && outOfOrderRelease.data.ok, 'counter code prints a skipped order without rejoining or blocking anyone');
+  assert(
+    outOfOrderRelease.status === 200
+      && outOfOrderRelease.data.requiresQueueOverride === true
+      && outOfOrderRelease.data.position === null,
+    'skipped-order release requires a visible out-of-order warning',
+  );
+  const overridePaymentPrompt = await request('/api/shop/release', {
+    method: 'POST', token: shopToken,
+    body: { otp: beforeSkipA.data.job.otpCode, overrideQueue: true },
+  });
+  assert(overridePaymentPrompt.status === 200 && overridePaymentPrompt.data.requiresPaymentConfirmation, 'queue override still requires attended payment confirmation');
+  const overriddenRelease = await request('/api/shop/release', {
+    method: 'POST', token: shopToken,
+    body: {
+      otp: beforeSkipA.data.job.otpCode,
+      overrideQueue: true,
+      paymentConfirmation: { method: 'cash' },
+      ...(overridePaymentPrompt.data.selectedPrinterId ? { printerId: overridePaymentPrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  assert(overriddenRelease.status === 200 && overriddenRelease.data.ok, 'staff overrides and pays a skipped order without blocking the live line');
   await waitFor('second simulated first-attempt failure', async () => {
     const result = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
     return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
@@ -609,13 +624,15 @@ async function main() {
   await request(`/api/shop/jobs/${missedJobId}/handover`, { method: 'POST', token: shopToken });
 
   const cancelled = await request(`/api/jobs/${waitingJobId}/cancel`, { method: 'POST', token: studentToken });
-  assert(cancelled.status === 200, 'student can cancel a checked-in order before release');
+  assert(cancelled.status === 200, 'student can cancel an unpaid checked-in order before release');
   const duplicateCancel = await request(`/api/jobs/${waitingJobId}/cancel`, { method: 'POST', token: studentToken });
   assert(duplicateCancel.status === 409, 'duplicate cancellation cannot trigger a second refund');
-  const refunded = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
-  assert(refunded.data.job.paymentStatus === 'refunded', 'payment was refunded exactly once');
+  const unpaidCancelled = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
+  assert(unpaidCancelled.data.job.paymentStatus === 'failed', 'unpaid cancellation does not invent a refund');
+  const afterUnpaidCancel = await request('/api/shop/earnings', { token: shopToken });
+  assert(!afterUnpaidCancel.data.earnings.entries.some((entry) => entry.jobId === waitingJobId), 'unprinted cancellation creates no commission');
 
-  const remoteCancelJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const remoteCancelJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   await waitFor('prepared cancellation order', async () => {
     const result = await request(`/api/jobs/${remoteCancelJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival';
@@ -624,8 +641,8 @@ async function main() {
   assert(remoteCancelled.status === 200, 'remote prepared order can be cancelled before arrival');
 
   console.log('\nShop closing and existing-order protection');
-  const closingJobId = await createAndPay(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
-  await waitFor('existing paid order before pause', async () => {
+  const closingJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  await waitFor('existing prepared order before pause', async () => {
     const result = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
   });
@@ -642,7 +659,7 @@ async function main() {
     token: studentToken,
     body: arrivalProof(),
   });
-  assert(honoredCheckIn.status === 200 && honoredCheckIn.data.job?.status === 'queued', 'already-paid order can still check in after new sales pause');
+  assert(honoredCheckIn.status === 200 && honoredCheckIn.data.job?.status === 'queued', 'existing prepared order can still check in after new sales pause');
   const closingLive = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
   const blockedQuote = await request('/api/jobs/quote', {
     method: 'POST',
@@ -650,12 +667,21 @@ async function main() {
     body: { fileId: queueFileId, specs: { ...specs, copies: 1, color: false, binding: null, pageRange: null } },
   });
   assert(blockedQuote.status === 409, 'paused shop cannot start a new checkout');
-  const honoredRelease = await request('/api/shop/release', {
+  const honoredPrompt = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
     body: { otp: closingLive.data.job.otpCode },
   });
-  assert(honoredRelease.status === 200 && honoredRelease.data.ok, 'existing counter code still prints while new sales are paused');
+  assert(honoredPrompt.status === 200 && honoredPrompt.data.requiresPaymentConfirmation, 'paused shop still prompts for payment on an existing order');
+  const honoredRelease = await request('/api/shop/release', {
+    method: 'POST', token: shopToken,
+    body: {
+      otp: closingLive.data.job.otpCode,
+      paymentConfirmation: { method: 'cash' },
+      ...(honoredPrompt.data.selectedPrinterId ? { printerId: honoredPrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  assert(honoredRelease.status === 200 && honoredRelease.data.ok, 'existing counter code prints after staff payment confirmation while sales are paused');
   await waitFor('paused-storefront simulated jam', async () => {
     const result = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
     return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
@@ -666,7 +692,7 @@ async function main() {
     const result = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
     return result.data.job?.status === 'ready_for_pickup';
   });
-  assert(true, 'existing paid order completed while new sales stayed paused');
+  assert(true, 'existing counter-paid order completed while new sales stayed paused');
   await request(`/api/shop/jobs/${closingJobId}/handover`, { method: 'POST', token: shopToken });
   const reopened = await request('/api/shop/availability', {
     method: 'PATCH',

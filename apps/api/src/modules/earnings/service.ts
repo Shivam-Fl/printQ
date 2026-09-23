@@ -58,7 +58,12 @@ export async function creditPrintEarning(jobId: string): Promise<void> {
       paymentProvider: true,
     },
   });
-  if (!job || !POST_PRINT_STATUSES.includes(job.status as (typeof POST_PRINT_STATUSES)[number]) || job.paymentStatus !== 'paid') return;
+  if (
+    !job
+    || job.paymentProvider === 'pay_at_shop'
+    || !POST_PRINT_STATUSES.includes(job.status as (typeof POST_PRINT_STATUSES)[number])
+    || job.paymentStatus !== 'paid'
+  ) return;
   if (job.shopBasePaise <= 0) {
     logger.error({ jobId }, 'shop_earning_missing_base_snapshot');
     return;
@@ -88,6 +93,7 @@ export async function reconcilePrintEarnings(): Promise<void> {
     where: {
       status: { in: [...POST_PRINT_STATUSES] },
       paymentStatus: 'paid',
+      paymentProvider: { not: 'pay_at_shop' },
       shopBasePaise: { gt: 0 },
       ledgerEntries: { none: { type: { in: ['print_earning', 'cash_settlement'] } } },
     },

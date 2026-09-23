@@ -45,6 +45,12 @@ const campusPatchSchema = z.object({
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
+const counterRefundSchema = z.object({
+  studentConfirmed: z.literal(true),
+  method: z.enum(['cash', 'shop_upi']),
+  reason: z.string().trim().min(10).max(2_000),
+  reference: z.string().trim().min(1).max(120).optional(),
+}).strict();
 
 function canonicalSlug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 100);
@@ -270,6 +276,89 @@ adminRouter.post(
       return updated;
     });
     res.json({ shop: unpublished });
+  }),
+);
+
+/**
+ * Record a support-confirmed full counter-payment refund after a printed job.
+ * The support/admin operator must verify the student and actual return. This
+ * route does not move funds; it freezes the audit evidence and reverses the
+ * single PrintQs receivable in the authoritative PostgreSQL ledger.
+ */
+adminRouter.post(
+  '/jobs/:id/confirm-counter-refund',
+  requireAdmin,
+  validateBody(counterRefundSchema),
+  asyncHandler(async (req, res) => {
+    const jobId = param(req, 'id');
+    const { studentConfirmed, method, reason, reference } = req.body as z.infer<typeof counterRefundSchema>;
+    if (!studentConfirmed) throw badRequest('Student/support confirmation is required');
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Job" WHERE "id" = ${jobId} FOR UPDATE`;
+      const job = await tx.job.findUnique({ where: { id: jobId } });
+      if (!job) throw notFound();
+      if (job.paymentProvider !== 'pay_at_shop' || job.paymentStatus !== 'paid' || !job.counterPaymentConfirmedAt) {
+        throw conflict('Only a staff-confirmed pay-at-shop order can be refunded here');
+      }
+      if (!job.printConfirmedAt || !['finishing', 'ready_for_pickup', 'completed'].includes(job.status)) {
+        throw conflict('This support refund route is for a physically printed order; failed unprinted orders use the counter-return action');
+      }
+      if (job.refundConfirmedAt) throw conflict('A refund has already been recorded');
+      const commission = await tx.shopCommissionEntry.findUnique({
+        where: { jobId_type: { jobId, type: 'print_commission' } },
+      });
+      if (!commission) throw conflict('The completed-print commission entry is missing; reconcile it before refunding');
+
+      const now = new Date();
+      await tx.job.update({
+        where: { id: jobId },
+        data: {
+          paymentStatus: 'refunded',
+          refundConfirmedAt: now,
+          refundConfirmedByAdminId: req.admin!.id,
+          refundAmountPaise: job.counterPaymentAmountPaise ?? job.totalPaise,
+          refundReason: reason,
+          refundReference: reference ?? null,
+        },
+      });
+      await tx.shopCommissionEntry.create({
+        data: {
+          shopId: job.shopId,
+          jobId,
+          type: 'refund_credit',
+          amountPaise: -commission.amountPaise,
+          description: 'Support-confirmed full student refund; commission receivable reversed',
+        },
+      });
+      await tx.paymentEvent.create({
+        data: {
+          provider: 'pay_at_shop',
+          providerEventId: `counter_refund_${jobId}`,
+          jobId,
+          payload: {
+            confirmedByAdminId: req.admin!.id,
+            returnedByMethod: method,
+            amountPaise: job.counterPaymentAmountPaise ?? job.totalPaise,
+            reason,
+            reference: reference ?? null,
+          },
+        },
+      });
+      await tx.adminAuditEvent.create({
+        data: audit(req.admin!.id, 'job.counter_payment_refunded', 'job', jobId, {
+          shopId: job.shopId,
+          amountPaise: job.counterPaymentAmountPaise ?? job.totalPaise,
+          method,
+          reference: reference ?? null,
+          reason,
+          reversedCommissionPaise: commission.amountPaise,
+        }),
+      });
+      return { jobId, paymentStatus: 'refunded' as const };
+    }, { isolationLevel: 'Serializable' });
+
+    res.json({ ok: true, job: result });
   }),
 );
 

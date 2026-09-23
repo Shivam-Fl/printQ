@@ -17,7 +17,8 @@ import {
   reconcileFileDeletionSchedules,
 } from './conversion.js';
 import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
-import { reconcilePrintEarnings, runPayoutSweep } from '../modules/earnings/service.js';
+import { reconcileVerifiedPrintCommissions } from '../modules/commission/service.js';
+import { freezeCompletedWeeklyStatements } from '../modules/commission/statementService.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
 import { publishPendingRealtimeProjections } from '../realtime/projections.js';
 import { publishPendingFirebaseNotifications } from '../providers/fcm/outbox.js';
@@ -97,14 +98,14 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
       async (job) => {
         if (job.name === 'cleanup') {
           await expireStalePreparedOrders();
-          await reconcilePrintEarnings();
+          await reconcileVerifiedPrintCommissions();
         }
         else if (job.name === 'fileRetention') {
           await reconcileFileDeletionSchedules();
           await cleanupExpiredFiles();
         }
         else if (job.name === 'staleAgents') await detectStaleAgents();
-        else if (job.name === 'payoutSweep') await runPayoutSweep();
+        else if (job.name === 'weeklyStatements') await freezeCompletedWeeklyStatements();
         else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
         else if (job.name === 'firebaseNotifications') await publishPendingFirebaseNotifications();
       },
@@ -116,7 +117,12 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     // scheduler/outage gaps and guarantees no old hourly retention behaviour.
     await maintenanceQueue.upsertJobScheduler('file-retention-minute', { every: 60_000 }, { name: 'fileRetention' });
     await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 60_000 }, { name: 'staleAgents' });
-    await maintenanceQueue.upsertJobScheduler('payout-sweep', { every: 3_600_000 }, { name: 'payoutSweep' });
+    // The unique shop/week constraint makes the hourly trigger safe; it only
+    // freezes the prior completed IST week and cannot debit or notify anyone.
+    await maintenanceQueue.upsertJobScheduler('weekly-statements', { every: 3_600_000 }, { name: 'weeklyStatements' });
+    // Remove the retired daily Route-payout scheduler. Weekly commission
+    // collection gets its own TEST-only statement worker after mandate QA.
+    await maintenanceQueue.removeJobScheduler('payout-sweep').catch(() => undefined);
     // The worker is a no-op until the explicitly isolated Firebase projection
     // target is enabled. Once enabled, it repairs temporary Firebase outages
     // from PostgreSQL's durable transactional outbox.
