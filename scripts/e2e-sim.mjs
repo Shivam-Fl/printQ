@@ -238,7 +238,7 @@ async function main() {
   });
   assert(located.status === 200 && located.data.shop?.locationUpdatedAt, 'secure arrival zone configured');
   const verifiedCounterUpi = await request('/api/shop/counter-upi/verify', {
-    method: 'POST', token: shopToken, body: {},
+    method: 'POST', token: shopToken, body: { merchantAppChecked: true },
   });
   assert(verifiedCounterUpi.status === 200 && verifiedCounterUpi.data.counterUpi?.counterUpiVerifiedAt, 'owner verified the shop merchant UPI payee');
 
