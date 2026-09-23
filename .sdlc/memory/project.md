@@ -7,12 +7,11 @@ and a wrong entry here steers every ticket wrong.
 node · 279 tracked files
 
 ## Top-level layout
-- `Dockerfile/`
-- `apps/`
-- `bin/`
-- `packages/`
-- `scripts/`
-- `vibe-to-production-skill/`
+- `apps/` — product code: `api`, `web`, `agent`
+- `packages/` — shared code (e.g. `shared` for `computePrice`)
+- `bin/`, `.sdlc/`, `vibe-to-production-skill/` — pipeline tooling, not product code
+- `scripts/` — CI/dev scripts (e.g. `run-ci-tests.mjs`)
+- `Dockerfile` (file, not a dir), `docker-compose.yml`, `render.yaml`, `vercel.json` — deploy
 
 ## Commands
 - typecheck: `npm run typecheck`
@@ -20,8 +19,8 @@ node · 279 tracked files
 - build: `npm run build`
 
 ## Non-obvious
-_Empty. This is the most valuable section and a scan cannot write it._
-
-Add what a newcomer gets wrong: which module owns what, the abstraction that looks
-redundant but is not, the test that is slow for a reason, the service that must be running
-locally. The Librarian appends here as the system learns, but it starts from what you write.
+- `.sdlc/`, `bin/sdlc`, and `vibe-to-production-skill/` are the AI-SDLC pipeline that
+  built/reviews this repo — not printQ product code. A ticket about the print-queue product
+  touches `apps/` and `packages/`; don't confuse pipeline bugs with product bugs.
+- Root `package.json` has no runtime `dependencies` — see [conventions.md](conventions.md) for
+  why (`js-yaml` reverted in #7). Don't take a bare npm workspace as license to add one casually.
