@@ -661,22 +661,42 @@ async function main() {
   });
   assert(honoredCheckIn.status === 200 && honoredCheckIn.data.job?.status === 'queued', 'existing prepared order can still check in after new sales pause');
   const closingLive = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
+  assert(/^\d{6}$/.test(closingLive.data.job?.otpCode ?? ''), 'existing checked-in order retains its counter code while sales are paused');
   const blockedQuote = await request('/api/jobs/quote', {
     method: 'POST',
     token: studentToken,
     body: { fileId: queueFileId, specs: { ...specs, copies: 1, color: false, binding: null, pageRange: null } },
   });
   assert(blockedQuote.status === 409, 'paused shop cannot start a new checkout');
-  const honoredPrompt = await request('/api/shop/release', {
+  const releaseOptions = { otp: closingLive.data.job.otpCode };
+  let honoredPrompt = await request('/api/shop/release', {
     method: 'POST',
     token: shopToken,
-    body: { otp: closingLive.data.job.otpCode },
+    body: releaseOptions,
   });
-  assert(honoredPrompt.status === 200 && honoredPrompt.data.requiresPaymentConfirmation, 'paused shop still prompts for payment on an existing order');
+  if (honoredPrompt.data.requiresQueueOverride) {
+    // Pausing new sales does not waive the normal out-of-order warning for an
+    // existing job if another checked-in student is ahead of it.
+    assert(honoredPrompt.status === 200, 'paused shop shows the required queue warning');
+    releaseOptions.overrideQueue = true;
+    honoredPrompt = await request('/api/shop/release', { method: 'POST', token: shopToken, body: releaseOptions });
+  }
+  if (honoredPrompt.data.requiresManualAssignment) {
+    const eligiblePrinter = honoredPrompt.data.eligiblePrinters?.[0]?.printerId;
+    assert(honoredPrompt.status === 200 && eligiblePrinter, 'existing order can choose a connected printer while new sales are paused');
+    releaseOptions.printerId = eligiblePrinter;
+    honoredPrompt = await request('/api/shop/release', { method: 'POST', token: shopToken, body: releaseOptions });
+  }
+  assert(
+    honoredPrompt.status === 200
+      && honoredPrompt.data.requiresPaymentConfirmation === true
+      && honoredPrompt.data.counterPaymentAmountPaise === closingLive.data.job.totalPaise,
+    `paused shop prompts for the exact counter payment on an existing order (status ${honoredPrompt.status}, queue override ${Boolean(honoredPrompt.data.requiresQueueOverride)}, manual assignment ${Boolean(honoredPrompt.data.requiresManualAssignment)})`,
+  );
   const honoredRelease = await request('/api/shop/release', {
     method: 'POST', token: shopToken,
     body: {
-      otp: closingLive.data.job.otpCode,
+      ...releaseOptions,
       paymentConfirmation: { method: 'cash' },
       ...(honoredPrompt.data.selectedPrinterId ? { printerId: honoredPrompt.data.selectedPrinterId } : {}),
     },
