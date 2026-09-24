@@ -1,0 +1,61 @@
+# Agent 8 — Release. Mostly mechanical; a model only for changelog prose.
+name: sdlc-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr: { required: true, type: string }
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Kill switch
+        run: node .sdlc/bin/sdlc-ctl.mjs guard
+      # Works in a repo with no package.json: install the repo's own deps when there is a
+      # manifest, then make sure the framework's single dependency is available either way.
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      - name: Runtime args from config
+        id: rt
+        run: node .sdlc/bin/claude-args.mjs release
+
+      - name: Changelog and docs
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Passed explicitly so the action does NOT try to exchange its OIDC token for a
+          # GitHub App token — that path 401s unless the Claude GitHub App is installed on
+          # the repo, and requiring an App install would make this framework harder to clone.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Every stage dispatches the next, so all but the first agent run is initiated by
+          # github-actions[bot]. The action refuses bot-initiated runs by default — a sensible
+          # guard against bot loops, and one that blocks an automated pipeline entirely.
+          # Scoped to github-actions rather than "*": a workflow WE dispatched, not any bot.
+          allowed_bots: "github-actions"
+          claude_args: ${{ steps.rt.outputs.args }}
+          prompt: |
+            Follow .sdlc/agents/release.md exactly for merged PR #${{ inputs.pr }}.
+
+            Write the changelog entry for someone USING the software, not someone reading the
+            diff: "Fixed sessions being lost after signing in with Google", never
+            "patched SameSite in session.ts".
+
+            If the work order touched documented behaviour, update the docs in the same commit.
+            Never rewrite history on main. Never tag when CI on main is red.

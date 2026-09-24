@@ -15,8 +15,12 @@ const PRE_PRINT_STATUSES = [
   'requeued',
   'otp_verified',
   'printing',
-  'finishing',
 ] as const;
+
+// Physical printing is final before a human performs binding/stapling. A
+// finishing job has already met the only condition for its immutable earning;
+// it must not be deferred until pickup or a later manual step.
+const POST_PRINT_STATUSES = ['finishing', 'ready_for_pickup', 'completed'] as const;
 
 /** Ledger balance including cash orders whose print has not completed yet. */
 export async function getProjectedCashSettlementBalance(shopId: string): Promise<number> {
@@ -54,7 +58,12 @@ export async function creditPrintEarning(jobId: string): Promise<void> {
       paymentProvider: true,
     },
   });
-  if (!job || !['ready_for_pickup', 'completed'].includes(job.status) || job.paymentStatus !== 'paid') return;
+  if (
+    !job
+    || job.paymentProvider === 'pay_at_shop'
+    || !POST_PRINT_STATUSES.includes(job.status as (typeof POST_PRINT_STATUSES)[number])
+    || job.paymentStatus !== 'paid'
+  ) return;
   if (job.shopBasePaise <= 0) {
     logger.error({ jobId }, 'shop_earning_missing_base_snapshot');
     return;
@@ -82,8 +91,9 @@ export async function creditPrintEarning(jobId: string): Promise<void> {
 export async function reconcilePrintEarnings(): Promise<void> {
   const missing = await prisma.job.findMany({
     where: {
-      status: { in: ['ready_for_pickup', 'completed'] },
+      status: { in: [...POST_PRINT_STATUSES] },
       paymentStatus: 'paid',
+      paymentProvider: { not: 'pay_at_shop' },
       shopBasePaise: { gt: 0 },
       ledgerEntries: { none: { type: { in: ['print_earning', 'cash_settlement'] } } },
     },
@@ -97,7 +107,7 @@ export async function getShopEarnings(shopId: string) {
   const [balance, lifetime, cashCollected, pending, shop, entries, payouts, balancePayments] = await Promise.all([
     prisma.shopLedgerEntry.aggregate({ where: { shopId }, _sum: { amountPaise: true } }),
     prisma.job.aggregate({
-      where: { shopId, paymentStatus: 'paid', status: { in: ['ready_for_pickup', 'completed'] } },
+      where: { shopId, paymentStatus: 'paid', status: { in: [...POST_PRINT_STATUSES] } },
       _sum: { shopBasePaise: true },
     }),
     prisma.job.aggregate({

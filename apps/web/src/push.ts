@@ -1,8 +1,9 @@
 import { api } from './api.js';
+import { firebaseMessagingEnabled, firebaseMessagingWorkerQuery } from './firebaseConfig.js';
 
 export function registerServiceWorker(): void {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    navigator.serviceWorker.register(`/sw.js${firebaseMessagingWorkerQuery()}`).catch(() => undefined);
   }
 }
 
@@ -29,6 +30,8 @@ function base64ToUint8(base64: string): Uint8Array<ArrayBuffer> {
 export async function enablePush(): Promise<boolean> {
   if (!pushSupported()) return false;
   try {
+    if (firebaseMessagingEnabled) return enableFirebaseMessaging();
+
     const { enabled, key } = await api<{ enabled: boolean; key: string | null }>(
       '/api/push/vapid-public-key',
     );
@@ -54,4 +57,21 @@ export async function enablePush(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function enableFirebaseMessaging(): Promise<boolean> {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return false;
+
+  const registration = await navigator.serviceWorker.ready;
+  const { getFirebaseMessagingToken } = await import('./firebasePhoneAuth.js');
+  const token = await getFirebaseMessagingToken(registration);
+  if (!token) return false;
+
+  await api('/api/push/fcm-subscribe', {
+    method: 'POST',
+    role: 'student',
+    body: { token },
+  });
+  return true;
 }

@@ -1,0 +1,192 @@
+# Written by `sdlc install` from a scan of this repo. Every value below is a starting
+# point, not a fact — read it before you trust the pipeline with anything.
+#
+# Detected stack: node
+#   - preview mode assumed — QA waits for a deployment_status event. If this repo has no per-PR preview deploys, switch env.mode to compose.
+#   - npm workspaces detected (packages/*, apps/*). Monorepos usually need codegen or a shared package built before typecheck will run — set verify.prepare, or every check fails for reasons unrelated to the PR.
+#   - this repo already has 2 workflow(s) (agent-release.yml, ci.yml), so verify.mode is set to "existing" — the pipeline waits for those checks rather than duplicating them. Set verify.required_checks to the job names that must pass, or leave it empty to wait for all of them.
+
+runtime:
+  # Model per STEP. Empty = the action's default. Council members inherit their stage.
+  # Spend where a mistake is hardest to recover from: the diagnosis every later stage
+  # inherits, and the last read before code is trusted.
+  model:
+    plan:               claude-opus-5
+    plan_proposer:      ""
+    plan_critic:        ""
+    plan_arbiter:       claude-opus-5
+    plan_reviewer:      claude-opus-5
+    debug:              claude-opus-5
+    implement:          ""
+    review:             claude-opus-5
+    review_correctness: ""
+    review_design:      ""
+    qa:                 ""
+    root_cause:         ""
+    librarian:          ""
+    release:            ""
+
+  max_turns:
+    plan: 40
+    plan_proposer: 40
+    plan_critic: 40
+    plan_arbiter: 40
+    plan_reviewer: 30
+    debug: 60
+    implement: 60
+    review: 40
+    review_correctness: 40
+    review_design: 40
+    qa: 120
+    root_cause: 40
+    librarian: 50
+    release: 25
+
+# single = one agent. council = several in sequence, each reading the last one's output.
+# A council costs roughly 3x the turns. Start single; switch the stage that actually
+# produces bad output.
+councils:
+  plan:   single           # single | council
+  review: single           # single | council
+
+# Bugs go to the debugger, which reproduces in a live browser before diagnosing.
+base_branch: "development"   # printQ integrates here; master is the released state
+
+route_bugs_to_debugger: true
+
+# The environment QA drives. url_allowlist is the guard that stops an agent clicking
+# through production — QA refuses to open a browser against anything not matching it.
+env:
+  # compose, not preview. printQ's Vercel previews build only apps/web and inherit
+  # VITE_API_URL, so a preview page would pass a *.vercel.app host check while every order QA
+  # places lands in a real shop's print queue. QA is adversarial by design — it double-submits
+  # and probes permission boundaries — so it gets a stack it is free to wreck.
+  mode: compose
+  base_url: "http://localhost:5173"
+  url_allowlist: ["localhost:*"]
+  api_allowlist: ["localhost:*"]   # nothing may leave the runner
+  ready: "/"
+  ready_timeout_seconds: 600   # docker pull + migrate + seed + two vite/tsx servers
+
+  # Infra in docker, app on the host — the layout docker-compose.yml already assumes.
+  # Every value here is a throwaway for an ephemeral database that is destroyed with the
+  # runner; none of it is a secret, which is the point of running QA this way.
+  boot: |
+    set -e
+    cat > .env <<'ENVEOF'
+    NODE_ENV=development
+    PORT=4000
+    CORS_ORIGINS=http://localhost:5173
+    PUBLIC_WEB_URL=http://localhost:5173
+    DATABASE_URL=postgresql://printq:printq_dev_only@localhost:15432/printq
+    REDIS_URL=redis://localhost:6380
+    JWT_SECRET=ci_only_not_a_secret_0000000000000000000000000000000000000000
+    OTP_PEPPER=ci_only_not_a_secret_00000000000
+    STUDENT_AUTH_PROVIDER=local
+    SMS_PROVIDER=console
+    STORAGE_DRIVER=local
+    STORAGE_LOCAL_DIR=./storage
+    VITE_API_URL=http://localhost:4000
+    SEED_OWNER_PASSWORD=ci-owner-pass-1
+    ENVEOF
+    docker compose up -d postgres redis
+    until docker compose exec -T postgres pg_isready -U printq >/dev/null 2>&1; do sleep 2; done
+    npm run db:generate -w apps/api
+    npm run build -w packages/shared
+    npx --yes prisma migrate deploy --schema apps/api/prisma/schema.prisma
+    npm run db:seed -w apps/api
+    npm run dev:api > /tmp/printq-api.log 2>&1 &
+    npm run dev:web > /tmp/printq-web.log 2>&1 &
+
+debug_env:
+  # Reported printQ bugs live in production, with that shop's data and that student's order.
+  # The debugger is allowed there because it cannot do its job otherwise. QA is not, because
+  # its job is to break things. Different work, different contract.
+  allow_production: true
+  url_allowlist: ["*.printqs.com", "*.vercel.app"]
+  api_allowlist: ["*.printqs.com"]
+  read_only: true   # reproduce and observe. No refunds, cancellations or deletions, and
+                    # never a record the agent did not create itself.
+
+# How QA logs in.
+# none    = the app has no login, or QA only tests unauthenticated flows
+# secrets = accounts provisioned by hand (SSO, admin). Values come from GitHub Secrets;
+#           only their NAMES appear here.
+# derived = QA signs itself up, every password an HMAC of one QA_FIXTURE_SEED secret.
+#
+# Derived rather than "sign up and save the credentials" because there is nowhere safe to
+# save them: memory/ and the ledger are both git. Deriving stores nothing, yields the same
+# password for the same identity so accounts are reusable, and rotating the seed rotates all.
+qa_auth:
+  # fixture: the values below are plaintext ON PURPOSE. This database is created empty by
+  # prisma migrate + seed on every run and destroyed with the runner, so "ci-owner-pass-1" is
+  # a constant already written in apps/api/prisma/seed.ts. Storing it as a secret would be
+  # theatre. The mode refuses to hand these over unless env.mode is compose and
+  # api_allowlist is local-only, so it cannot drift into pointing at anything real.
+  #
+  # The production test accounts stay in GitHub Secrets for the DEBUGGER, which works against
+  # production where the reported bugs actually live. They do not exist in this database.
+  mode: fixture
+
+  accounts:
+    - role: shop_owner
+      fields:
+        email: "owner@demo.printq.local"    # created by apps/api/prisma/seed.ts
+        password: "ci-owner-pass-1"         # SEED_OWNER_PASSWORD, set in env.boot above
+
+    # Students are NOT seeded. QA signs one up by phone; SMS_PROVIDER=console prints the OTP
+    # to /tmp/printq-api.log. Recipe in .sdlc/memory/qa/environment.md.
+
+# own      = run the checks below (a repo with no CI of its own)
+# existing = skip them; this repo's CI already gates the PR, and the pipeline waits for those
+#            checks instead of running a weaker duplicate beside them
+# both     = run ours alongside theirs
+verify:
+  mode: existing
+
+  # Which checks must pass before an agent may look at the PR. Empty = every check on the PR
+  # except the pipeline's own. Name them explicitly on a repo with optional or slow jobs.
+  required_checks: ["check"]   # the job in printQ's own ci.yml
+  wait_minutes: 30
+
+  # Runs before every other check. Monorepos usually need codegen or a shared package built
+  # first, or typecheck fails for reasons unrelated to the PR.
+  prepare:   ""
+  typecheck: "npm run typecheck"
+  lint:      ""
+  unit:      "npm run test"
+  build:     "npm run build"
+  e2e:       ""
+
+gates:
+  plan_approval:     true   # a HUMAN approves the work order before any code is written
+  plan_review_agent: true   # when plan_approval is off, an agent reviews instead of nobody
+  min_confidence:    70     # a plan below this reaches a human regardless of the gates above
+  merge_approval:    true
+  qa_files_issues:   true   # QA opens issues for bugs outside this PR's scope
+
+limits:
+  attempts: 3
+  minutes:  120
+  lock_ttl_minutes: 45
+
+# No agent may touch these without a human. Derived from what this repo actually contains.
+forbidden_paths:
+  - "**/*.env*"
+  - ".github/**"
+  - ".sdlc/config.yml"
+  - "Dockerfile"
+  - "apps/api/prisma/migrations/**"
+  - "docker-compose.yml"
+  - "render.yaml"
+  - "vercel.json"
+
+# Only these users may issue /sdlc commands. Everyone else's comments are data, never
+# instructions. REPLACE THIS — an install cannot know who owns the repo.
+allowlist:
+  - "Shivam-Fl"
+
+release:
+  auto_merge: false
+  auto_tag:   false
+  changelog:  "CHANGELOG.md"

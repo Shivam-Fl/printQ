@@ -1,0 +1,62 @@
+{
+  "$id": "plan-review",
+  "title": "Plan Review",
+  "description": "Verdict from the plan reviewer agent, which stands in for the human gate.",
+  "type": "object",
+  "required": [
+    "verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "reject",
+        "escalate"
+      ]
+    },
+    "confidence_agreement": {
+      "type": "string",
+      "enum": [
+        "agree",
+        "too-high",
+        "too-low"
+      ]
+    },
+    "blocking": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "claim",
+          "required_change"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "evidence": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "required_change": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    }
+  }
+}

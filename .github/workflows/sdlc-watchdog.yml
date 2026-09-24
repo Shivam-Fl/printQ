@@ -1,0 +1,42 @@
+# Agent 10 — Watchdog. Pure script, every 15 minutes.
+# Reclaims stale locks, trips budgets, surfaces stalls. The thing that stops a hung issue
+# from sitting locked forever because an agent died mid-run.
+name: sdlc-watchdog
+
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - name: Kill switch
+        run: node .sdlc/bin/sdlc-ctl.mjs guard
+      # Works in a repo with no package.json: install the repo's own deps when there is a
+      # manifest, then make sure the framework's single dependency is available either way.
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      - name: Sweep every open ledger
+        id: sweep
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: node .sdlc/bin/sdlc-ctl.mjs watchdog
+
+      - name: Report anything that needs a human
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPORT: ${{ steps.sweep.outputs.report }}
+        run: node .sdlc/bin/watchdog-report.mjs

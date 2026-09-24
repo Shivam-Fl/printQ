@@ -65,16 +65,10 @@ services:
         # Environment-specific public Firebase configuration belongs in the
         # platform environment, never in the repository or a Blueprint sync.
         sync: false
-      # Razorpay test mode is used for the current production pilot. Secrets stay
-      # in Render and are never committed to this Blueprint.
+      # Retired student checkout configuration. Pay-at-shop has no provider
+      # checkout; keep this mock so the legacy Render service cannot move money.
       - key: PAYMENT_PROVIDER
-        value: razorpay
-      - key: RAZORPAY_KEY_ID
-        sync: false
-      - key: RAZORPAY_KEY_SECRET
-        sync: false
-      - key: RAZORPAY_WEBHOOK_SECRET
-        sync: false
+        value: mock
       - key: PLATFORM_MARKUP_BPS
         value: "2500"
       - key: SHOP_PAYOUT_PROVIDER

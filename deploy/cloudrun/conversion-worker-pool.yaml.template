@@ -1,0 +1,91 @@
+apiVersion: run.googleapis.com/v1
+kind: WorkerPool
+metadata:
+  name: printqs-development-conversion
+  namespace: ${PRINTQ_PROJECT_NUMBER}
+  labels:
+    cloud.googleapis.com/location: ${PRINTQ_REGION}
+    printqs.io/environment: development
+  annotations:
+    run.googleapis.com/description: PrintQs development document conversion worker
+    run.googleapis.com/manualInstanceCount: "1"
+spec:
+  template:
+    metadata:
+      labels:
+        printqs.io/environment: development
+      annotations:
+        run.googleapis.com/cloudsql-instances: ${PRINTQ_CLOUD_SQL_CONNECTION}
+        run.googleapis.com/network-interfaces: '[{"network":"${PRINTQ_VPC_NETWORK}","subnetwork":"${PRINTQ_VPC_SUBNET}"}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: printqs-development-runtime@${PRINTQ_PROJECT_ID}.iam.gserviceaccount.com
+      containers:
+        - name: conversion
+          image: ${PRINTQ_IMAGE_URI}
+          command: [node]
+          args: [apps/api/dist/worker.js]
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: NODE_ENV
+              value: development
+            - name: PRINTQ_ENVIRONMENT
+              value: development
+            - name: WORKER_ROLE
+              value: conversion
+            - name: DATABASE_NAMESPACE
+              value: development
+            - name: QUEUE_NAMESPACE
+              value: printq-development
+            - name: STORAGE_NAMESPACE
+              value: printq-development
+            - name: STORAGE_DRIVER
+              value: gcs
+            - name: GCS_BUCKET
+              value: ${PRINTQ_GCS_BUCKET}
+            - name: STUDENT_AUTH_PROVIDER
+              value: firebase
+            - name: FIREBASE_PROJECT_ID
+              value: ${PRINTQ_FIREBASE_PROJECT_ID}
+            - name: PAYMENT_PROVIDER
+              value: mock
+            - name: SHOP_PAYOUT_PROVIDER
+              value: mock
+            - name: EMAIL_PROVIDER
+              value: console
+            - name: SMS_PROVIDER
+              value: console
+            - name: PUBLIC_WEB_URL
+              value: ${PRINTQ_PUBLIC_WEB_URL}
+            - name: CORS_ORIGINS
+              value: ${PRINTQ_PUBLIC_WEB_URL}
+            - name: SOFFICE_PATH
+              value: /usr/bin/soffice
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-database-url
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-redis-url
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-jwt-secret
+                  key: latest
+            - name: OTP_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-otp-pepper
+                  key: latest
+            - name: FIREBASE_AUTH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: printqs-development-firebase-api-key
+                  key: latest

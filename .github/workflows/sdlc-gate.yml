@@ -1,0 +1,62 @@
+# The gate between "a PR exists" and "an agent may look at it".
+#
+# Waits for whatever checks already gate this PR — the repo's own CI, ours, or both — then
+# hands off to review. This replaces chaining on `workflow_run: [ci-verify]`, which hardcoded
+# the assumption that our CI is the only CI. Repos that already have CI should keep using it:
+# duplicating it burns minutes and drifts from the checks the team actually trusts.
+name: sdlc-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr: { required: true, type: string }
+
+concurrency:
+  group: gate-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  checks: read              # statusCheckRollup reads check runs...
+  statuses: read            # ...and legacy commit statuses. Without both, gh returns
+                            # "Resource not accessible by integration", which reads as an
+                            # auth problem rather than a missing permission.
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+
+      - name: Kill switch
+        run: node .sdlc/bin/sdlc-ctl.mjs guard
+
+      - name: Bootstrap
+        run: |
+          if [ -f package-lock.json ]; then npm ci
+          elif [ -f package.json ]; then npm install --no-audit --no-fund
+          fi
+          node .sdlc/bin/ensure-deps.mjs
+
+      - name: Wait for the checks that gate this PR
+        id: checks
+        run: node .sdlc/bin/wait-for-checks.mjs
+
+      - name: Record the outcome on the ledger
+        if: steps.checks.outputs.conclusion != 'none'
+        run: node .sdlc/bin/gate-outcome.mjs
+
+      - name: Hand off to review
+        if: steps.checks.outputs.passed == 'true'
+        run: node .sdlc/bin/dispatch.mjs sdlc-review.yml -f pr="$PR"

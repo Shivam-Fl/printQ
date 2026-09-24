@@ -6,11 +6,17 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PDFDocument } from 'pdf-lib';
 import sharp from 'sharp';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../config/env.js';
 import { storage } from '../providers/storage/index.js';
 import { publishEvent } from '../realtime/events.js';
+import {
+  ensureFileDeletionJob,
+  scheduleFileDeletion,
+  scheduleVerifiedPrintFileDeletion,
+} from '../lib/fileRetention.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -143,47 +149,164 @@ export async function convertFile(fileId: string): Promise<void> {
   }
 }
 
-/** Hourly maintenance: delete stored files past their retention window (privacy, §14). */
+const RECOVERABLE_CONTENT_STATUSES = new Set([
+  'pending_payment',
+  'awaiting_arrival',
+  'queued',
+  'notified',
+  'otp_verified',
+  'printing',
+]);
+
+export function keysForDeletion(file: {
+  id: string;
+  originalKey: string;
+  sources: unknown;
+  convertedKey: string | null;
+  previewKey: string | null;
+}): string[] {
+  const sourceKeys = Array.isArray(file.sources)
+    ? (file.sources as unknown as Source[]).map((source) => source.key)
+    : [file.originalKey];
+  // A converted document is commonly also the preview. Delete once, but make
+  // sure every distinct source/derivative key is included.
+  return [...new Set([...sourceKeys, file.convertedKey, file.previewKey].filter((key): key is string => Boolean(key)))];
+}
+
+type DueFile = {
+  id: string;
+  originalKey: string;
+  sources: unknown;
+  convertedKey: string | null;
+  previewKey: string | null;
+  jobs: { status: string }[];
+};
+
+/**
+ * Delete one due file. It deliberately throws on an object-store error so the
+ * delayed BullMQ job can back off and land in the dead-letter queue. The
+ * minute sweeper also retries from PostgreSQL until the content is gone.
+ */
+async function deleteDueFile(file: DueFile, now: Date): Promise<'deleted' | 'deferred'> {
+  if (file.jobs.some((job) => RECOVERABLE_CONTENT_STATUSES.has(job.status))) {
+    // A hard upload deadline met an unexpectedly active/recoverable job. Do
+    // not silently move the deadline: keep the overdue state auditable.
+    await prisma.uploadedFile.update({
+      where: { id: file.id },
+      data: {
+        deletionAttempts: { increment: 1 },
+        lastDeletionError: 'Deletion overdue while a recoverable print job remains active',
+      },
+    });
+    logger.error({ fileId: file.id }, 'file_deletion_overdue_active_job');
+    return 'deferred';
+  }
+
+  try {
+    for (const key of keysForDeletion(file)) await storage.delete(key);
+    await prisma.uploadedFile.update({
+      where: { id: file.id },
+      data: {
+        status: 'deleted',
+        convertedKey: null,
+        previewKey: null,
+        // Metadata for orders/audit remains, but neither original content nor
+        // filename/source key survives the strict retention window.
+        originalKey: `deleted/${file.id}`,
+        originalName: 'Document deleted',
+        sources: Prisma.DbNull,
+        contentDeletedAt: now,
+        deletionAttempts: { increment: 1 },
+        lastDeletionError: null,
+      },
+    });
+    return 'deleted';
+  } catch (error) {
+    await prisma.uploadedFile.update({
+      where: { id: file.id },
+      data: {
+        deletionAttempts: { increment: 1 },
+        lastDeletionError: error instanceof Error ? error.message.slice(0, 300) : 'Object deletion failed',
+      },
+    }).catch((updateError) => logger.error({ updateError, fileId: file.id }, 'file_deletion_failure_record_failed'));
+    throw error;
+  }
+}
+
+/** Process an exact delayed deletion job. A clock-skew "not due" result is a
+ * harmless no-op; an active recoverable job is the only retryable deferral. */
+export async function deleteExpiredFileById(
+  fileId: string,
+  now = new Date(),
+): Promise<'deleted' | 'deferred' | 'not_due'> {
+  const file = await prisma.uploadedFile.findUnique({
+    where: { id: fileId },
+    include: { jobs: { select: { status: true } } },
+  });
+  if (!file || file.status === 'deleted' || !file.deleteAfter || file.deleteAfter > now) return 'not_due';
+  return deleteDueFile(file, now);
+}
+
+/**
+ * Minute-level, database-backed deletion sweep. It is deliberately idempotent:
+ * object-store deletes may have partly succeeded before an outage, and the next
+ * run removes the remaining objects without extending the recorded deadline.
+ */
 export async function cleanupExpiredFiles(): Promise<void> {
+  const now = new Date();
   const expired = await prisma.uploadedFile.findMany({
-    where: { status: { not: 'deleted' }, deleteAfter: { lt: new Date() } },
+    where: { status: { not: 'deleted' }, deleteAfter: { lte: now } },
+    orderBy: { deleteAfter: 'asc' },
     take: 200,
+    include: { jobs: { select: { status: true } } },
   });
   for (const file of expired) {
     try {
-      const activeJobs = await prisma.job.count({
-        where: {
-          fileId: file.id,
-          status: {
-            in: [
-              'pending_payment',
-              'awaiting_arrival',
-              'queued',
-              'notified',
-              'otp_verified',
-              'printing',
-              'finishing',
-              'ready_for_pickup',
-              'no_show',
-              'requeued',
-            ],
-          },
-        },
-      });
-      if (activeJobs > 0) continue;
-
-      const keys = Array.isArray(file.sources)
-        ? (file.sources as unknown as Source[]).map((s) => s.key)
-        : [file.originalKey];
-      for (const key of keys) await storage.delete(key);
-      if (file.convertedKey) await storage.delete(file.convertedKey);
-      await prisma.uploadedFile.update({
-        where: { id: file.id },
-        data: { status: 'deleted', convertedKey: null, previewKey: null },
-      });
-    } catch (err) {
-      logger.error({ err, fileId: file.id }, 'file_cleanup_failed');
+      await deleteDueFile(file, now);
+    } catch (error) {
+      logger.error({ error, fileId: file.id }, 'file_cleanup_failed');
     }
   }
   if (expired.length > 0) logger.info({ count: expired.length }, 'files_cleaned');
+}
+
+/**
+ * Repair a rare post-transition scheduling failure without relying on a Redis
+ * delayed job. PostgreSQL remains the source of truth for the deadline.
+ */
+export async function reconcileFileDeletionSchedules(): Promise<void> {
+  const files = await prisma.uploadedFile.findMany({
+    where: {
+      status: { not: 'deleted' },
+      OR: [
+        { jobs: { some: { printConfirmedAt: { not: null } } } },
+        { jobs: { some: { status: { in: ['cancelled', 'expired'] } } } },
+      ],
+    },
+    select: {
+      id: true,
+      deleteAfter: true,
+      jobs: {
+        select: { status: true, printConfirmedAt: true, updatedAt: true },
+      },
+    },
+    take: 200,
+  });
+
+  for (const file of files) {
+    const confirmedAt = file.jobs
+      .map((job) => job.printConfirmedAt)
+      .filter((value): value is Date => value !== null)
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    if (confirmedAt) {
+      await scheduleVerifiedPrintFileDeletion(file.id, confirmedAt);
+    } else {
+      const terminalAt = file.jobs
+        .filter((job) => job.status === 'cancelled' || job.status === 'expired')
+        .map((job) => job.updatedAt)
+        .sort((a, b) => a.getTime() - b.getTime())[0];
+      await scheduleFileDeletion(file.id, terminalAt ?? new Date());
+    }
+    if (file.deleteAfter) await ensureFileDeletionJob(file.id, file.deleteAfter);
+  }
 }

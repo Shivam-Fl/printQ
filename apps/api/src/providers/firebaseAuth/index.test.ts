@@ -23,7 +23,10 @@ describe('Firebase phone token verification', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(verifyFirebasePhoneIdToken('verified-token')).resolves.toBe('+919876543210');
+    await expect(verifyFirebasePhoneIdToken('verified-token')).resolves.toEqual({
+      uid: 'firebase-user',
+      phone: '+919876543210',
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ idToken: 'verified-token' }));
   });

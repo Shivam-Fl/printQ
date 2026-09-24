@@ -17,3 +17,8 @@ export function isCounterCodeAvailable(
   if (status !== 'queued' && status !== 'notified') return false;
   return position !== null && position <= nearFrontThreshold;
 }
+
+/** Only the head of an active physical queue can be released without a warning. */
+export function isNormalCounterRelease(status: JobStatus, position: number | null): boolean {
+  return (status === 'queued' || status === 'notified') && position === 1;
+}

@@ -32,12 +32,6 @@ interface Quote {
   totalPaise: number;
 }
 
-declare global {
-  interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
-  }
-}
-
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -49,8 +43,6 @@ export default function NewJob() {
   const [opts, setOpts] = useState<ShopOptions | null>(null);
   const [specs, setSpecs] = useState<Specs | null>(null);
   const [mode, setMode] = useState<'instant' | 'scheduled'>('instant');
-  const [paymentMethod, setPaymentMethod] = useState<'online' | 'cash'>('online');
-  const [cashPaymentsEnabled, setCashPaymentsEnabled] = useState(false);
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
   const [pages, setPages] = useState<number | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -73,10 +65,9 @@ export default function NewJob() {
 
   // load the shop's offered options and seed defaults
   useEffect(() => {
-    api<{ shop: { options: ShopOptions; cashPaymentsEnabled: boolean } }>(`/api/public/shops/${slug}`)
+    api<{ shop: { options: ShopOptions } }>(`/api/public/shops/${slug}`)
       .then((r) => {
         setOpts(r.shop.options);
-        setCashPaymentsEnabled(r.shop.cashPaymentsEnabled);
         const p0 = r.shop.options.papers[0];
         setSpecs({
           copies: 1,
@@ -175,36 +166,17 @@ export default function NewJob() {
     setBusy(true);
     setError('');
     try {
-      const body: Record<string, unknown> = { fileId, specs, mode, paymentMethod };
+      const body: Record<string, unknown> = { fileId, specs, mode };
       if (mode === 'scheduled') body.scheduledTime = new Date(slot).toISOString();
       if (appliedCoupon) body.couponCode = appliedCoupon;
       const res = await api<{
         job: { id: string };
-        checkout: { mode: 'mock' | 'razorpay' | 'cash'; keyId?: string; orderId?: string; amountPaise?: number };
+        checkout: { mode: 'pay_at_shop'; amountPaise: number };
       }>('/api/jobs', { method: 'POST', role: 'student', body });
 
       if (pushPermission() === 'default') void enablePush();
 
-      if (res.checkout.mode === 'cash') {
-        navigate(`/jobs/${res.job.id}`);
-        return;
-      }
-      if (res.checkout.mode === 'mock') {
-        await api('/api/payments/mock/confirm', { method: 'POST', role: 'student', body: { jobId: res.job.id } });
-        navigate(`/jobs/${res.job.id}`);
-        return;
-      }
-      await loadRazorpay();
-      const rzp = new window.Razorpay!({
-        key: res.checkout.keyId,
-        order_id: res.checkout.orderId,
-        amount: res.checkout.amountPaise,
-        currency: 'INR',
-        name: 'PrintQ',
-        handler: () => navigate(`/jobs/${res.job.id}`),
-        modal: { ondismiss: () => navigate(`/jobs/${res.job.id}`) },
-      });
-      rzp.open();
+      navigate(`/jobs/${res.job.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed');
     } finally {
@@ -229,11 +201,11 @@ export default function NewJob() {
     <div className="page">
       <Topbar />
       <div className="checkout-heading">
-        <span className="eyebrow-label">Review before payment</span>
+        <span className="eyebrow-label">Review before you visit</span>
         <h1>Set up your print</h1>
         <p className="dim">Check the preview and choose only what you need. The total updates instantly.</p>
         <div className="checkout-steps" aria-label="Order progress">
-          <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Payment</span><span>Arrive &amp; check in</span>
+          <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Pay at shop</span><span>Arrive &amp; check in</span>
         </div>
       </div>
 
@@ -316,29 +288,21 @@ export default function NewJob() {
           </section>
 
           <section className="checkout-card">
-            <div className="checkout-card-head"><h2>When do you plan to arrive?</h2><p>Payment prepares the order. Your live queue position starts only after you reach the shop and check in.</p></div>
+            <div className="checkout-card-head"><h2>When do you plan to arrive?</h2><p>Your live queue position starts only after you reach the shop and check in.</p></div>
             <div className="seg" role="radiogroup" aria-label="When to print">
               <button className={mode === 'instant' ? 'on' : ''} onClick={() => setMode('instant')}>Flexible arrival</button>
               <button className={mode === 'scheduled' ? 'on' : ''} onClick={() => setMode('scheduled')}>Reserve a time</button>
             </div>
-            {mode === 'instant' ? <p className="dim" style={{ marginBottom: 0 }}>Payment prepares the order; your position appears only after you arrive and check in.</p> : (
+            {mode === 'instant' ? <p className="dim" style={{ marginBottom: 0 }}>Your position appears only after you arrive and check in.</p> : (
               <div style={{ marginTop: 14 }}><label htmlFor="slot">Planned arrival</label><input id="slot" type="datetime-local" value={slot} min={minSlot} max={maxSlot} onChange={(e) => setSlot(e.target.value)} /><p className="dim" style={{ marginBottom: 0 }}>We’ll remind you near this time. Check-in still starts only when you are physically there.</p></div>
             )}
           </section>
 
           <section className="checkout-card">
-            <div className="checkout-card-head"><h2>Payment</h2><p>Choose how you want to pay for this order.</p></div>
-            <div className="payment-methods" role="radiogroup" aria-label="Payment method">
-              <button className={paymentMethod === 'online' ? 'payment-method on' : 'payment-method'} onClick={() => setPaymentMethod('online')}>
-                <strong>Pay online</strong>
-                <span>Secure checkout now</span>
-              </button>
-              {cashPaymentsEnabled && (
-                <button className={paymentMethod === 'cash' ? 'payment-method on' : 'payment-method'} onClick={() => setPaymentMethod('cash')}>
-                  <strong>Cash at counter</strong>
-                  <span>Staff confirms cash before printing</span>
-                </button>
-              )}
+            <div className="checkout-card-head"><h2>Pay at shop</h2><p>Pay the final total shown below directly to the shop by cash or the shop’s merchant UPI. Staff verifies receipt before printing.</p></div>
+            <div className="payment-method on" aria-label="Payment method">
+              <strong>Pay at shop</strong>
+              <span>Cash or the shop’s own UPI at the counter</span>
             </div>
           </section>
         </div>
@@ -367,13 +331,11 @@ export default function NewJob() {
             {couponError && <p className="error" style={{ marginBottom: 0 }}>{couponError}</p>}
             <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
               {busy
-                ? paymentMethod === 'cash' ? 'Preparing order…' : 'Opening payment…'
-                : paymentMethod === 'cash'
-                  ? mode === 'scheduled' ? 'Prepare cash order & save time' : 'Prepare cash order'
-                  : mode === 'scheduled' ? 'Pay & save arrival time' : 'Pay & prepare order'}
+                ? 'Preparing order…'
+                : mode === 'scheduled' ? 'Prepare order & save arrival time' : 'Prepare order'}
             </button>
             <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>
-              {paymentMethod === 'cash' ? 'Pay the total shown above at the counter · status notifications' : 'Secure payment · exact preview · status notifications'}
+              Pay the final total shown above at the counter · status notifications
             </p>
           </div>
         </aside>
@@ -382,15 +344,4 @@ export default function NewJob() {
       <p className="dim"><a href={`/s/${slug}`}>← Choose different files</a></p>
     </div>
   );
-}
-
-function loadRazorpay(): Promise<void> {
-  if (window.Razorpay) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Could not load payment window'));
-    document.body.appendChild(script);
-  });
 }

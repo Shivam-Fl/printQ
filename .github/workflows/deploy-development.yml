@@ -1,0 +1,205 @@
+name: Deploy isolated development candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_pr:
+        description: Open master-targeted PR number whose exact head should be deployed
+        required: true
+        type: string
+      candidate_sha:
+        description: Exact 40-character head SHA of that PR
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: printqs-development-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy verified development candidate
+    runs-on: ubuntu-latest
+    environment: development
+    timeout-minutes: 45
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      GCP_VPC_NETWORK: ${{ vars.GCP_VPC_NETWORK }}
+      GCP_VPC_SUBNET: ${{ vars.GCP_VPC_SUBNET }}
+      GCP_CLOUD_SQL_INSTANCE: ${{ vars.GCP_CLOUD_SQL_INSTANCE }}
+      GCP_REDIS_INSTANCE: ${{ vars.GCP_REDIS_INSTANCE }}
+      PRINTQ_GCS_BUCKET: ${{ vars.DEV_GCS_BUCKET }}
+      PRINTQ_FIREBASE_PROJECT_ID: ${{ secrets.DEV_FIREBASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate candidate identity and required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha='${{ inputs.candidate_sha }}'
+          pr='${{ inputs.candidate_pr }}'
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a 40-character SHA'; exit 1; }
+          [[ "$pr" =~ ^[1-9][0-9]*$ ]] || { echo 'candidate_pr must be a positive PR number'; exit 1; }
+
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr}")"
+          [[ "$(jq -r .state <<<"$pr_json")" == 'open' ]] || { echo 'Candidate PR is not open'; exit 1; }
+          [[ "$(jq -r .base.ref <<<"$pr_json")" == 'master' ]] || { echo 'Candidate PR must target master'; exit 1; }
+          [[ "$(jq -r .head.sha <<<"$pr_json")" == "$sha" ]] || { echo 'Candidate SHA is not the current PR head'; exit 1; }
+
+          for check_name in 'CI / check' 'CI / secret scan'; do
+            conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/check-runs?per_page=100" \
+              --jq ".check_runs[] | select(.name == \"${check_name}\") | .conclusion" | tail -n 1)"
+            [[ "$conclusion" == 'success' ]] || { echo "Required check is not successful: ${check_name}"; exit 1; }
+          done
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Confirm candidate is based on current master history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          base_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${{ inputs.candidate_pr }}" --jq .base.sha)"
+          current_master="$(git rev-parse origin/master)"
+          [[ "$base_sha" == "$current_master" ]] || {
+            echo 'Candidate is based on stale master history; update the PR and rerun its required checks first'
+            exit 1
+          }
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          version: '>= 500.0.0'
+
+      - name: Verify isolated development prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value_name in GCP_PROJECT_ID GCP_REGION GCP_ARTIFACT_REPOSITORY GCP_WIF_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT GCP_VPC_NETWORK GCP_VPC_SUBNET GCP_CLOUD_SQL_INSTANCE GCP_REDIS_INSTANCE PRINTQ_GCS_BUCKET PRINTQ_FIREBASE_PROJECT_ID; do
+            [[ -n "${!value_name:-}" ]] || { echo "Missing development environment setting: ${value_name}"; exit 1; }
+          done
+          [[ "$GCP_PROJECT_ID" == 'printqs-development' ]] || { echo 'Only the isolated printqs-development project is permitted'; exit 1; }
+          [[ "$GCP_REGION" == 'asia-south1' ]] || { echo 'Development resources must be in Mumbai'; exit 1; }
+          [[ "$PRINTQ_FIREBASE_PROJECT_ID" == 'printqs-development' ]] || { echo 'Only the isolated development Firebase project is permitted'; exit 1; }
+          [[ "$PRINTQ_GCS_BUCKET" == *development* ]] || { echo 'Development object bucket name must identify development'; exit 1; }
+          gcloud artifacts repositories describe "$GCP_ARTIFACT_REPOSITORY" --location "$GCP_REGION" --project "$GCP_PROJECT_ID" >/dev/null
+          expected_project_number="$(gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectNumber)')"
+          [[ "$expected_project_number" =~ ^[0-9]+$ ]] || { echo 'Development project number unavailable'; exit 1; }
+          bucket_json="$(gcloud storage buckets describe "gs://${PRINTQ_GCS_BUCKET}" --project "$GCP_PROJECT_ID" --format=json)"
+          bucket_project_number="$(jq -r '.projectNumber' <<<"$bucket_json")"
+          [[ "$bucket_project_number" == "$expected_project_number" ]] || { echo 'Development bucket belongs to a different project'; exit 1; }
+          uniform_access="$(gcloud storage buckets describe "gs://${PRINTQ_GCS_BUCKET}" --project "$GCP_PROJECT_ID" --format='value(uniformBucketLevelAccess.enabled)' | tr '[:upper:]' '[:lower:]')"
+          [[ "$uniform_access" == 'true' ]] || { echo 'Development bucket must use uniform bucket-level access'; exit 1; }
+          public_access_prevention="$(gcloud storage buckets describe "gs://${PRINTQ_GCS_BUCKET}" --project "$GCP_PROJECT_ID" --format='value(iamConfig.publicAccessPrevention)' | tr '[:upper:]' '[:lower:]')"
+          [[ "$public_access_prevention" == 'enforced' ]] || { echo 'Development bucket must enforce public access prevention'; exit 1; }
+          [[ "$(jq -r '.versioning.enabled // false' <<<"$bucket_json")" == 'false' ]] || { echo 'Development bucket versioning must be disabled for ten-minute deletion'; exit 1; }
+          [[ "$(jq -r '.retentionPolicy.retentionPeriod // 0' <<<"$bucket_json")" == '0' ]] || { echo 'Development bucket retention policy must be disabled'; exit 1; }
+          [[ "$(jq -r '.softDeletePolicy.retentionDurationSeconds // 0' <<<"$bucket_json")" == '0' ]] || { echo 'Development bucket soft delete must be disabled for ten-minute deletion'; exit 1; }
+          gcloud compute networks describe "$GCP_VPC_NETWORK" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud compute networks subnets describe "$GCP_VPC_SUBNET" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" >/dev/null
+          cloud_sql_connection="$(gcloud sql instances describe "$GCP_CLOUD_SQL_INSTANCE" --project "$GCP_PROJECT_ID" --format='value(connectionName)')"
+          [[ "$cloud_sql_connection" == "${GCP_PROJECT_ID}:${GCP_REGION}:"* ]] || { echo 'Development Cloud SQL must belong to the isolated Mumbai project'; exit 1; }
+          gcloud redis instances describe "$GCP_REDIS_INSTANCE" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" >/dev/null
+          gcloud iam service-accounts describe "printqs-development-runtime@${GCP_PROJECT_ID}.iam.gserviceaccount.com" --project "$GCP_PROJECT_ID" >/dev/null
+          for secret_name in \
+            printqs-development-database-url \
+            printqs-development-redis-url \
+            printqs-development-jwt-secret \
+            printqs-development-otp-pepper \
+            printqs-development-firebase-api-key; do
+            gcloud secrets describe "$secret_name" --project "$GCP_PROJECT_ID" >/dev/null
+          done
+          echo "PRINTQ_PROJECT_NUMBER=$expected_project_number" >> "$GITHUB_ENV"
+          echo "PRINTQ_CLOUD_SQL_CONNECTION=$cloud_sql_connection" >> "$GITHUB_ENV"
+          echo "PRINTQ_VPC_NETWORK=$GCP_VPC_NETWORK" >> "$GITHUB_ENV"
+          echo "PRINTQ_VPC_SUBNET=$GCP_VPC_SUBNET" >> "$GITHUB_ENV"
+
+      - name: Build immutable candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_uri="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY}/printq:${{ inputs.candidate_sha }}"
+          if gcloud artifacts docker images describe "$image_uri" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo 'Reusing the existing immutable image for this exact candidate SHA'
+          else
+            gcloud builds submit --project "$GCP_PROJECT_ID" --tag "$image_uri" .
+          fi
+          echo "PRINTQ_IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+
+      - name: Render deployment manifests without secrets
+        shell: bash
+        env:
+          PRINTQ_PUBLIC_WEB_URL: https://development.invalid
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/cloudrun
+          # Export names expected by the templates without exposing any secret value.
+          export PRINTQ_PROJECT_ID="$GCP_PROJECT_ID"
+          export PRINTQ_REGION="$GCP_REGION"
+          for template in deploy/cloudrun/*.yaml.template; do
+            output=".tmp/cloudrun/$(basename "${template%.template}")"
+            envsubst '${PRINTQ_IMAGE_URI} ${PRINTQ_PROJECT_ID} ${PRINTQ_PROJECT_NUMBER} ${PRINTQ_REGION} ${PRINTQ_GCS_BUCKET} ${PRINTQ_FIREBASE_PROJECT_ID} ${PRINTQ_PUBLIC_WEB_URL} ${PRINTQ_CLOUD_SQL_CONNECTION} ${PRINTQ_VPC_NETWORK} ${PRINTQ_VPC_SUBNET}' < "$template" > "$output"
+            ! grep -Eq '\$\{[A-Z0-9_]+\}' "$output"
+          done
+
+      - name: Apply the one-task Prisma migration job
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run jobs replace .tmp/cloudrun/migration-job.yaml --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          gcloud run jobs execute printqs-development-migrate --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --wait --quiet
+
+      - name: Deploy development API and bind its concrete same-origin URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services replace .tmp/cloudrun/api-service.yaml --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          api_url="$(gcloud run services describe printqs-development-api --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format='value(status.url)')"
+          [[ "$api_url" =~ ^https:// ]] || { echo 'Cloud Run did not return an HTTPS development API URL'; exit 1; }
+          gcloud run services update printqs-development-api --region "$GCP_REGION" --project "$GCP_PROJECT_ID" \
+            --update-env-vars "PUBLIC_WEB_URL=${api_url},CORS_ORIGINS=${api_url}" --quiet
+          echo "PRINTQ_DEVELOPMENT_API_URL=$api_url" >> "$GITHUB_ENV"
+
+      - name: Deploy dedicated conversion and maintenance worker pools
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run worker-pools replace .tmp/cloudrun/conversion-worker-pool.yaml --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+          gcloud run worker-pools replace .tmp/cloudrun/maintenance-worker-pool.yaml --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --quiet
+
+      - name: Verify the exact deployed development candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "${PRINTQ_DEVELOPMENT_API_URL}/healthz" | jq -e '.ok == true' >/dev/null
+          revision="$(gcloud run services describe printqs-development-api --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format='value(status.latestReadyRevisionName)')"
+          image="$(gcloud run revisions describe "$revision" --region "$GCP_REGION" --project "$GCP_PROJECT_ID" --format='value(spec.containers[0].image)')"
+          [[ "$image" == *':${{ inputs.candidate_sha }}' ]] || { echo 'Development API revision does not use the candidate SHA image'; exit 1; }
+          {
+            echo '### Isolated development deployment'
+            echo "- Candidate PR: #${{ inputs.candidate_pr }}"
+            echo "- Candidate SHA: \`${{ inputs.candidate_sha }}\`"
+            echo "- API revision: \`${revision}\`"
+            echo "- API URL: ${PRINTQ_DEVELOPMENT_API_URL}"
+            echo "- Image: \`${image}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

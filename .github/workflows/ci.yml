@@ -40,8 +40,12 @@ jobs:
           --health-retries 12
     env:
       NODE_ENV: test
+      PRINTQ_ENVIRONMENT: test
       DATABASE_URL: postgresql://printq_test:printq_test@127.0.0.1:5432/printq_test
+      DATABASE_NAMESPACE: test
       REDIS_URL: redis://127.0.0.1:6379/15
+      QUEUE_NAMESPACE: printq-ci-test
+      STORAGE_NAMESPACE: printq-ci-test
       # The simulator uses a separate configuration key so its production-build
       # process points at the same disposable CI Redis service, not localhost:6380.
       PRINTQ_E2E_REDIS_URL: redis://127.0.0.1:6379/15
@@ -54,6 +58,7 @@ jobs:
       STORAGE_LOCAL_DIR: .tmp/ci-storage
       SMS_PROVIDER: console
       EMAIL_PROVIDER: console
+      ALLOW_SIMULATED_PRINT_COMPLETION: "true"
       PUBLIC_WEB_URL: http://localhost:4173
       CORS_ORIGINS: http://localhost:4173
     steps:
@@ -75,8 +80,18 @@ jobs:
         run: |
           set -o pipefail
           npm run test:e2e:sim | tee .tmp/ci-results/agent-simulator.log
-      # Supply-chain check — fails only on high+ severity in production deps.
-      - run: npm audit --omit=dev --audit-level=high
+      # Audit every deployable workspace separately. npm's root-workspace audit
+      # endpoint rejects this monorepo's valid workspace-link tree with HTTP 400;
+      # running each published runtime independently preserves a hard production
+      # dependency gate instead of ignoring or downgrading the failed audit.
+      - name: Audit production dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm audit --workspace @printq/shared --omit=dev --audit-level=high
+          npm audit --workspace @printq/api --omit=dev --audit-level=high
+          npm audit --workspace @printq/agent --omit=dev --audit-level=high
+          npm audit --workspace @printq/web --omit=dev --audit-level=high
       - name: Upload CI evidence
         if: always()
         uses: actions/upload-artifact@v4

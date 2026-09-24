@@ -60,6 +60,7 @@ export async function notifyShopReopened(shopId: string): Promise<void> {
         title: `${shop.name} is open again`,
         body: 'Send your file now — the print station is connected.',
         url: `/s/${shop.slug}`,
+        eventKey: `shop-reopened:${shopId}`,
       }),
     ),
   );

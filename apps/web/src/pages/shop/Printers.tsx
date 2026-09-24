@@ -14,6 +14,9 @@ interface Printer {
   status: 'online' | 'offline' | 'jammed';
   osPrinterName: string | null;
   mediaConfig: Record<string, DriverMedia>;
+  lastTestedAt: string | null;
+  lastTestStatus: 'requested' | 'spool_accepted' | 'failed' | null;
+  lastTestError: string | null;
 }
 
 interface DriverMedia {
@@ -29,6 +32,8 @@ interface DetectedPrinter {
 interface AgentRow {
   id: string;
   machineLabel: string;
+  status: 'online' | 'offline';
+  connectedPrinterIds: string[];
   detectedPrinters: DetectedPrinter[] | null;
 }
 
@@ -65,6 +70,7 @@ export default function Printers() {
   const [linking, setLinking] = useState<string | null>(null);
   const [editingMedia, setEditingMedia] = useState<string | null>(null);
   const [mediaDraft, setMediaDraft] = useState<Record<string, DriverMedia>>({});
+  const [testing, setTesting] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
@@ -95,9 +101,12 @@ export default function Printers() {
     const socket = getShopSocket();
     if (!socket) return;
     const onDetected = () => void refresh();
+    const onTestResult = () => void refresh();
     socket.on('agent:printers_detected', onDetected);
+    socket.on('printer:test_result', onTestResult);
     return () => {
       socket.off('agent:printers_detected', onDetected);
+      socket.off('printer:test_result', onTestResult);
     };
   }, [refresh]);
 
@@ -212,6 +221,28 @@ export default function Printers() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save paper and tray mapping');
+    }
+  }
+
+  function testAgents(printerId: string) {
+    return agents.filter((agent) => agent.status === 'online' && agent.connectedPrinterIds.includes(printerId));
+  }
+
+  async function testPrinter(printer: Printer, agentId?: string) {
+    setTesting(printer.id);
+    setError('');
+    try {
+      const result = await api<{ message: string }>(`/api/shop/printers/${printer.id}/test-print`, {
+        method: 'POST',
+        role: 'shop',
+        body: agentId ? { agentId } : {},
+      });
+      setError(result.message);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the printer test page');
+    } finally {
+      setTesting(null);
     }
   }
 
@@ -346,11 +377,11 @@ export default function Printers() {
       <div className="table-shell printer-table">
         <table>
           <thead>
-            <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Driver media</th><th>Status</th></tr>
+            <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Driver media</th><th>Test page</th><th>Status</th></tr>
           </thead>
           <tbody>
             {printers.length === 0 && (
-              <tr><td colSpan={8}><div className="table-empty"><strong>No printers configured</strong><span>Add a detected printer above to start taking orders.</span></div></td></tr>
+              <tr><td colSpan={9}><div className="table-empty"><strong>No printers configured</strong><span>Add a detected printer above to start taking orders.</span></div></td></tr>
             )}
             {printers.map((p) => (
               <Fragment key={p.id}>
@@ -383,6 +414,30 @@ export default function Printers() {
                   </td>
                   <td><button className="ghost small" onClick={() => beginMediaEdit(p)}>Configure</button></td>
                   <td>
+                    {!p.osPrinterName ? (
+                      <span className="dim">Link a Windows printer first</span>
+                    ) : testAgents(p.id).length === 0 ? (
+                      <span className="dim">Connect an online computer</span>
+                    ) : testAgents(p.id).length === 1 ? (
+                      <button className="ghost small" disabled={testing === p.id} onClick={() => void testPrinter(p)}>
+                        {testing === p.id ? 'Sending…' : 'Print test page'}
+                      </button>
+                    ) : (
+                      <select
+                        aria-label={`Choose computer for ${p.label} test page`}
+                        defaultValue=""
+                        disabled={testing === p.id}
+                        onChange={(event) => event.target.value && void testPrinter(p, event.target.value)}
+                      >
+                        <option value="">Print via computer…</option>
+                        {testAgents(p.id).map((agent) => <option key={agent.id} value={agent.id}>{agent.machineLabel}</option>)}
+                      </select>
+                    )}
+                    {p.lastTestStatus === 'requested' && <p className="dim" style={{ margin: '6px 0 0' }}>Waiting for spooler…</p>}
+                    {p.lastTestStatus === 'spool_accepted' && <p className="dim" style={{ margin: '6px 0 0' }}>Spool accepted — inspect page</p>}
+                    {p.lastTestStatus === 'failed' && <p className="dim" style={{ margin: '6px 0 0' }}>Test failed: {p.lastTestError || 'retry after checking the printer'}</p>}
+                  </td>
+                  <td>
                     <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
                       <option value="online">online</option>
                       <option value="offline">offline</option>
@@ -392,7 +447,7 @@ export default function Printers() {
                 </tr>
                 {editingMedia === p.id && (
                   <tr className="media-config-row">
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <div className="manual-picker">
                         <strong>Windows paper and tray mapping</strong>
                         <p>Map each shop paper option to the exact size and optional tray name shown by this printer’s Windows driver.</p>

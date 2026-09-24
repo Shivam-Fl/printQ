@@ -5,7 +5,8 @@ process.env.VITE_STUDENT_AUTH_PROVIDER = 'firebase';
 const storage = new Map<string, string>();
 const resumeFirebasePhoneSession = vi.fn<() => Promise<string | null>>();
 
-vi.mock('./firebasePhoneAuth.js', () => ({ resumeFirebasePhoneSession }));
+const getFirebaseAppCheckToken = vi.fn<() => Promise<string | null>>();
+vi.mock('./firebasePhoneAuth.js', () => ({ resumeFirebasePhoneSession, getFirebaseAppCheckToken }));
 
 Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
@@ -35,6 +36,8 @@ beforeAll(async () => {
 beforeEach(() => {
   storage.clear();
   resumeFirebasePhoneSession.mockReset();
+  getFirebaseAppCheckToken.mockReset();
+  getFirebaseAppCheckToken.mockResolvedValue(null);
   vi.restoreAllMocks();
 });
 

@@ -109,7 +109,11 @@ async function main() {
   ).data;
   const claimRes = await fetch(`${API}/api/agent/jobs/${jobCreated.id}/claim`, { method: 'POST', headers: { 'x-agent-token': agentReg.token } });
   ok(claimRes.status === 200, 'agent claimed the job');
-  await fetch(`${API}/api/agent/jobs/${jobCreated.id}/complete`, { method: 'POST', headers: { 'x-agent-token': agentReg.token } });
+  await fetch(`${API}/api/agent/jobs/${jobCreated.id}/complete`, {
+    method: 'POST',
+    headers: { 'x-agent-token': agentReg.token, 'content-type': 'application/json' },
+    body: JSON.stringify({ outcome: 'simulator_complete' }),
+  });
   await j(`/api/shop/jobs/${jobCreated.id}/handover`, { method: 'POST', token: shopToken });
 
   const completedJob = (await j(`/api/jobs/${jobCreated.id}`, { token: studentToken })).data.job;

@@ -26,6 +26,10 @@ describe('job state machine', () => {
     expect(transition('otp_verified', 'CASH_RETURNED')).toBe('cancelled');
   });
 
+  it('closes a failed pay-at-shop print after staff records the returned counter payment', () => {
+    expect(transition('otp_verified', 'COUNTER_PAYMENT_RETURNED')).toBe('cancelled');
+  });
+
   it('removes an absent arrival without cancelling the paid order, then permits a fresh arrival', () => {
     expect(transition('queued', 'QUEUE_SKIPPED')).toBe('awaiting_arrival');
     expect(transition('awaiting_arrival', 'ARRIVED')).toBe('queued');

@@ -1,4 +1,4 @@
-import type { Job } from '@prisma/client';
+import type { CounterPaymentMethod, Job } from '@prisma/client';
 import type { JobSpecs, JobStatus } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { digestReleaseCode, verifyOtpHash } from '../../lib/otp.js';
@@ -6,8 +6,7 @@ import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
 import { dispatchJob, emitQueueUpdate, getJobLiveMetrics, recommendPrinter } from './engine.js';
-import { env } from '../../config/env.js';
-import { isCounterCodeAvailable } from './visibility.js';
+import { isNormalCounterRelease } from './visibility.js';
 
 export interface ReleaseResult {
   ok: boolean;
@@ -19,9 +18,9 @@ export interface ReleaseResult {
   position?: number | null;
   queueStatus?: string;
   eligiblePrinters?: { printerId: string; estimatedWaitMinutes: number }[];
-  /** Cash orders stop here until counter staff confirms the full amount was received. */
-  requiresCashConfirmation?: boolean;
-  cashAmountPaise?: number;
+  /** Pay-at-shop orders stop here until counter staff verifies the full amount. */
+  requiresPaymentConfirmation?: boolean;
+  counterPaymentAmountPaise?: number;
   selectedPrinterId?: string;
 }
 
@@ -51,7 +50,7 @@ export function isDirectCounterReleaseRecoverable(status: JobStatus): boolean {
 /**
  * The shop's single counter-code input. It is intentionally independent of
  * advisory queue order: any student physically at the counter can release a
- * paid, print-ready order, even after a missed/removed queue position.
+ * prepared, print-ready order, even after a missed/removed queue position.
  */
 export async function releaseByOtp(
   shopId: string,
@@ -59,9 +58,12 @@ export async function releaseByOtp(
   shopUserId: string,
   manualPrinterId?: string,
   overrideQueue = false,
-  cashReceived = false,
+  paymentConfirmation?: { method: CounterPaymentMethod; reference?: string },
 ): Promise<ReleaseResult> {
-  const shop = await prisma.shop.findUnique({ where: { id: shopId } });
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { id: true, autoAssignEnabled: true, counterUpiVpa: true, counterUpiVerifiedAt: true },
+  });
   if (!shop) throw notFound();
 
   const digest = digestReleaseCode(shopId, otp);
@@ -71,6 +73,8 @@ export async function releaseByOtp(
       releaseCodeDigest: digest,
       OR: [
         { paymentStatus: 'paid' },
+        { paymentProvider: 'pay_at_shop', paymentStatus: 'counter_due' },
+        // Pre-cutover orders may finish safely, but are never used for new work.
         { paymentProvider: 'cash', paymentStatus: 'cash_due' },
       ],
       status: {
@@ -105,12 +109,7 @@ export async function releaseByOtp(
   }
 
   const live = await getJobLiveMetrics(matched.id);
-  const inNormalReleaseWindow = isCounterCodeAvailable(
-    matched.status,
-    live.position,
-    env.NEAR_FRONT_THRESHOLD,
-    matched.nearFrontNotifiedAt !== null,
-  );
+  const inNormalReleaseWindow = isNormalCounterRelease(matched.status, live.position);
   if (!inNormalReleaseWindow && !overrideQueue) {
     return {
       ok: false,
@@ -152,15 +151,19 @@ export async function releaseByOtp(
     }
   }
 
-  const isCashDue = matched.paymentProvider === 'cash' && matched.paymentStatus === 'cash_due';
-  if (isCashDue && !cashReceived) {
+  const isCounterDue = matched.paymentProvider === 'pay_at_shop' && matched.paymentStatus === 'counter_due';
+  const isLegacyCashDue = matched.paymentProvider === 'cash' && matched.paymentStatus === 'cash_due';
+  if ((isCounterDue || isLegacyCashDue) && !paymentConfirmation) {
     return {
       ok: false,
-      requiresCashConfirmation: true,
-      cashAmountPaise: matched.totalPaise,
+      requiresPaymentConfirmation: true,
+      counterPaymentAmountPaise: matched.totalPaise,
       selectedPrinterId: printerId,
       job: matched,
     };
+  }
+  if (paymentConfirmation?.method === 'shop_upi' && (!shop.counterUpiVpa || !shop.counterUpiVerifiedAt)) {
+    throw conflict('Verify this shop’s merchant UPI VPA before confirming a UPI counter payment');
   }
 
   const arrivedAtCounter = ['awaiting_arrival', 'no_show', 'requeued'].includes(matched.status);
@@ -173,11 +176,18 @@ export async function releaseByOtp(
       assignedPrinterId: printerId,
       claimedByAgentId: null,
       printError: null,
-      ...(isCashDue
+      ...(isCounterDue || isLegacyCashDue
         ? {
             paymentStatus: 'paid',
-            paymentId: `cash_${matched.id}`,
-            cashCollectedAt: new Date(),
+            paymentId: `counter_${paymentConfirmation!.method}_${matched.id}`,
+            cashCollectedAt: paymentConfirmation!.method === 'cash' ? new Date() : null,
+            counterPaymentMethod: paymentConfirmation!.method,
+            counterPaymentConfirmedAt: new Date(),
+            counterPaymentConfirmedById: shopUserId,
+            counterPaymentReference: paymentConfirmation!.reference ?? null,
+            // The browser supplies no amount. This immutable snapshot is the
+            // server-calculated amount staff were required to verify.
+            counterPaymentAmountPaise: matched.totalPaise,
           }
         : {}),
       ...(arrivedAtCounter
@@ -196,6 +206,7 @@ export async function releaseByOtp(
       otpCode: null,
       otpExpiresAt: null,
     },
+    !inNormalReleaseWindow ? 'COUNTER_QUEUE_OVERRIDE_RELEASE' : undefined,
   );
   if (!updated) throw conflict('Job state changed, try again');
 

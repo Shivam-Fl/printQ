@@ -29,6 +29,13 @@ enum PrinterStatus {
   jammed
 }
 
+/// A setup-page spool result. This never represents customer-print completion.
+enum PrinterTestStatus {
+  requested
+  spool_accepted
+  failed
+}
+
 enum AgentStatus {
   online
   offline
@@ -36,11 +43,19 @@ enum AgentStatus {
 
 enum PaymentStatus {
   pending
+  /// The student pays the shop directly; only authenticated staff can confirm it.
+  counter_due
+  /// Retained for pre-launch cash orders while rolling out pay-at-shop.
   cash_due
   paid
   refunding
   refunded
   failed
+}
+
+enum CounterPaymentMethod {
+  cash
+  shop_upi
 }
 
 enum PayoutSchedule {
@@ -65,6 +80,51 @@ enum ShopLedgerType {
   adjustment
 }
 
+/// Immutable entries in the amount a shop owes PrintQs for completed prints.
+/// Positive is a receivable; negative is a documented credit/reversal.
+enum CommissionEntryType {
+  print_commission
+  refund_credit
+  manual_credit
+  statement_settlement
+}
+
+enum CollectionMandateMethod {
+  upi_autopay
+  bank_emandate
+  card_recurring
+}
+
+enum CollectionMandateStatus {
+  pending
+  active
+  revoked
+  expired
+  failed
+}
+
+enum CollectionEnvironment {
+  test
+  live
+}
+
+enum CommissionStatementStatus {
+  draft
+  frozen
+  notice_sent
+  debit_pending
+  settled
+  failed
+  paused
+}
+
+enum CommissionCollectionAttemptStatus {
+  pending
+  submitted
+  settled
+  failed
+}
+
 enum ShopBalancePaymentStatus {
   pending
   paid
@@ -81,6 +141,19 @@ enum ShopUserRole {
   staff
 }
 
+/// A shop must be both independently verified and explicitly published before
+/// it can be returned by any student/public discovery route.
+enum ShopVerificationStatus {
+  draft
+  submitted
+  verified
+  rejected
+}
+
+enum AdminRole {
+  platform_admin
+}
+
 enum FileStatus {
   uploaded
   converting
@@ -89,12 +162,30 @@ enum FileStatus {
   deleted
 }
 
+/// The only signals that may start the strict content-deletion clock. A
+/// spool submission is deliberately not represented here: it is not proof
+/// that paper was produced.
+enum PrintCompletionMethod {
+  simulator
+  staff_confirmed
+}
+
 model Shop {
   id                String   @id @default(uuid())
   slug              String   @unique
   name              String
   address           String
+  /// Legacy free-text campus label is retained only for migration/display of
+  /// old records. New discovery uses the canonical Campus relationship.
   campusName        String?
+  campusId          String?
+  campus            Campus?  @relation(fields: [campusId], references: [id])
+  verificationStatus ShopVerificationStatus @default(draft)
+  verificationSubmittedAt DateTime?
+  verifiedAt        DateTime?
+  publishedAt       DateTime?
+  /// Private reviewer context. It is never selected by public or shop routes.
+  verificationNotes String?
   /// Owner-captured counter coordinates. Used for one-time arrival checks and
   /// nearby discovery; students' coordinates are never persisted.
   latitude          Float?
@@ -104,6 +195,11 @@ model Shop {
   payoutSchedule    PayoutSchedule @default(daily)
   razorpayLinkedAccountId String?  @unique
   cashPaymentsEnabled Boolean @default(false)
+  /// Merchant-owned UPI identity used only for attended, manual counter payment.
+  /// It is set after owner verification and never treated as an automated proof.
+  counterUpiVpa String?
+  counterUpiPayeeName String?
+  counterUpiVerifiedAt DateTime?
   autoAssignEnabled Boolean  @default(true)
   acceptingOrders   Boolean  @default(true)
   /// legacy RateCard JSON — superseded by printOptions
@@ -121,8 +217,63 @@ model Shop {
   openInterests ShopOpenInterest[]
   coupons       Coupon[]
   ledgerEntries ShopLedgerEntry[]
+  commissionEntries ShopCommissionEntry[]
+  collectionMandates ShopCollectionMandate[]
+  commissionStatements ShopCommissionStatement[]
   payouts       ShopPayout[]
   balancePayments ShopBalancePayment[]
+
+  @@index([campusId])
+  @@index([verificationStatus, publishedAt])
+}
+
+/// Platform-curated campuses. A shop owner selects an active record rather
+/// than inventing a public campus label; only staff can curate this catalogue.
+model Campus {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  address   String
+  latitude  Float?
+  longitude Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shops     Shop[]
+
+  @@index([isActive, name])
+}
+
+/// Separate platform identity: shop credentials never confer launch-admin
+/// access. Bootstrap credentials are argon2id hashes, injected only at deploy.
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         AdminRole @default(platform_admin)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditEvents  AdminAuditEvent[]
+}
+
+/// Append-only operational audit trail for campus and shop-verification
+/// decisions. Metadata must remain content-free and contain no secrets.
+model AdminAuditEvent {
+  id          String    @id @default(uuid())
+  adminId     String
+  admin       AdminUser @relation(fields: [adminId], references: [id])
+  action      String
+  subjectType String
+  subjectId   String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([subjectType, subjectId, createdAt])
+  @@index([adminId, createdAt])
 }
 
 /// A discount code — platform-wide (shopId null) or scoped to one shop.
@@ -158,12 +309,17 @@ model Student {
   id        String   @id @default(uuid())
   /// E.164, e.g. +919876543210
   phone     String   @unique
+  /// Firebase Auth UID for the server-published, per-student projection.
+  /// Local-development students intentionally have no Firebase identity.
+  firebaseUid String? @unique
   name      String?
   createdAt DateTime @default(now())
 
   jobs              Job[]
   files             UploadedFile[]
   pushSubscriptions PushSubscription[]
+  fcmSubscriptions  FcmSubscription[]
+  notificationDeliveries NotificationDelivery[]
   openInterests     ShopOpenInterest[]
 }
 
@@ -192,6 +348,40 @@ model PushSubscription {
   @@index([studentId])
 }
 
+/// Firebase Cloud Messaging registration for one student-controlled web
+/// device. Tokens are never logged or returned to clients after registration.
+model FcmSubscription {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+/// Durable, idempotent FCM delivery work. PostgreSQL owns the record and the
+/// last retryable error; Firebase is never the source of notification truth.
+model NotificationDelivery {
+  id             String    @id @default(uuid())
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  eventKey       String
+  title          String
+  body           String
+  url            String?
+  createdAt      DateTime  @default(now())
+  deliveredAt    DateTime?
+  leaseExpiresAt DateTime?
+  attempts       Int       @default(0)
+  lastError      String?
+
+  @@unique([studentId, eventKey])
+  @@index([deliveredAt, leaseExpiresAt, createdAt])
+  @@index([studentId, createdAt])
+}
+
 /// Phone-login OTPs. Hashed (argon2 + pepper); plaintext never stored.
 model LoginOtp {
   id         String    @id @default(uuid())
@@ -207,13 +397,17 @@ model LoginOtp {
 
 /// Shop-owner forgot-password codes. Hashed (argon2 + pepper), same as LoginOtp.
 model PasswordResetOtp {
-  id         String    @id @default(uuid())
-  email      String
-  otpHash    String
-  attempts   Int       @default(0)
-  expiresAt  DateTime
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id                  String    @id @default(uuid())
+  email               String
+  otpHash             String
+  attempts            Int       @default(0)
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  deliveryProvider    String?
+  deliveryMessageId   String?
+  deliveryAttemptedAt DateTime?
+  deliveryError       String?
+  createdAt           DateTime  @default(now())
 
   @@index([email, createdAt])
 }
@@ -236,6 +430,14 @@ model Printer {
   osPrinterName        String?
   /// shop paper id -> { paperSize: Windows driver paper size, bin?: tray name }
   mediaConfig          Json          @default("{}")
+  /// Diagnostics only. A spool acceptance remains distinct from physical or
+  /// customer-job completion and is safe to expose to the shop dashboard.
+  lastTestRequestId    String?
+  lastTestRequestedAt  DateTime?
+  lastTestedAt         DateTime?
+  lastTestStatus       PrinterTestStatus?
+  lastTestError        String?
+  lastTestAgentId      String?
   createdAt            DateTime      @default(now())
 
   jobs Job[]
@@ -282,8 +484,14 @@ model UploadedFile {
   pages        Int?
   status       FileStatus @default(uploaded)
   error        String?
-  /// files auto-deleted after this time (privacy, printQ.md §14)
+  /// Event-based deletion deadline. Successful prints and terminal jobs set
+  /// this to their confirmation/terminal timestamp + 10 minutes; unprinted
+  /// uploads use the 24-hour hard maximum.
   deleteAfter  DateTime?
+  deletionScheduledAt DateTime?
+  contentDeletedAt    DateTime?
+  deletionAttempts    Int      @default(0)
+  lastDeletionError   String?
   createdAt    DateTime   @default(now())
 
   jobs Job[]
@@ -324,6 +532,20 @@ model Job {
   paymentId       String?
   /// Set only after counter staff explicitly confirms physical cash receipt.
   cashCollectedAt DateTime?
+  /// Pay-at-shop evidence. These fields are private to shop/admin operations;
+  /// student responses expose only their final price and order state.
+  counterPaymentMethod CounterPaymentMethod?
+  counterPaymentConfirmedAt DateTime?
+  counterPaymentConfirmedById String?
+  counterPaymentReference String?
+  counterPaymentAmountPaise Int?
+  /// An admin/support-confirmed return after payment. The staff counter path
+  /// handles a pre-print return; this record covers audited post-print refunds.
+  refundConfirmedAt DateTime?
+  refundConfirmedByAdminId String?
+  refundAmountPaise Int?
+  refundReason String?
+  refundReference String?
 
   /// coupon code applied at checkout, if any — discount already folded into totalPaise
   couponCode    String?
@@ -369,12 +591,22 @@ model Job {
   /// Persisted spooler failure state so a dashboard refresh never loses the recovery action.
   printError       String?
   printAttempts    Int       @default(0)
+  /// The agent accepted the print into its local driver/spooler. This is not
+  /// successful-print evidence and never starts content deletion.
+  spoolAcceptedAt  DateTime?
+  /// Set only when the simulator completes or authenticated staff confirms
+  /// the physical output. This starts the ten-minute deletion clock.
+  printConfirmedAt DateTime?
+  printConfirmedById String?
+  printCompletionMethod PrintCompletionMethod?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   events JobEvent[]
   ledgerEntries ShopLedgerEntry[]
+  commissionEntries ShopCommissionEntry[]
+  realtimeOutbox RealtimeOutbox[]
 
   @@index([shopId, status])
   @@index([shopId, releaseCodeDigest])
@@ -396,6 +628,26 @@ model JobEvent {
   actorId    String?
   createdAt  DateTime @default(now())
 
+  realtimeOutbox RealtimeOutbox?
+
+  @@index([jobId, createdAt])
+}
+
+/// Rebuildable Firebase projection delivery record. It is inserted in the
+/// same PostgreSQL transaction as its JobEvent, then published at-least-once
+/// by the maintenance worker. It contains no document, location or money data.
+model RealtimeOutbox {
+  id          String   @id @default(uuid())
+  jobEventId  String   @unique
+  jobEvent    JobEvent @relation(fields: [jobEventId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  publishedAt DateTime?
+  attempts    Int      @default(0)
+  lastError   String?
+
+  @@index([publishedAt, createdAt])
   @@index([jobId, createdAt])
 }
 
@@ -471,4 +723,117 @@ model ShopLedgerEntry {
   @@unique([payoutId, type])
   @@unique([balancePaymentId, type])
   @@index([shopId, createdAt])
+}
+
+/// The authoritative weekly-collection source ledger. It is append-only and
+/// deliberately independent of the retired student-payment/payout ledger.
+model ShopCommissionEntry {
+  id          String              @id @default(uuid())
+  shopId      String
+  shop        Shop                @relation(fields: [shopId], references: [id])
+  jobId       String?
+  job         Job?                @relation(fields: [jobId], references: [id])
+  type        CommissionEntryType
+  /// Positive = amount due to PrintQs; negative = approved credit/reversal.
+  amountPaise Int
+  /// Shop bears any discount that brings the final direct counter price below
+  /// its base rate: total = base + commission - shop-funded discount.
+  shopFundedDiscountPaise Int      @default(0)
+    description String
+    createdAt   DateTime            @default(now())
+
+    statementLines ShopCommissionStatementLine[]
+    settlementStatementId String? @unique
+    settlementStatement   ShopCommissionStatement? @relation("StatementSettlement", fields: [settlementStatementId], references: [id])
+
+  @@unique([jobId, type])
+  @@index([shopId, createdAt])
+}
+
+/// Shop-owner recurring collection authorization. Production mandates are
+/// never created from a test environment or without the approved Razorpay use case.
+model ShopCollectionMandate {
+  id                     String                   @id @default(uuid())
+  shopId                 String
+  shop                   Shop                     @relation(fields: [shopId], references: [id])
+  provider               String
+  environment            CollectionEnvironment
+  method                 CollectionMandateMethod
+  status                 CollectionMandateStatus  @default(pending)
+  maxAmountPaise         Int
+  frequency              String                   @default("weekly")
+  validFrom              DateTime
+  validUntil             DateTime
+  cancellationTermsAcceptedAt DateTime?
+  providerCustomerId     String?
+  providerMandateId      String?                  @unique
+  activatedAt            DateTime?
+  revokedAt              DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  statements ShopCommissionStatement[]
+
+  @@index([shopId, status, environment])
+}
+
+/// A frozen weekly statement is the sole source for one variable recurring debit.
+model ShopCommissionStatement {
+  id                     String                   @id @default(uuid())
+  shopId                 String
+  shop                   Shop                     @relation(fields: [shopId], references: [id])
+  mandateId              String?
+  mandate                ShopCollectionMandate?   @relation(fields: [mandateId], references: [id])
+  periodStart            DateTime
+  periodEnd              DateTime
+  grossCommissionPaise   Int
+  creditPaise            Int
+  amountDuePaise         Int
+  status                 CommissionStatementStatus @default(draft)
+  frozenAt               DateTime?
+  preDebitNoticeSentAt   DateTime?
+  debitNotBefore         DateTime?
+  pausedReason           String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+    lines    ShopCommissionStatementLine[]
+    attempts ShopCommissionCollectionAttempt[]
+    settlementEntry ShopCommissionEntry? @relation("StatementSettlement")
+
+  @@unique([shopId, periodStart, periodEnd])
+  @@index([shopId, status, periodEnd])
+}
+
+/// Links each immutable ledger entry to exactly one frozen weekly statement.
+model ShopCommissionStatementLine {
+  id          String                   @id @default(uuid())
+  statementId String
+  statement   ShopCommissionStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  entryId     String
+  entry       ShopCommissionEntry      @relation(fields: [entryId], references: [id])
+  amountPaise Int
+  createdAt   DateTime                 @default(now())
+
+  @@unique([statementId, entryId])
+  @@unique([entryId])
+}
+
+/// Provider attempts use one stable idempotency key per statement/attempt.
+model ShopCommissionCollectionAttempt {
+  id                     String                            @id @default(uuid())
+  statementId            String
+  statement              ShopCommissionStatement           @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  amountPaise            Int
+  status                 CommissionCollectionAttemptStatus @default(pending)
+  provider               String
+  providerCollectionId   String?                           @unique
+  idempotencyKey         String                            @unique
+  failureReason          String?
+  submittedAt            DateTime?
+  settledAt              DateTime?
+  createdAt              DateTime                          @default(now())
+  updatedAt              DateTime                          @updatedAt
+
+  @@index([statementId, status, createdAt])
 }

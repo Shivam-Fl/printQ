@@ -8,13 +8,13 @@ import { validateBody } from '../../middleware/validate.js';
 import { storage } from '../../providers/storage/index.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
-import { notifyStudent } from '../../providers/notification/index.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
 import { notifyShopReopened } from '../shops/availability.js';
-import { creditPrintEarning } from '../earnings/service.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
+import { env } from '../../config/env.js';
+import { confirmSuccessfulPrint, recordSpoolAccepted } from '../jobs/printCompletion.js';
 
 export const agentRouter = Router();
 agentRouter.use(requireAgent);
@@ -179,57 +179,84 @@ agentRouter.get(
   }),
 );
 
+const completePrintSchema = z.object({
+  // A normal Windows spooler tells us only that it accepted the job. The
+  // simulator is deterministic and may complete automatically in test/dev.
+  outcome: z.enum(['spool_accepted', 'simulator_complete']),
+});
+
+const printerTestResultSchema = z.object({
+  testId: z.string().uuid(),
+  printerId: z.string().uuid(),
+  status: z.enum(['spool_accepted', 'failed']),
+  error: z.string().trim().max(200).optional(),
+});
+
+/** Record a setup-page spool result without ever creating or advancing a Job. */
+agentRouter.post(
+  '/printer-tests/result',
+  validateBody(printerTestResultSchema),
+  asyncHandler(async (req, res) => {
+    const agent = req.agent!;
+    const result = req.body as z.infer<typeof printerTestResultSchema>;
+    const changed = await prisma.printer.updateMany({
+      where: {
+        id: result.printerId,
+        shopId: agent.shopId,
+        lastTestRequestId: result.testId,
+        lastTestAgentId: agent.id,
+      },
+      data: {
+        lastTestedAt: new Date(),
+        lastTestStatus: result.status,
+        lastTestError: result.status === 'failed' ? (result.error || 'The printer rejected the setup page') : null,
+      },
+    });
+    if (changed.count === 0) throw conflict('Printer test is no longer current');
+    publishEvent(`shop:${agent.shopId}`, 'printer:test_result', {
+      printerId: result.printerId,
+      testId: result.testId,
+      status: result.status,
+    });
+    res.json({ ok: true });
+  }),
+);
+
 agentRouter.post(
   '/jobs/:id/complete',
+  validateBody(completePrintSchema),
   asyncHandler(async (req, res) => {
     const agent = req.agent!;
     const job = await prisma.job.findFirst({
       where: { id: param(req, 'id'), shopId: agent.shopId, claimedByAgentId: agent.id },
     });
     if (!job) throw notFound();
-    if (job.status !== 'printing') throw conflict('Job is not printing');
+    if (job.status !== 'printing') {
+      // Network retries after a confirmed simulator result are harmless.
+      if (job.printConfirmedAt) {
+        res.json({ ok: true, alreadyConfirmed: true });
+        return;
+      }
+      throw conflict('Job is not printing');
+    }
 
-    const specs = job.specs as unknown as JobSpecs;
-    const needsManualFinishing = Boolean(specs.binding);
-    const updated = await applyTransition(job.id, 'printing', needsManualFinishing ? 'FINISHING_REQUIRED' : 'PRINT_COMPLETED', {
-      type: 'agent',
-      id: agent.id,
-    }, { printError: null });
-    if (!updated) throw conflict('Job state changed');
-
-    if (needsManualFinishing) {
-      await notifyStudent(job.studentId, {
-        title: 'Printing complete — finishing in progress',
-        body: 'The shop is completing the requested binding. We’ll tell you when it is ready to collect.',
-        url: `/jobs/${job.id}`,
-      });
-      publishEvent(`student:${job.studentId}`, 'job:update', {
-        jobId: job.id,
-        status: 'finishing',
-      });
-      publishEvent(`shop:${job.shopId}`, 'queue:finishing_required', { jobId: job.id, binding: specs.binding });
-      res.json({ ok: true, finishingRequired: true });
+    const { outcome } = req.body as z.infer<typeof completePrintSchema>;
+    if (outcome === 'simulator_complete') {
+      if (!env.ALLOW_SIMULATED_PRINT_COMPLETION) {
+        throw conflict('Simulator print completion is disabled in this environment');
+      }
+      const completed = await confirmSuccessfulPrint(job, { type: 'agent', id: agent.id }, 'simulator');
+      if (!completed) throw conflict('Job state changed');
+      res.json({ ok: true, finishingRequired: completed.finishingRequired, completionConfirmed: true });
       return;
     }
 
-    // Printing is the earning event—not upload, payment, queueing or handover.
-    // The upsert is idempotent; the maintenance reconciler repairs a rare
-    // database interruption without making the physical print fail again.
-    await creditPrintEarning(updated.id).catch((error) => {
-      logger.error({ error, jobId: updated.id }, 'shop_earning_credit_deferred');
-    });
-
-    await notifyStudent(job.studentId, {
-      title: 'Print ready ✓',
-      body: 'Collect it at the counter.',
-      url: `/jobs/${job.id}`,
-    });
-    publishEvent(`student:${job.studentId}`, 'job:update', {
-      jobId: job.id,
-      status: 'ready_for_pickup',
-    });
-    publishEvent(`shop:${job.shopId}`, 'queue:job_ready', { jobId: job.id });
-    res.json({ ok: true });
+    await recordSpoolAccepted(job.id);
+    // This is a deliberately visible handoff: driver acceptance isn't reliable
+    // physical completion, so the counter must inspect the output and choose
+    // “Printed successfully” before the job becomes ready or files can delete.
+    publishEvent(`shop:${job.shopId}`, 'queue:print_confirmation_required', { jobId: job.id });
+    res.json({ ok: true, completionConfirmationRequired: true });
   }),
 );
 

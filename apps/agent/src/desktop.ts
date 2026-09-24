@@ -14,21 +14,14 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-interface DesktopConfig {
-  apiUrl: string;
-  webUrl: string;
-  token: string;
-  mode: 'real' | 'simulate';
-}
-
-interface StoredDesktopConfig {
-  apiUrl?: string;
-  webUrl?: string;
-  token?: string;
-  tokenEncrypted?: string;
-  mode?: 'real' | 'simulate';
-}
+import {
+  fromStoredDesktopConfig,
+  toStoredDesktopConfig,
+  type DesktopConfig,
+  type SecureStorage,
+  type StoredDesktopConfig,
+} from './secureConfig.js';
+import { restartDelayMs } from './restartPolicy.js';
 
 interface AgentStatus {
   state: 'setup_required' | 'connecting' | 'online' | 'offline' | 'error';
@@ -42,6 +35,8 @@ const productionApiUrl = 'https://api.printqs.com';
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let agentProcess: ChildProcess | null = null;
+let restartTimer: NodeJS.Timeout | null = null;
+let restartAttempts = 0;
 let shuttingDown = false;
 let status: AgentStatus = {
   state: 'setup_required',
@@ -50,30 +45,17 @@ let status: AgentStatus = {
 };
 
 const configPath = () => path.join(app.getPath('userData'), 'shop-config.json');
-
-function decodeToken(parsed: StoredDesktopConfig): string | null {
-  if (parsed.tokenEncrypted && safeStorage.isEncryptionAvailable()) {
-    try {
-      return safeStorage.decryptString(Buffer.from(parsed.tokenEncrypted, 'base64'));
-    } catch {
-      return null;
-    }
-  }
-  return parsed.token || null;
-}
+const secureStorage: SecureStorage = {
+  isAvailable: () => safeStorage.isEncryptionAvailable(),
+  encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
+  decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+};
 
 async function loadConfig(): Promise<DesktopConfig | null> {
   if (!existsSync(configPath())) return null;
   try {
     const parsed = JSON.parse(await readFile(configPath(), 'utf8')) as StoredDesktopConfig;
-    const token = decodeToken(parsed);
-    if (!token || !parsed.apiUrl) return null;
-    return {
-      apiUrl: parsed.apiUrl.replace(/\/$/, ''),
-      webUrl: (parsed.webUrl || productionWebUrl).replace(/\/$/, ''),
-      token,
-      mode: parsed.mode === 'simulate' ? 'simulate' : 'real',
-    };
+    return fromStoredDesktopConfig(parsed, secureStorage);
   } catch {
     return null;
   }
@@ -99,12 +81,29 @@ function setStatus(next: AgentStatus['state'], detail: string): void {
   tray?.setToolTip(`PrintQs Shop — ${next.replace('_', ' ')}`);
 }
 
+function cancelScheduledRestart(): void {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = null;
+}
+
 function stopAgent(): void {
   agentProcess?.kill();
   agentProcess = null;
 }
 
-async function startAgent(): Promise<void> {
+function scheduleRestart(exitCode: number | null): void {
+  if (shuttingDown || restartTimer) return;
+  const delay = restartDelayMs(restartAttempts++);
+  setStatus('offline', `Printer engine stopped${exitCode == null ? '' : ` (code ${exitCode})`}. Retrying automatically in ${Math.ceil(delay / 1_000)} seconds.`);
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    void startAgent();
+  }, delay);
+}
+
+async function startAgent({ resetRestartAttempts = false }: { resetRestartAttempts?: boolean } = {}): Promise<void> {
+  if (resetRestartAttempts) restartAttempts = 0;
+  cancelScheduledRestart();
   stopAgent();
   const config = await loadConfig();
   if (!config) {
@@ -114,7 +113,7 @@ async function startAgent(): Promise<void> {
 
   setStatus('connecting', config.mode === 'simulate' ? 'Starting safe printer simulation…' : 'Connecting to installed Windows printers…');
   const agentScript = path.join(currentDir, 'index.js');
-  agentProcess = spawn(process.execPath, [agentScript, ...(config.mode === 'simulate' ? ['--simulate'] : [])], {
+  const spawned = spawn(process.execPath, [agentScript, ...(config.mode === 'simulate' ? ['--simulate'] : [])], {
     windowsHide: true,
     env: {
       ...process.env,
@@ -125,22 +124,29 @@ async function startAgent(): Promise<void> {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  agentProcess = spawned;
 
   const consume = (chunk: Buffer) => {
     for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
       if (line.includes('Connected to PrintQ')) {
+        restartAttempts = 0;
         setStatus('online', config.mode === 'simulate' ? 'Printer simulator connected and ready.' : 'Printer engine connected and ready.');
-      } else if (line.includes('printer(s) found')) setStatus('online', line.trim());
+      } else if (line.includes('printer(s) found')) {
+        restartAttempts = 0;
+        setStatus('online', line.trim());
+      }
       else if (/failed|error/i.test(line)) setStatus('error', line.trim().slice(0, 240));
     }
   };
-  agentProcess.stdout?.on('data', consume);
-  agentProcess.stderr?.on('data', consume);
-  agentProcess.on('exit', (code) => {
+  spawned.stdout?.on('data', consume);
+  spawned.stderr?.on('data', consume);
+  spawned.on('exit', (code) => {
+    // A manual restart replaces the process before its exit event arrives.
+    if (agentProcess !== spawned) return;
     agentProcess = null;
-    if (!shuttingDown) setStatus('offline', `Printer engine stopped${code == null ? '' : ` (code ${code})`}. Restart it from Computers.`);
+    scheduleRestart(code);
   });
-  agentProcess.on('error', (error) => setStatus('error', error.message));
+  spawned.on('error', (error) => setStatus('error', error.message));
 }
 
 function isAllowedUrl(raw: string): boolean {
@@ -222,7 +228,7 @@ function createTray(): Tray {
   value.setToolTip('PrintQs Shop');
   value.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open shop dashboard', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
-    { label: 'Restart printer engine', click: () => void startAgent() },
+    { label: 'Restart printer engine', click: () => void startAgent({ resetRestartAttempts: true }) },
     { type: 'separator' },
     { label: 'Quit PrintQs Shop', click: () => { shuttingDown = true; app.quit(); } },
   ]));
@@ -244,14 +250,7 @@ ipcMain.handle('agent:configure', async (event, input: Partial<DesktopConfig>) =
   if (!isAllowedUrl(webUrl)) throw new Error('Invalid PrintQs dashboard URL.');
   if (token.length < 20) throw new Error('The secure computer token is incomplete.');
   const config: DesktopConfig = { apiUrl, webUrl, token, mode: input.mode === 'simulate' ? 'simulate' : 'real' };
-  const stored: StoredDesktopConfig = {
-    apiUrl,
-    webUrl,
-    mode: config.mode,
-    ...(safeStorage.isEncryptionAvailable()
-      ? { tokenEncrypted: safeStorage.encryptString(token).toString('base64') }
-      : { token }),
-  };
+  const stored = toStoredDesktopConfig(config, secureStorage);
   await mkdir(path.dirname(configPath()), { recursive: true });
   await writeFile(configPath(), JSON.stringify(stored, null, 2), { mode: 0o600 });
   await startAgent();
@@ -259,7 +258,7 @@ ipcMain.handle('agent:configure', async (event, input: Partial<DesktopConfig>) =
 });
 ipcMain.handle('agent:restart', async (event) => {
   assertTrustedSender(event);
-  await startAgent();
+  await startAgent({ resetRestartAttempts: true });
   return status;
 });
 ipcMain.handle('agent:open-dashboard', async (event) => {
@@ -277,6 +276,6 @@ else {
     tray = createTray();
     await startAgent();
   });
-  app.on('before-quit', () => { shuttingDown = true; stopAgent(); });
+  app.on('before-quit', () => { shuttingDown = true; cancelScheduledRestart(); stopAgent(); });
   app.on('window-all-closed', () => undefined);
 }

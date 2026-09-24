@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import argon2 from 'argon2';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   createStaffSchema,
@@ -13,7 +14,7 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
-import { otpVerifyLimiter } from '../../middleware/rateLimit.js';
+import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -30,17 +31,13 @@ import {
 import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
-import {
-  confirmShopBalancePayment,
-  createShopBalancePayment,
-  creditPrintEarning,
-  getShopEarnings,
-  requestShopPayout,
-} from '../earnings/service.js';
+import { getCommissionOverview } from '../commission/service.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
+import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
 
@@ -59,12 +56,21 @@ shopRouter.get(
         name: true,
         address: true,
         campusName: true,
+        campusId: true,
+        campus: { select: { id: true, name: true, slug: true } },
+        verificationStatus: true,
+        verificationSubmittedAt: true,
+        verifiedAt: true,
+        publishedAt: true,
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
         cashPaymentsEnabled: true,
+        counterUpiVpa: true,
+        counterUpiPayeeName: true,
+        counterUpiVerifiedAt: true,
         acceptingOrders: true,
         printOptions: true,
         otpWindowMinutes: true,
@@ -119,12 +125,30 @@ shopRouter.get(
 
     res.json({
       setup: {
-        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
+        profileReady: Boolean(shop.name.trim() && shop.address.trim() && shop.campusId),
         locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
         agentReady,
-        ready: locationReady && pricingReady && readyPrinters.length > 0 && agentReady,
+        ready: locationReady
+          && pricingReady
+          && readyPrinters.length > 0
+          && agentReady
+          && shop.verificationStatus === 'verified'
+          && shop.publishedAt != null,
+        verification: {
+          status: shop.verificationStatus,
+          submittedAt: shop.verificationSubmittedAt,
+          verifiedAt: shop.verifiedAt,
+          publishedAt: shop.publishedAt,
+          canSubmit: locationReady
+            && pricingReady
+            && readyPrinters.length > 0
+            && agentReady
+            && Boolean(shop.campusId)
+            && shop.verificationStatus !== 'submitted'
+            && shop.verificationStatus !== 'verified',
+        },
         acceptingOrders: shop.acceptingOrders,
         counts: {
           printers: printers.length,
@@ -143,11 +167,14 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
+  campusId: z.string().uuid().nullable().optional(),
   latitude: z.number().finite().min(-90).max(90).nullable().optional(),
   longitude: z.number().finite().min(-180).max(180).nullable().optional(),
-  checkInRadiusM: z.number().int().min(20).max(500).optional(),
+  checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100)]).optional(),
   autoAssignEnabled: z.boolean().optional(),
   cashPaymentsEnabled: z.boolean().optional(),
+  counterUpiVpa: z.string().trim().toLowerCase().max(120).regex(/^[a-z0-9._-]{2,100}@[a-z][a-z0-9.-]{1,63}$/, 'Enter a valid merchant UPI VPA').nullable().optional(),
+  counterUpiPayeeName: z.string().trim().min(2).max(120).nullable().optional(),
   acceptingOrders: z.boolean().optional(),
   printOptions: printOptionsSchema.optional(),
 }).superRefine((value, context) => {
@@ -160,6 +187,15 @@ const shopPatchSchema = z.object({
       message: 'Latitude and longitude must be updated together',
     });
   }
+  const vpaProvided = value.counterUpiVpa !== undefined;
+  const payeeProvided = value.counterUpiPayeeName !== undefined;
+  if (vpaProvided !== payeeProvided || (vpaProvided && ((value.counterUpiVpa == null) !== (value.counterUpiPayeeName == null)))) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['counterUpiVpa'],
+      message: 'Merchant UPI VPA and payee name must be updated together',
+    });
+  }
 });
 
 /** Owner-only settings updates (details, auto-assign, print menu + pricing). */
@@ -168,14 +204,35 @@ shopRouter.patch(
   requireShopOwner,
   validateBody(shopPatchSchema),
   asyncHandler(async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    if (typeof body.campusId === 'string') {
+      const campus = await prisma.campus.findFirst({ where: { id: body.campusId, isActive: true }, select: { id: true } });
+      if (!campus) throw badRequest('Choose an active campus from the approved list');
+    }
+    // Any material profile, location, campus or menu change must go through
+    // review again. An old publish decision cannot silently cover new facts.
+    const verificationReset = ['name', 'address', 'campusId', 'campusName', 'latitude', 'longitude', 'printOptions']
+      .some((key) => key in body);
     const shop = await prisma.shop.update({
       where: { id: req.shopUser!.shopId },
       data: {
-        ...(req.body as object),
-        ...('latitude' in req.body ? {
-          locationUpdatedAt: typeof req.body.latitude === 'number' && typeof req.body.longitude === 'number'
+        ...(body as object),
+        ...('latitude' in body ? {
+          locationUpdatedAt: typeof body.latitude === 'number' && typeof body.longitude === 'number'
             ? new Date()
             : null,
+        } : {}),
+        ...(verificationReset ? {
+          verificationStatus: 'draft',
+          verificationSubmittedAt: null,
+          verifiedAt: null,
+          publishedAt: null,
+          verificationNotes: null,
+        } : {}),
+        ...(('counterUpiVpa' in body || 'counterUpiPayeeName' in body) ? {
+          // Changing either merchant identity invalidates the prior manual
+          // verification; no browser callback can restore it.
+          counterUpiVerifiedAt: null,
         } : {}),
       },
       select: {
@@ -183,17 +240,144 @@ shopRouter.patch(
         name: true,
         address: true,
         campusName: true,
+        campusId: true,
+        campus: { select: { id: true, name: true, slug: true } },
+        verificationStatus: true,
+        verificationSubmittedAt: true,
+        verifiedAt: true,
+        publishedAt: true,
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
         cashPaymentsEnabled: true,
+        counterUpiVpa: true,
+        counterUpiPayeeName: true,
+        counterUpiVerifiedAt: true,
         acceptingOrders: true,
         printOptions: true,
       },
     });
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
+  }),
+);
+
+/**
+ * Owner attests that the displayed VPA and payee name were checked in the
+ * shop's merchant app. This records a fresh verification timestamp; it does
+ * not accept a UPI intent callback, screenshot or typed UTR as proof.
+ */
+shopRouter.post(
+  '/counter-upi/verify',
+  requireShopOwner,
+  validateBody(z.object({ merchantAppChecked: z.literal(true) }).strict()),
+  asyncHandler(async (req, res) => {
+    const shop = await prisma.shop.findUnique({
+      where: { id: req.shopUser!.shopId },
+      select: { counterUpiVpa: true, counterUpiPayeeName: true },
+    });
+    if (!shop?.counterUpiVpa || !shop.counterUpiPayeeName) {
+      throw conflict('Save the merchant UPI VPA and payee name before marking it verified');
+    }
+    const updated = await prisma.shop.update({
+      where: { id: req.shopUser!.shopId },
+      data: { counterUpiVerifiedAt: new Date() },
+      select: { counterUpiVpa: true, counterUpiPayeeName: true, counterUpiVerifiedAt: true },
+    });
+    res.json({ counterUpi: updated });
+  }),
+);
+
+/**
+ * Send a locally generated, non-customer setup page to one specific online
+ * computer. A test spool result is never a customer-print completion signal.
+ */
+shopRouter.post(
+  '/printers/:id/test-print',
+  requireShopUser,
+  validateBody(z.object({ agentId: z.string().uuid().optional() })),
+  asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
+    const printer = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
+    if (!printer) throw notFound();
+    if (printer.status !== 'online') throw conflict('Mark this printer online before running a test page');
+    if (!printer.osPrinterName) throw conflict('Link this printer to a Windows printer before running a test page');
+
+    const agents = await prisma.agent.findMany({
+      where: { shopId },
+      select: { id: true, status: true, connectedPrinterIds: true },
+    });
+    const requestedAgentId = (req.body as { agentId?: string }).agentId;
+    const agent = selectPrinterTestAgent(agents, printer.id, requestedAgentId);
+    if (!agent) {
+      throw conflict(requestedAgentId
+        ? 'That computer is no longer online or linked to this printer'
+        : 'Choose an online connected computer for this printer');
+    }
+
+    const testId = randomUUID();
+    const paperSize = printer.paperSizesLoaded[0] ?? 'A4';
+    const configuredMedia = (printer.mediaConfig as Record<string, { paperSize?: string; bin?: string | null }>)[paperSize];
+    const media = { paperSize: configuredMedia?.paperSize || paperSize, bin: configuredMedia?.bin ?? null };
+    await prisma.printer.update({
+      where: { id: printer.id },
+      data: {
+        lastTestRequestId: testId,
+        lastTestRequestedAt: new Date(),
+        lastTestStatus: 'requested',
+        lastTestError: null,
+        lastTestAgentId: agent.id,
+      },
+    });
+    publishEvent(`agent:${agent.id}`, 'printer:test_page', {
+      testId,
+      printerId: printer.id,
+      printerLabel: printer.label,
+      osPrinterName: printer.osPrinterName,
+      options: { paperSize: media.paperSize, bin: media.bin, color: printer.colorSupport, duplex: false },
+    });
+    res.status(202).json({
+      ok: true,
+      testId,
+      message: 'Test page sent to the Windows spooler. Inspect the physical page before accepting orders.',
+    });
+  }),
+);
+
+/** Submit a complete shop profile for independent platform verification. */
+shopRouter.post(
+  '/verification/submit',
+  requireShopOwner,
+  asyncHandler(async (req, res) => {
+    const shop = await prisma.shop.findUnique({
+      where: { id: req.shopUser!.shopId },
+      include: { campus: true, printers: true, agents: true },
+    });
+    if (!shop) throw notFound();
+    const hasCoordinates = shop.latitude != null && shop.longitude != null;
+    const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
+    const hasAgent = shop.agents.length > 0;
+    const hasMenu = shopOptions(shop).papers.length > 0;
+    if (!shop.campus || !shop.campus.isActive || !hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
+      throw badRequest('Complete campus, location, printer, agent, and print-menu setup before requesting verification');
+    }
+    if (shop.verificationStatus === 'verified') {
+      res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
+      return;
+    }
+    const updated = await prisma.shop.update({
+      where: { id: shop.id },
+      data: {
+        verificationStatus: 'submitted',
+        verificationSubmittedAt: new Date(),
+        verifiedAt: null,
+        publishedAt: null,
+        verificationNotes: null,
+      },
+      select: { verificationStatus: true, verificationSubmittedAt: true },
+    });
+    res.json({ verification: { status: updated.verificationStatus, submittedAt: updated.verificationSubmittedAt } });
   }),
 );
 
@@ -215,65 +399,12 @@ shopRouter.patch(
   }),
 );
 
-/** Private owner ledger. Never mounted on any student/public route. */
+/** Private owner commission ledger. Never mounted on any student/public route. */
 shopRouter.get(
   '/earnings',
   requireShopOwner,
   asyncHandler(async (req, res) => {
-    res.json({ earnings: await getShopEarnings(req.shopUser!.shopId) });
-  }),
-);
-
-shopRouter.patch(
-  '/earnings/settings',
-  requireShopOwner,
-  validateBody(z.object({ payoutSchedule: z.enum(['daily', 'on_demand']) })),
-  asyncHandler(async (req, res) => {
-    const { payoutSchedule } = req.body as { payoutSchedule: 'daily' | 'on_demand' };
-    const shop = await prisma.shop.update({
-      where: { id: req.shopUser!.shopId },
-      data: { payoutSchedule },
-      select: { payoutSchedule: true },
-    });
-    res.json({ settings: shop });
-  }),
-);
-
-shopRouter.post(
-  '/earnings/payout',
-  requireShopOwner,
-  asyncHandler(async (req, res) => {
-    const payout = await requestShopPayout(req.shopUser!.shopId, req.shopUser!.id);
-    res.status(201).json({ payout });
-  }),
-);
-
-/** Settle a negative shop ledger created by cash-collected platform fees. */
-shopRouter.post(
-  '/earnings/pay-due',
-  requireShopOwner,
-  asyncHandler(async (req, res) => {
-    const result = await createShopBalancePayment(req.shopUser!.shopId, req.shopUser!.id);
-    res.status(result.created ? 201 : 200).json(result);
-  }),
-);
-
-/** Local/test provider equivalent of Razorpay's captured-payment webhook. */
-shopRouter.post(
-  '/earnings/pay-due/mock-confirm',
-  requireShopOwner,
-  validateBody(z.object({ balancePaymentId: z.string().uuid() })),
-  asyncHandler(async (req, res) => {
-    if (env.PAYMENT_PROVIDER !== 'mock') throw notFound();
-    const balancePayment = await prisma.shopBalancePayment.findFirst({
-      where: {
-        id: (req.body as { balancePaymentId: string }).balancePaymentId,
-        shopId: req.shopUser!.shopId,
-      },
-    });
-    if (!balancePayment) throw notFound();
-    await confirmShopBalancePayment(balancePayment.providerOrderId, `mock_balance_${balancePayment.id}`);
-    res.json({ ok: true });
+    res.json({ earnings: await getCommissionOverview(req.shopUser!.shopId) });
   }),
 );
 
@@ -494,6 +625,9 @@ shopRouter.get(
         otpExpiresAt: true,
         printError: true,
         printAttempts: true,
+        spoolAcceptedAt: true,
+        printConfirmedAt: true,
+        printCompletionMethod: true,
         queuedAt: true,
         arrivedAt: true,
         checkInCount: true,
@@ -518,14 +652,14 @@ shopRouter.get(
 shopRouter.post(
   '/release',
   requireShopUser,
-  otpVerifyLimiter,
+  counterReleaseLimiter,
   validateBody(releaseOtpSchema),
   asyncHandler(async (req, res) => {
-    const { otp, printerId, overrideQueue, cashReceived } = req.body as {
+    const { otp, printerId, overrideQueue, paymentConfirmation } = req.body as {
       otp: string;
       printerId?: string;
       overrideQueue: boolean;
-      cashReceived: boolean;
+      paymentConfirmation?: { method: 'cash' | 'shop_upi'; reference?: string };
     };
     const result = await releaseByOtp(
       req.shopUser!.shopId,
@@ -533,14 +667,14 @@ shopRouter.post(
       req.shopUser!.id,
       printerId,
       overrideQueue,
-      cashReceived,
+      paymentConfirmation,
     );
     if (!result.ok) {
       res.status(200).json({
         requiresManualAssignment: result.requiresManualAssignment,
         requiresQueueOverride: result.requiresQueueOverride,
-        requiresCashConfirmation: result.requiresCashConfirmation,
-        cashAmountPaise: result.cashAmountPaise,
+        requiresPaymentConfirmation: result.requiresPaymentConfirmation,
+        counterPaymentAmountPaise: result.counterPaymentAmountPaise,
         selectedPrinterId: result.selectedPrinterId,
         position: result.position,
         queueStatus: result.queueStatus,
@@ -548,6 +682,24 @@ shopRouter.post(
         eligiblePrinters: result.eligiblePrinters,
       });
       return;
+    }
+    if (result.job!.counterPaymentConfirmedAt && result.job!.counterPaymentMethod) {
+      await prisma.paymentEvent.upsert({
+        where: { providerEventId: `counter_payment_${result.job!.id}` },
+        create: {
+          provider: 'pay_at_shop',
+          providerEventId: `counter_payment_${result.job!.id}`,
+          jobId: result.job!.id,
+          payload: {
+            method: result.job!.counterPaymentMethod,
+            amountPaise: result.job!.counterPaymentAmountPaise ?? result.job!.totalPaise,
+            confirmedByShopUserId: result.job!.counterPaymentConfirmedById,
+            confirmedAt: result.job!.counterPaymentConfirmedAt.toISOString(),
+            reference: result.job!.counterPaymentReference,
+          },
+        },
+        update: {},
+      });
     }
     res.json({ ok: true, job: { id: result.job!.id, status: result.job!.status } });
   }),
@@ -630,46 +782,86 @@ shopRouter.post(
   }),
 );
 
-/** Close a collected-cash order only after staff physically returns the cash. */
+/**
+ * Real Windows drivers usually acknowledge a spool submission rather than
+ * physical completion. Staff inspect the paper and make this auditable action
+ * before PrintQs treats the job as printed, posts commission, or deletes files.
+ */
 shopRouter.post(
-  '/jobs/:id/cash-returned',
+  '/jobs/:id/confirm-print-completion',
   requireShopUser,
+  asyncHandler(async (req, res) => {
+    const job = await prisma.job.findFirst({
+      where: { id: param(req, 'id'), shopId: req.shopUser!.shopId },
+    });
+    if (!job) throw notFound();
+    if (job.status !== 'printing') throw conflict('This job is not awaiting print confirmation');
+
+    const completed = await confirmSuccessfulPrint(
+      job,
+      { type: 'shop', id: req.shopUser!.id },
+      'staff_confirmed',
+    );
+    if (!completed) throw conflict('Job state changed, refresh and try again');
+    res.json({
+      ok: true,
+      job: { id: completed.job.id, status: completed.job.status },
+      finishingRequired: completed.finishingRequired,
+    });
+  }),
+);
+
+/**
+ * Close a failed pay-at-shop order only after staff physically returns the
+ * full amount. This is an auditable counter record, never a provider refund.
+ */
+shopRouter.post(
+  '/jobs/:id/counter-payment-returned',
+  requireShopUser,
+  validateBody(z.object({ reference: z.string().trim().min(1).max(120).optional() }).strict()),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!job) throw notFound();
     if (
-      job.paymentProvider !== 'cash'
+      job.paymentProvider !== 'pay_at_shop'
       || job.paymentStatus !== 'paid'
-      || !job.cashCollectedAt
+      || !job.counterPaymentConfirmedAt
       || job.status !== 'otp_verified'
     ) {
-      throw conflict('This cash order cannot be closed in its current state');
+      throw conflict('This counter-paid order cannot be closed in its current state');
     }
 
     const updated = await applyTransition(
       job.id,
       'otp_verified',
-      'CASH_RETURNED',
+      'COUNTER_PAYMENT_RETURNED',
       { type: 'shop', id: req.shopUser!.id },
       { paymentStatus: 'refunded', claimedByAgentId: null, printError: null },
     );
     if (!updated) throw conflict('Job state changed, try again');
     await prisma.paymentEvent.upsert({
-      where: { providerEventId: `cash_returned_${job.id}` },
+      where: { providerEventId: `counter_payment_returned_${job.id}` },
       create: {
-        provider: 'cash',
-        providerEventId: `cash_returned_${job.id}`,
+        provider: 'pay_at_shop',
+        providerEventId: `counter_payment_returned_${job.id}`,
         jobId: job.id,
-        payload: { cashReturned: true, returnedByShopUserId: req.shopUser!.id },
+        payload: {
+          counterPaymentReturned: true,
+          method: job.counterPaymentMethod,
+          amountPaise: job.counterPaymentAmountPaise ?? job.totalPaise,
+          reference: (req.body as { reference?: string }).reference ?? null,
+          returnedByShopUserId: req.shopUser!.id,
+        },
       },
       update: {},
     });
     await scheduleFileDeletion(job.fileId);
     await notifyStudent(job.studentId, {
-      title: 'Cash returned — order closed',
-      body: 'The shop could not complete this print and returned your cash. The order has been cancelled.',
+      title: 'Payment returned — order closed',
+      body: 'The shop could not complete this print and returned your counter payment. The order has been cancelled.',
       url: `/jobs/${job.id}`,
+      eventKey: `counter-payment-returned:${job.id}`,
     });
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'cancelled' });
     await emitQueueUpdate(shopId);
@@ -693,11 +885,11 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
-    await creditPrintEarning(updated.id);
     await notifyStudent(job.studentId, {
       title: 'Print ready ✓',
       body: 'Printing and finishing are complete. Collect it at the counter.',
       url: `/jobs/${job.id}`,
+      eventKey: `finishing-ready:${job.id}:${updated.updatedAt.toISOString()}`,
     });
     publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
     publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
@@ -705,7 +897,7 @@ shopRouter.post(
   }),
 );
 
-/** Hand the finished print to the student — closes the job and starts file retention. */
+/** Hand the finished print to the student — its deletion clock started at confirmed printing. */
 shopRouter.post(
   '/jobs/:id/handover',
   requireShopUser,
@@ -721,7 +913,6 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
-    await scheduleFileDeletion(job.fileId);
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),

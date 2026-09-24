@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+// sdlc — install and verify the framework in a repo.
+//
+//   sdlc install   put the framework into another repository, config written from a scan
+//   sdlc doctor    check every token, label, secret and workflow end to end
+//   sdlc init      create labels, the state branch, and the kill switch variable
+//   sdlc status    show every issue in flight
+//
+// `doctor` exists because the failure mode of a system like this is silent: a missing secret
+// or an uninstalled App produces a workflow that looks fine and quietly never runs. Better to
+// fail loudly at install than to wonder why nothing happened to your issue.
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { load as parseYaml } from 'js-yaml';
+
+const exec = promisify(execFile);
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+const sh = async (cmd, args) => (await exec(cmd, args, { maxBuffer: 10 * 1024 * 1024 })).stdout.trim();
+const gh = (args) => sh('gh', args);
+
+const OK = '\x1b[32m✓\x1b[0m';
+const BAD = '\x1b[31m✗\x1b[0m';
+const WARN = '\x1b[33m!\x1b[0m';
+
+let failures = 0;
+let warnings = 0;
+
+function pass(label, detail = '') { process.stdout.write(`  ${OK} ${label}${detail ? '  ' + detail : ''}\n`); }
+function fail(label, fix) { failures++; process.stdout.write(`  ${BAD} ${label}\n      fix: ${fix}\n`); }
+function warn(label, note) { warnings++; process.stdout.write(`  ${WARN} ${label}\n      ${note}\n`); }
+function section(name) { process.stdout.write(`\n\x1b[1m${name}\x1b[0m\n`); }
+
+async function currentRepo() {
+  try {
+    return JSON.parse(await gh(['repo', 'view', '--json', 'nameWithOwner'])).nameWithOwner;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+async function doctor() {
+  process.stdout.write('\nsdlc doctor\n');
+
+  section('Local tooling');
+  try {
+    const v = (await sh('node', ['--version'])).replace('v', '');
+    Number(v.split('.')[0]) >= 20
+      ? pass('node', v)
+      : fail(`node ${v} is too old`, 'install Node 20 or newer');
+  } catch { fail('node not found', 'install Node 20+'); }
+
+  try { pass('gh', (await sh('gh', ['--version'])).split('\n')[0].replace('gh version ', '')); }
+  catch { return fail('gh CLI not found', 'brew install gh'); }
+
+  section('GitHub auth');
+  let repo = null;
+  try {
+    const status = await exec('gh', ['auth', 'status']).then((r) => r.stdout + r.stderr).catch((e) => e.stdout + e.stderr);
+    const active = status.match(/Logged in to \S+ account (\S+).*?\n\s+- Active account: true/s);
+    active ? pass('authenticated', 'as ' + active[1]) : warn('could not determine the active account', status.split('\n')[1] ?? '');
+
+    const scopes = status.match(/Token scopes: (.+)/)?.[1] ?? '';
+    for (const need of ['repo', 'workflow']) {
+      scopes.includes(`'${need}'`)
+        ? pass(`scope ${need}`)
+        : fail(`missing the "${need}" scope`, `gh auth refresh -h github.com -s ${need}`);
+    }
+
+    repo = await currentRepo();
+    repo ? pass('repository', repo) : fail('not inside a GitHub repo', 'run this from a cloned repo with a remote');
+  } catch (e) { fail('gh auth check failed', e.message); }
+
+  section('Framework files');
+  const cfgPath = join(ROOT, '.sdlc/config.yml');
+  let cfg = null;
+  if (!existsSync(cfgPath)) fail('.sdlc/config.yml missing', 'sdlc init');
+  else {
+    try { cfg = parseYaml(readFileSync(cfgPath, 'utf8')); pass('config.yml parses'); }
+    catch (e) { fail('config.yml is invalid YAML', e.message); }
+  }
+
+  const workflows = existsSync(join(ROOT, '.github/workflows'))
+    ? readdirSync(join(ROOT, '.github/workflows')).filter((f) => f.endsWith('.yml'))
+    : [];
+  workflows.length >= 8
+    ? pass('workflows', `${workflows.length} installed`)
+    : fail(`only ${workflows.length} workflows found`, 'reinstall from the template');
+
+  for (const s of ['work-order', 'qa-report']) {
+    existsSync(join(ROOT, `.sdlc/schemas/${s}.json`)) ? pass(`schema ${s}`) : fail(`schema ${s}.json missing`, 'reinstall from the template');
+  }
+
+  const agents = existsSync(join(ROOT, '.sdlc/agents'))
+    ? readdirSync(join(ROOT, '.sdlc/agents')).filter((f) => f.endsWith('.md'))
+    : [];
+  agents.length >= 6 ? pass('agent packs', `${agents.length} defined`) : fail('agent packs missing', 'reinstall from the template');
+
+  if (!repo) { summary(); return; }
+
+  section('Repository setup');
+  try {
+    const labels = JSON.parse(await gh(['label', 'list', '--limit', '100', '--json', 'name'])).map((l) => l.name);
+    const wanted = parseYaml(readFileSync(join(ROOT, '.sdlc/templates/labels.yml'), 'utf8')).map((l) => l.name);
+    const missing = wanted.filter((w) => !labels.includes(w));
+    missing.length === 0
+      ? pass('labels', `${wanted.length} present`)
+      : fail(`${missing.length} labels missing (${missing.slice(0, 3).join(', ')}…)`, 'sdlc init');
+  } catch (e) { fail('could not list labels', e.message); }
+
+  try {
+    await gh(['api', `repos/${repo}/branches/sdlc-state`]);
+    pass('sdlc-state branch');
+  } catch { fail('sdlc-state branch missing — the ledger has nowhere to live', 'sdlc init'); }
+
+  section('Secrets and variables');
+  try {
+    const secrets = JSON.parse(await gh(['api', `repos/${repo}/actions/secrets`])).secrets.map((s) => s.name);
+    secrets.includes('CLAUDE_CODE_OAUTH_TOKEN')
+      ? pass('CLAUDE_CODE_OAUTH_TOKEN')
+      : fail('CLAUDE_CODE_OAUTH_TOKEN is not set — every agent workflow will fail',
+             'run `claude setup-token`, then: gh secret set CLAUDE_CODE_OAUTH_TOKEN');
+  } catch { warn('could not read repository secrets', 'needs admin access to this repo'); }
+
+  try {
+    const vars = JSON.parse(await gh(['api', `repos/${repo}/actions/variables`])).variables;
+    const killSwitch = vars.find((v) => v.name === 'SDLC_ENABLED');
+    if (!killSwitch) warn('SDLC_ENABLED is not set', 'defaults to enabled; set it to false to halt everything');
+    else killSwitch.value === 'false'
+      ? warn('SDLC_ENABLED is false — the whole system is halted', 'gh variable set SDLC_ENABLED --body true')
+      : pass('SDLC_ENABLED', killSwitch.value);
+  } catch { warn('could not read repository variables', 'needs admin access'); }
+
+  section('Agent integration');
+  try {
+    const apps = await gh(['api', `repos/${repo}/installation`]).catch(() => null);
+    // The action exchanges an OIDC token for a GitHub App token unless `github_token` is
+    // passed explicitly. These workflows do pass it, so the App is optional — but if that
+    // input is ever dropped, every agent run 401s with "Claude Code is not installed on
+    // this repository", which reads as a token problem rather than a missing App.
+    const passesToken = readFileSync(join(ROOT, '.github/workflows/sdlc-plan.yml'), 'utf8')
+      .includes('github_token:');
+    if (apps) pass('Claude GitHub App installed');
+    else if (passesToken) pass('no GitHub App', 'fine — workflows pass github_token explicitly');
+    else fail('no GitHub App, and workflows do not pass github_token — every agent run will 401',
+              'install https://github.com/apps/claude, or add github_token to the action inputs');
+  } catch { /* the endpoint 404s for non-App tokens; not worth failing on */ }
+
+  if (cfg?.env?.url_allowlist?.length) pass('QA url_allowlist', cfg.env.url_allowlist.join(', '));
+  else fail('env.url_allowlist is empty — QA will refuse to run at all', 'add preview host patterns to .sdlc/config.yml');
+
+  if (cfg?.gates?.plan_approval === false) {
+    warn('plan_approval is off', 'agents will write code with no human seeing the plan first. Fine once trusted.');
+  }
+
+  summary();
+}
+
+function summary() {
+  process.stdout.write('\n');
+  if (failures) process.stdout.write(`\x1b[31m${failures} problem(s) must be fixed before this will work.\x1b[0m\n`);
+  else if (warnings) process.stdout.write(`\x1b[33mReady, with ${warnings} thing(s) worth reading above.\x1b[0m\n`);
+  else process.stdout.write('\x1b[32mEverything checks out.\x1b[0m\n');
+  process.exit(failures ? 1 : 0);
+}
+
+// ---------------------------------------------------------------------------
+async function init() {
+  const repo = await currentRepo();
+  if (!repo) { process.stderr.write('not inside a GitHub repo\n'); process.exit(1); }
+  process.stdout.write(`\nInstalling into ${repo}\n`);
+
+  section('Labels');
+  const labels = parseYaml(readFileSync(join(ROOT, '.sdlc/templates/labels.yml'), 'utf8'));
+  for (const l of labels) {
+    try {
+      await gh(['label', 'create', l.name, '--color', l.color, '--description', l.description, '--force']);
+      pass(l.name);
+    } catch (e) { fail(`label ${l.name}`, e.message.split('\n')[0]); }
+  }
+
+  section('State branch');
+  try {
+    await gh(['api', `repos/${repo}/branches/sdlc-state`]);
+    pass('sdlc-state already exists');
+  } catch {
+    const { ensureStateBranch } = await import(join(ROOT, '.sdlc/bin/lib/state-io.js'));
+    await ensureStateBranch(repo);
+    pass('sdlc-state created (orphan, no CI, no history)');
+  }
+
+  section('Kill switch');
+  try {
+    await gh(['variable', 'set', 'SDLC_ENABLED', '--body', 'true']);
+    pass('SDLC_ENABLED=true', '(set to false to halt everything within one job)');
+  } catch (e) { warn('could not set SDLC_ENABLED', e.message.split('\n')[0]); }
+
+  process.stdout.write('\nNext:\n');
+  process.stdout.write('  1. claude setup-token   then   gh secret set CLAUDE_CODE_OAUTH_TOKEN\n');
+  process.stdout.write('  2. /install-github-app  (in Claude Code) to install the GitHub App\n');
+  process.stdout.write('  3. edit .sdlc/config.yml — especially env.url_allowlist and allowlist\n');
+  process.stdout.write('  4. sdlc doctor\n\n');
+}
+
+// ---------------------------------------------------------------------------
+const [command] = process.argv.slice(2);
+const run = {
+  doctor,
+  init,
+  install: async () => {
+    const i = process.argv.indexOf('--target');
+    if (i === -1) { process.stdout.write('usage: sdlc install --target <path-to-repo> [--force]\n'); process.exit(1); }
+    await exec('node', [join(ROOT, '.sdlc/bin/install.mjs'), ...process.argv.slice(3)], { stdio: 'inherit' })
+      .then((r) => process.stdout.write(r.stdout));
+  },
+  status: async () => {
+    const repo = await currentRepo();
+    await exec('node', [join(ROOT, '.sdlc/bin/sdlc-ctl.mjs'), 'status'], {
+      env: { ...process.env, GITHUB_REPOSITORY: repo },
+      stdio: 'inherit',
+    }).then((r) => process.stdout.write(r.stdout));
+  },
+}[command];
+
+if (!run) {
+  process.stdout.write('usage: sdlc <install|init|doctor|status>\n\n' +
+    '  install --target <repo>   put the framework into another repository\n' +
+    '  init                      labels, state branch, kill switch (run inside the repo)\n' +
+    '  doctor                    verify every token, secret and integration\n' +
+    '  status                    show every issue in flight\n');
+  process.exit(1);
+}
+run().catch((e) => { process.stderr.write(`sdlc: ${e.message}\n`); process.exit(1); });
