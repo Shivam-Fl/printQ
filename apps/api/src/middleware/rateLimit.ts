@@ -7,10 +7,11 @@ import { redis } from '../lib/redis.js';
  * Redis-backed tiered rate limits. Auth/OTP endpoints get tight per-IP limits
  * (brute-force protection); general API gets a generous ceiling.
  */
-function makeLimiter(prefix: string, windowMs: number, max: number) {
+function makeLimiter(prefix: string, windowMs: number, max: number, skipSuccessfulRequests = false) {
   return rateLimit({
     windowMs,
     limit: max,
+    skipSuccessfulRequests,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     // Unit suites exercise route behavior without a networked limiter. CI's
@@ -30,6 +31,10 @@ function makeLimiter(prefix: string, windowMs: number, max: number) {
 export const generalLimiter = makeLimiter('gen', 60_000, 300);
 export const otpRequestLimiter = makeLimiter('otpreq', 60_000, 5);
 export const otpVerifyLimiter = makeLimiter('otpver', 60_000, 10);
+// A valid counter code can require queue, printer and payment confirmation
+// requests before printing. Count failed attempts, not those valid prompts;
+// otherwise a busy shop can lock itself out after just a few orders.
+export const counterReleaseLimiter = makeLimiter('counter-release', 60_000, 10, true);
 // Firebase has already verified the phone credential before this exchange.
 // Keep enough headroom for many students sharing one campus Wi-Fi NAT and for
 // silent trusted-device renewal; the global limiter still provides a ceiling.

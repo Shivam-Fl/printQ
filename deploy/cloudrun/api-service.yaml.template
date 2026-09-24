@@ -2,7 +2,7 @@ apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
   name: printqs-development-api
-  namespace: ${PRINTQ_PROJECT_ID}
+  namespace: ${PRINTQ_PROJECT_NUMBER}
   labels:
     cloud.googleapis.com/location: ${PRINTQ_REGION}
     printqs.io/environment: development
@@ -16,9 +16,12 @@ spec:
       labels:
         printqs.io/environment: development
       annotations:
-        autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "3"
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
         run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cloudsql-instances: ${PRINTQ_CLOUD_SQL_CONNECTION}
+        run.googleapis.com/network-interfaces: '[{"network":"${PRINTQ_VPC_NETWORK}","subnetwork":"${PRINTQ_VPC_SUBNET}"}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
       containerConcurrency: 40
       timeoutSeconds: 60

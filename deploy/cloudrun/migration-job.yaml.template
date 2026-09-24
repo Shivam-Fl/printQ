@@ -2,7 +2,7 @@ apiVersion: run.googleapis.com/v1
 kind: Job
 metadata:
   name: printqs-development-migrate
-  namespace: ${PRINTQ_PROJECT_ID}
+  namespace: ${PRINTQ_PROJECT_NUMBER}
   labels:
     cloud.googleapis.com/location: ${PRINTQ_REGION}
     printqs.io/environment: development
@@ -10,6 +10,11 @@ metadata:
     run.googleapis.com/description: PrintQs development Prisma migration job
 spec:
   template:
+    metadata:
+      annotations:
+        run.googleapis.com/cloudsql-instances: ${PRINTQ_CLOUD_SQL_CONNECTION}
+        run.googleapis.com/network-interfaces: '[{"network":"${PRINTQ_VPC_NETWORK}","subnetwork":"${PRINTQ_VPC_SUBNET}"}]'
+        run.googleapis.com/vpc-access-egress: private-ranges-only
     spec:
       parallelism: 1
       taskCount: 1

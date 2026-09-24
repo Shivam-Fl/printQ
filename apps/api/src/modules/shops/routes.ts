@@ -14,7 +14,7 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
-import { otpVerifyLimiter } from '../../middleware/rateLimit.js';
+import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -652,7 +652,7 @@ shopRouter.get(
 shopRouter.post(
   '/release',
   requireShopUser,
-  otpVerifyLimiter,
+  counterReleaseLimiter,
   validateBody(releaseOtpSchema),
   asyncHandler(async (req, res) => {
     const { otp, printerId, overrideQueue, paymentConfirmation } = req.body as {
