@@ -69,6 +69,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --test scripts/verify-render-production.test.mjs
+      - run: node --test scripts/verify-local-compose.test.mjs
       - run: npm run db:generate -w apps/api
       - run: npm run ci:integration:ready
       - run: npm run db:deploy -w apps/api
