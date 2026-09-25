@@ -6,7 +6,7 @@ Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are 
 
 ## Current local QA update
 
-Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser smoke found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested in PR #25's worktree. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.
+Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser QA found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested on PR #25. A local console-mock student completed fresh signup, both New print actions, reload and logout. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.
 
 ## Current phase
 

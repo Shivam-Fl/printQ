@@ -1,6 +1,6 @@
 # Local isolated development QA — 2026-09-26 IST
 
-This is an interim local QA run, **not** the final 164-case release matrix or a hosted development/production acceptance. Source was PR #25 branch `codex/render-prod-env-fix`, based on `94ed4d51c63ec6a3a99b8a39a700c4ee35b6308d`, plus the launch-copy regression fix in this worktree. The fix will be identified by its own commit when pushed.
+This is an interim local QA run, **not** the final 164-case release matrix or a hosted development/production acceptance. Source was PR #25 branch `codex/render-prod-env-fix`, based on `94ed4d51c63ec6a3a99b8a39a700c4ee35b6308d`. The verified launch-copy fix is code commit `5e9cdbf6e6178770e8fe829306049d8a0042a081`.
 
 ## Isolation and services
 
@@ -22,9 +22,12 @@ This is an interim local QA run, **not** the final 164-case release matrix or a 
 | `npm run test:e2e:sim` after the UI fix | Pass; 93 assertions, including setup, arrival queue, cash/shop-UPI confirmation, simulated printer jam/retry, no premature commission, refund credit, no-show, override, and paused-shop existing orders. |
 | `npm run test -w apps/web -- src/pages/student/PublicLaunchCopy.test.ts --silent` | Pass; 2 focused regressions. They failed first against the old text/dead link. |
 | `npm run test -w apps/web -- --silent`, web typecheck, web production build | Pass; 19 tests; build retains existing >500 kB chunk warning. |
-| Local browser at `http://127.0.0.1:5173/` with API at `http://127.0.0.1:4000/` | Homepage, verified-shop directory, student login, shop sign-in and recovery entry rendered. One simulator-created verified shop appeared as Offline, as expected after its agent stopped. The invalid `/s/demo` route was reproduced; homepage now links to `/shops`, and updated pay-at-shop copy was rechecked in the browser. No OTP or live provider journey was claimed. |
+| Local browser at `http://127.0.0.1:5173/` with API at `http://127.0.0.1:4000/` | Homepage, verified-shop directory, student login, shop sign-in and recovery entry rendered. One simulator-created verified shop appeared as Offline, as expected after its agent stopped. The invalid `/s/demo` route was reproduced; homepage now links to `/shops`, and updated pay-at-shop copy was rechecked in the browser. No live-provider journey was claimed. |
+| Fresh local-only browser signup | Pass: console-mock login code, name/profile setup, authenticated home, empty-state directory link, both primary and bottom `New print` actions routing to verified-shop directory, session surviving a page reload, and UI logout. No real SMS, Firebase, or production account was involved. |
 
 The first `test:ci` invocation failed 28 API suites because its `test` namespace was pointed at the Compose default `printq_development` database. The guard correctly rejected that mismatch. The failure report is retained under `initial-config-failure/api.junit.xml`. Creating and migrating an isolated `printq_test` database resolved the configuration error; the full rerun above passed.
+
+The first browser OTP request was rejected with `Origin is not allowed`: the test API was configured for `http://localhost:4173`, while Vite was served at `http://127.0.0.1:5173`. Restarting only the local test API with that exact allowed origin resolved the mismatch. It was a QA harness configuration error, not an application-code fix; the subsequent fresh-signup browser journey passed.
 
 ## Still open
 
