@@ -5,9 +5,12 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound, unauthorized } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { signAdminToken } from '../../lib/tokens.js';
+import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
 import { requireAdmin } from '../../middleware/auth.js';
-import { loginLimiter } from '../../middleware/rateLimit.js';
+import { loginLimiter, otpRequestLimiter, otpVerifyLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
+import { emailProvider } from '../../providers/email/index.js';
+import { logger } from '../../lib/logger.js';
 
 export const adminRouter = Router();
 
@@ -16,6 +19,15 @@ const adminLoginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   password: z.string().min(1).max(128),
 });
+const adminResetRequestSchema = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict();
+const adminResetConfirmSchema = adminResetRequestSchema.extend({
+  otp: z.string().regex(/^\d{6}$/),
+  newPassword: z.string().min(12).max(128),
+});
+const ADMIN_RESET_TTL_MS = 15 * 60_000;
+const ADMIN_RESET_RESEND_MS = 60_000;
+const ADMIN_RESET_DAILY_LIMIT = 10;
+const ADMIN_RESET_MAX_ATTEMPTS = 5;
 const coordinatesSchema = z.object({
   latitude: z.number().finite().min(-90).max(90).nullable().optional(),
   longitude: z.number().finite().min(-180).max(180).nullable().optional(),
@@ -82,9 +94,90 @@ adminRouter.post(
     const valid = await argon2.verify(admin?.passwordHash ?? dummyPasswordHash, password).catch(() => false);
     if (!admin || !admin.active || !valid) throw unauthorized('Invalid email or password');
     res.json({
-      token: signAdminToken(admin.id),
+      token: signAdminToken(admin.id, admin.sessionVersion),
       user: { id: admin.id, name: admin.name, role: admin.role },
     });
+  }),
+);
+
+/** Separate admin recovery realm; always respond uniformly for unknown accounts. */
+adminRouter.post(
+  '/auth/request-reset',
+  otpRequestLimiter,
+  validateBody(adminResetRequestSchema),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body as z.infer<typeof adminResetRequestSchema>;
+    const admin = await prisma.adminUser.findUnique({ where: { email }, select: { id: true, active: true } });
+    if (admin?.active) {
+      const now = new Date();
+      const recent = await prisma.adminPasswordResetOtp.findFirst({
+        where: { adminId: admin.id, createdAt: { gt: new Date(now.getTime() - ADMIN_RESET_RESEND_MS) } },
+        select: { id: true },
+      });
+      const sentToday = await prisma.adminPasswordResetOtp.count({
+        where: { adminId: admin.id, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
+      });
+      if (!recent && sentToday < ADMIN_RESET_DAILY_LIMIT) {
+        const otp = generateOtp();
+        const reset = await prisma.adminPasswordResetOtp.create({
+          data: { adminId: admin.id, otpHash: await hashOtp(otp), expiresAt: new Date(now.getTime() + ADMIN_RESET_TTL_MS) },
+        });
+        try {
+          const delivered = await emailProvider.send(
+            email,
+            'Reset your PrintQs platform admin password',
+            `Your PrintQs platform admin reset code is ${otp}. It expires in 15 minutes. If you did not request it, ignore this email.`,
+          );
+          await prisma.adminPasswordResetOtp.update({
+            where: { id: reset.id },
+            data: { deliveryProvider: emailProvider.name, deliveryMessageId: delivered.providerMessageId ?? null, deliveryAttemptedAt: new Date(), deliveryError: null },
+          });
+        } catch (error) {
+          await prisma.adminPasswordResetOtp.update({
+            where: { id: reset.id },
+            data: { deliveryProvider: emailProvider.name, deliveryAttemptedAt: new Date(), deliveryError: error instanceof Error ? error.message.slice(0, 300) : 'Email delivery failed' },
+          });
+          logger.error({ resetId: reset.id, provider: emailProvider.name }, 'admin_password_reset_email_failed');
+        }
+      }
+    }
+    res.json({ ok: true });
+  }),
+);
+
+adminRouter.post(
+  '/auth/reset-password',
+  otpVerifyLimiter,
+  validateBody(adminResetConfirmSchema),
+  asyncHandler(async (req, res) => {
+    const { email, otp, newPassword } = req.body as z.infer<typeof adminResetConfirmSchema>;
+    const admin = await prisma.adminUser.findUnique({ where: { email }, select: { id: true, active: true } });
+    if (!admin?.active) throw badRequest('Code expired or not found — request a new one');
+    const reset = await prisma.adminPasswordResetOtp.findFirst({
+      where: { adminId: admin.id, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!reset) throw badRequest('Code expired or not found — request a new one');
+    if (reset.attempts >= ADMIN_RESET_MAX_ATTEMPTS) throw badRequest('Too many wrong attempts — request a new code');
+    if (!await verifyOtpHash(reset.otpHash, otp)) {
+      await prisma.adminPasswordResetOtp.updateMany({
+        where: { id: reset.id, consumedAt: null, attempts: { lt: ADMIN_RESET_MAX_ATTEMPTS } },
+        data: { attempts: { increment: 1 } },
+      });
+      throw unauthorized('Incorrect code');
+    }
+
+    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.adminPasswordResetOtp.updateMany({
+        where: { id: reset.id, consumedAt: null, attempts: { lt: ADMIN_RESET_MAX_ATTEMPTS }, expiresAt: { gt: new Date() } },
+        data: { consumedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw badRequest('Code expired or already used');
+      await tx.adminUser.update({ where: { id: admin.id }, data: { passwordHash, sessionVersion: { increment: 1 } } });
+      await tx.adminAuditEvent.create({ data: audit(admin.id, 'admin_password_reset', 'admin_user', admin.id) });
+    });
+    res.json({ ok: true });
   }),
 );
 

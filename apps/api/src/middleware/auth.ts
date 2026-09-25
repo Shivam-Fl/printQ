@@ -69,8 +69,8 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
   const token = bearer(req);
   const claims = token ? verifyToken(token) : null;
   if (!claims || claims.typ !== 'admin' || claims.role !== 'platform_admin') return next(unauthorized());
-  const admin = await prisma.adminUser.findUnique({ where: { id: claims.sub }, select: { active: true, role: true } });
-  if (!admin?.active || admin.role !== 'platform_admin') return next(unauthorized());
+  const admin = await prisma.adminUser.findUnique({ where: { id: claims.sub }, select: { active: true, role: true, sessionVersion: true } });
+  if (!admin?.active || admin.role !== 'platform_admin' || admin.sessionVersion !== claims.sv) return next(unauthorized());
   req.admin = { id: claims.sub, role: admin.role };
   next();
 }
