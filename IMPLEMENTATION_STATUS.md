@@ -4,6 +4,8 @@
 
 Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
+The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.
+
 ## Current local QA update
 
 Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser QA found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested on PR #25. A local console-mock student completed fresh signup, both New print actions, reload and logout. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.

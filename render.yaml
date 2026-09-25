@@ -24,6 +24,9 @@ services:
     type: web
     runtime: docker
     plan: free
+    # Promote only a CI- and development-QA-verified SHA with
+    # `render deploys create <service-id> --commit <sha> --wait`.
+    autoDeployTrigger: off
     dockerfilePath: ./Dockerfile
     dockerContext: .
     # preDeployCommand needs a paid plan — on free tier, migrations run instead

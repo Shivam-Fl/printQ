@@ -31,3 +31,7 @@ test('Render production requires verified email, bootstrap admin, and private du
   assert.equal(blueprintValue('GCS_BUCKET'), 'printqs-production-private');
   assert.equal(blueprintValue('GOOGLE_APPLICATION_CREDENTIALS'), '/etc/secrets/gcs-production-service-account.json');
 });
+
+test('Render production deploys only an explicitly selected verified commit', () => {
+  assert.match(blueprint, /^\s+autoDeployTrigger: off\s*$/m);
+});
