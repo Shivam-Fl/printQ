@@ -6,7 +6,7 @@ This is sanitized release evidence. No environment values, database rows, creden
 
 | Check | Verified result |
 | --- | --- |
-| `git ls-remote origin refs/heads/master refs/heads/development` | `master=ff9f99fd2d2e28438fdc531875766c192026e359`; `development=7161ff8ef484a911de30702623ca617ffdb5e5cf`. Development is three commits behind master. |
+| `git ls-remote origin refs/heads/master refs/heads/development` | Baseline: `master=ff9f99fd2d2e28438fdc531875766c192026e359`; `development=7161ff8ef484a911de30702623ca617ffdb5e5cf` (three commits behind). After protected sync PR #26 merged, `development=af130510252f9888b7bddbbbf01915c47b6ddf9c`; `master` is unchanged. |
 | `render services --output json`, filtered to PrintQ | `printq-web` (`srv-dafems740ujc73b080e0`), free web, linked to `master`; no development Render web service in this workspace. |
 | `render deploys list srv-dafems740ujc73b080e0 --output json` | Live `dep-daqjk73l550s73bp7u8g` at `d9319e858e98f2d60160b761402f6c10ea0eae25`. Deploy `dep-dar65rrncjis73c9iibg` of current master `ff9f99f` failed; it is not live. The live deploy ID is the current application rollback target. |
 | `render postgres list --output json` | Production `printq-db`, free, available, Oregon, expiry **2026-10-07**. Free plan has no managed backups. |
@@ -21,6 +21,7 @@ The external Chrome browser showed an authenticated Render Dashboard, but servic
 
 - GitHub `master`, `development`, and unused `main` have required `CI / check` and `CI / secret scan`, PR enforcement, admin enforcement, no force push, and no deletion. Earlier direct-push probes were rejected (`GH006`), per the existing release history. There is no required independent PR review.
 - Three consecutive CI runs on PR #25 passed at code SHAs `5e9cdbf`, `93037ca`, and `eac8639`. The latest included 29 fresh local migrations, 168 package tests, 93 simulator assertions, build, typecheck, dependency audit and secret scan. [Local QA evidence](../printqs-local-qa-20260926/LOCAL_QA_STATUS.md) has details.
+- Protected sync [PR #26](https://github.com/Shivam-Fl/printQ/pull/26) merged `master` history into `development` only after its CI, secret scan, gate, and verification checks passed. Integration candidate [PR #25](https://github.com/Shivam-Fl/printQ/pull/25) now targets `development`; its feature head was updated with that sync merge, so the new exact head requires fresh checks before merge. Neither action changed `master` or deployed Render production.
 - Live Render configuration was found at `autoDeployTrigger=commit`, meaning GitHub required checks did **not** gate its deployment attempts. It was changed via authenticated Render CLI to `autoDeployTrigger=off` / `autoDeploy=no`. The current service now requires an explicit commit-ID deployment. The latest deploy history remained unchanged immediately after this setting change; no new code was deployed. `render.yaml` now mirrors the manual exact-SHA policy, with a regression test and successful Render Blueprint validation.
 - Phase 1 is **not fully complete**: a hosted development deployment and QA gate are missing; master release-source enforcement is not equivalent to the plan's development-to-production promotion policy. Do not infer them from green PR checks.
 
