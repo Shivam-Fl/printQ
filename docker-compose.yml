@@ -8,7 +8,7 @@ services:
       POSTGRES_DB: printq_development
     ports:
       # host 15432 — 5432/5433 are taken by locally installed PostgreSQL services
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +21,7 @@ services:
     image: redis:7-alpine
     ports:
       # host 6380 — 6379 is commonly taken by other local projects
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -41,8 +41,8 @@ services:
       MINIO_ROOT_USER: printq
       MINIO_ROOT_PASSWORD: printq_dev_only
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
 

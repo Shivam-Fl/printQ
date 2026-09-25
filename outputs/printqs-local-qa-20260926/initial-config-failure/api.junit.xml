@@ -1,0 +1,573 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="93" failures="28" errors="0" time="32.0693471">
+    <testsuite name="src/config/env.test.ts" timestamp="2026-09-25T19:20:37.776Z" hostname="Shivam-PC" tests="17" failures="1" errors="0" skipped="0" time="9.305675">
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; accepts matching development identities and namespaced resources" time="1.2388307">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a live Razorpay key in development" time="0.9010174">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a Razorpay TEST key in production" time="0.7255593">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; permits recurring collection test mode only outside production" time="1.1630701">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; fails closed for live recurring collection before explicit cutover code exists" time="0.5328084">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; parses a literal false simulator flag as false in production" time="0.5038008">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a separately bootstrapped platform administrator in production" time="0.3845243">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a production Firebase project in development" time="0.4662095">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before App Check can be monitored or enforced" time="0.4513">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before realtime projections can be enabled" time="0.4828626">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before FCM delivery can be enabled" time="0.4312844">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects the console password-reset provider in production" time="0.4164305">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects an unrecognised worker role before it can start a mixed worker process" time="0.3335417">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; accepts a namespaced private GCS bucket without static cloud credentials" time="0.4233271">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a bucket when GCS is selected" time="0.3447694">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a GCS bucket that does not declare the active environment" time="0.2810986">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="src/config/env.test.ts" time="9.305675">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/fileRetention.test.ts" timestamp="2026-09-25T19:20:37.793Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/lib/fileRetention.test.ts" name="src/lib/fileRetention.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/fileRetention.ts:1:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/geo.test.ts" timestamp="2026-09-25T19:20:37.796Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="0" time="0.6107832">
+        <testcase classname="src/lib/geo.test.ts" name="distanceMeters &gt; returns zero for the same point" time="0.0045353">
+        </testcase>
+        <testcase classname="src/lib/geo.test.ts" name="distanceMeters &gt; measures a short shop-scale distance" time="0.0008752">
+        </testcase>
+        <testcase classname="src/lib/geo.test.ts" name="src/lib/geo.test.ts" time="0.6107832">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/otp.test.ts" timestamp="2026-09-25T19:20:37.799Z" hostname="Shivam-PC" tests="6" failures="1" errors="0" skipped="5" time="0.6029875">
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; generates 6-digit numeric codes" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; verifies a correct OTP and rejects a wrong one" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; verifyOtpHash never throws on garbage hashes" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; encrypts stable counter codes and scopes their lookup digest to one shop" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="agent tokens &gt; returns a long token and stores only its sha256" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="src/lib/otp.test.ts" time="0.6029875">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/otp.ts:10:1
+            </failure>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/otp.ts:10:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/preparePrintPdf.test.ts" timestamp="2026-09-25T19:20:37.806Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="0" time="0.4249972">
+        <testcase classname="src/lib/preparePrintPdf.test.ts" name="preparePrintPdf &gt; returns the source unchanged when all pages are requested" time="0.0437899">
+        </testcase>
+        <testcase classname="src/lib/preparePrintPdf.test.ts" name="preparePrintPdf &gt; sends only the selected, de-duplicated pages to the printer" time="0.0427031">
+        </testcase>
+        <testcase classname="src/lib/preparePrintPdf.test.ts" name="src/lib/preparePrintPdf.test.ts" time="0.4249972">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/queues.test.ts" timestamp="2026-09-25T19:20:37.810Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/lib/queues.test.ts" name="src/lib/queues.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/queues.test.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/tokens.test.ts" timestamp="2026-09-25T19:20:37.812Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/lib/tokens.test.ts" name="src/lib/tokens.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/tokens.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/appCheck.test.ts" timestamp="2026-09-25T19:20:37.814Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/middleware/appCheck.test.ts" name="src/middleware/appCheck.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/middleware/appCheck.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/cors.test.ts" timestamp="2026-09-25T19:20:37.817Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="2" time="6.9878815">
+        <testcase classname="src/middleware/cors.test.ts" name="CORS origin validation &gt; returns JSON 403 without ACAO for an unapproved origin" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/middleware/cors.test.ts" name="CORS origin validation &gt; allows an approved origin" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/middleware/cors.test.ts" name="src/middleware/cors.test.ts" time="6.9878815">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/app.ts:8:1
+            </failure>
+            <failure message="Cannot read properties of undefined (reading &apos;close&apos;)" type="TypeError">
+TypeError: Cannot read properties of undefined (reading &apos;close&apos;)
+ ❯ src/middleware/cors.test.ts:19:55
+ ❯ src/middleware/cors.test.ts:19:9
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/counterReleaseLimiter.test.ts" timestamp="2026-09-25T19:20:37.822Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/middleware/counterReleaseLimiter.test.ts" name="src/middleware/counterReleaseLimiter.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/middleware/rateLimit.ts:3:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/error.test.ts" timestamp="2026-09-25T19:20:37.824Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/middleware/error.test.ts" name="src/middleware/error.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/logger.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/realtime/projections.test.ts" timestamp="2026-09-25T19:20:37.827Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/realtime/projections.test.ts" name="src/realtime/projections.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/realtime/projections.ts:3:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/workers/conversion.test.ts" timestamp="2026-09-25T19:20:37.829Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/workers/conversion.test.ts" name="src/workers/conversion.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/logger.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/workers/roles.test.ts" timestamp="2026-09-25T19:20:37.831Z" hostname="Shivam-PC" tests="2" failures="1" errors="0" skipped="0" time="0.5392185">
+        <testcase classname="src/workers/roles.test.ts" name="Cloud Run worker roles &gt; keeps legacy combined mode while isolating conversion from maintenance" time="0.0066946">
+        </testcase>
+        <testcase classname="src/workers/roles.test.ts" name="src/workers/roles.test.ts" time="0.5392185">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/admin/recovery.test.ts" timestamp="2026-09-25T19:20:37.835Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="2" time="0.3979739">
+        <testcase classname="src/modules/admin/recovery.test.ts" name="platform-admin recovery boundary &gt; does not reveal whether an admin email exists" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/admin/recovery.test.ts" name="platform-admin recovery boundary &gt; consumes a valid code once and revokes the previous admin session" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/admin/recovery.test.ts" name="src/modules/admin/recovery.test.ts" time="0.3979739">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/tokens.ts:2:1
+            </failure>
+            <failure message="Cannot read properties of undefined (reading &apos;close&apos;)" type="TypeError">
+TypeError: Cannot read properties of undefined (reading &apos;close&apos;)
+ ❯ src/modules/admin/recovery.test.ts:68:68
+ ❯ src/modules/admin/recovery.test.ts:68:30
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/commission/service.test.ts" timestamp="2026-09-25T19:20:37.839Z" hostname="Shivam-PC" tests="4" failures="1" errors="0" skipped="0" time="0.3551061">
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; reconciles positive commission without fractional paise" time="0.0055175">
+        </testcase>
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; records a coupon below shop base as an explicit shop-funded discount, never a negative receivable" time="0.0007007">
+        </testcase>
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; rejects non-integer or negative values" time="0.0009683">
+        </testcase>
+        <testcase classname="src/modules/commission/service.test.ts" name="src/modules/commission/service.test.ts" time="0.3551061">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/commission/statements.test.ts" timestamp="2026-09-25T19:20:37.842Z" hostname="Shivam-PC" tests="6" failures="1" errors="0" skipped="0" time="0.3120118">
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly commission statement arithmetic &gt; keeps every paise explained by commission or credit" time="0.0061982">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly commission statement arithmetic &gt; does not create a negative debit when credit exceeds commission" time="0.0014325">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="variable recurring-debit gate &gt; allows an exact test debit only after the 24-hour notice window" time="0.0009626">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="variable recurring-debit gate &gt; blocks early, oversized and inactive-mandate attempts" time="0.0010719">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly statement period &gt; uses the last complete Monday–Sunday IST window" time="0.0028063">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="src/modules/commission/statements.test.ts" time="0.3120118">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/files/routes.test.ts" timestamp="2026-09-25T19:20:37.846Z" hostname="Shivam-PC" tests="6" failures="1" errors="0" skipped="5" time="8.5164443">
+        <testcase classname="src/modules/files/routes.test.ts" name="local preview security headers &gt; allows framing only from configured concrete origins and preserves the PDF sandbox" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="local preview security headers &gt; does not turn a wildcard or malformed CORS value into a frame permission" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; accepts a matching PDF extension, browser MIME type and signature" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; rejects a PDF disguised as a text file" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; rejects a matching extension when the declared MIME type conflicts" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="src/modules/files/routes.test.ts" time="8.5164443">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/tokens.ts:2:1
+            </failure>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/tokens.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/jobs/transitions.test.ts" timestamp="2026-09-25T19:20:37.853Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="0" time="0.298974">
+        <testcase classname="src/modules/jobs/transitions.test.ts" name="authoritative transition outbox &gt; records the audit event and rebuildable projection delivery in the same transaction" time="0.0238625">
+        </testcase>
+        <testcase classname="src/modules/jobs/transitions.test.ts" name="authoritative transition outbox &gt; does not create an audit or projection record when optimistic concurrency loses" time="0.0034807">
+        </testcase>
+        <testcase classname="src/modules/jobs/transitions.test.ts" name="src/modules/jobs/transitions.test.ts" time="0.298974">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/email/index.test.ts" timestamp="2026-09-25T19:20:37.856Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5268742">
+        <testcase classname="src/providers/email/index.test.ts" name="Resend password-reset delivery &gt; uses the authenticated Resend endpoint and records only its non-secret delivery id" time="0.1011768">
+        </testcase>
+        <testcase classname="src/providers/email/index.test.ts" name="Resend password-reset delivery &gt; does not expose a provider response body when delivery fails" time="0.0049844">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/public/discovery.test.ts" timestamp="2026-09-25T19:20:37.858Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="0" time="0.6143404">
+        <testcase classname="src/modules/public/discovery.test.ts" name="public shop discovery &gt; requires verification, publication, and an active canonical campus" time="0.0055899">
+        </testcase>
+        <testcase classname="src/modules/public/discovery.test.ts" name="public shop discovery &gt; returns only a rounded distance and never coordinates" time="0.0060999">
+        </testcase>
+        <testcase classname="src/modules/public/discovery.test.ts" name="src/modules/public/discovery.test.ts" time="0.6143404">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/shops/printerTest.test.ts" timestamp="2026-09-25T19:20:37.860Z" hostname="Shivam-PC" tests="3" failures="1" errors="0" skipped="0" time="0.5066055">
+        <testcase classname="src/modules/shops/printerTest.test.ts" name="selectPrinterTestAgent &gt; allows only an online agent that is linked to the requested printer" time="0.0042645">
+        </testcase>
+        <testcase classname="src/modules/shops/printerTest.test.ts" name="selectPrinterTestAgent &gt; does not guess when more than one computer can reach the printer" time="0.0004021">
+        </testcase>
+        <testcase classname="src/modules/shops/printerTest.test.ts" name="src/modules/shops/printerTest.test.ts" time="0.5066055">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/fcm/index.test.ts" timestamp="2026-09-25T19:20:37.864Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.2482757">
+        <testcase classname="src/providers/fcm/index.test.ts" name="Firebase Cloud Messaging delivery &gt; sends only minimal notification data and removes invalid registrations without logging a token" time="0.0167071">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/fcm/outbox.test.ts" timestamp="2026-09-25T19:20:37.865Z" hostname="Shivam-PC" tests="4" failures="0" errors="0" skipped="0" time="0.2475627">
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; stores a stable event key so duplicate publication shares one durable delivery record" time="0.0123254">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; leases then marks a successful FCM delivery exactly once" time="0.0059676">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; does not send when another worker already holds the delivery lease" time="0.0017007">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; releases a failed delivery lease so the scheduled worker can retry" time="0.0023395">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/legacyTimers.test.ts" timestamp="2026-09-25T19:20:37.867Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/modules/queue/legacyTimers.test.ts" name="src/modules/queue/legacyTimers.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/logger.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/release.contract.test.ts" timestamp="2026-09-25T19:20:37.869Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/modules/queue/release.contract.test.ts" name="src/modules/queue/release.contract.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/otp.ts:10:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/visibility.test.ts" timestamp="2026-09-25T19:20:37.871Z" hostname="Shivam-PC" tests="6" failures="1" errors="0" skipped="0" time="0.624626">
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; hides the code before arrival and outside the near-front window" time="0.0048853">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; reveals automatically at the threshold and never hides it again" time="0.0008185">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; keeps the code available for collection" time="0.000439">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="physical counter release order &gt; requires an override for a near-front job that is not first" time="0.0007605">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="physical counter release order &gt; requires an override when a skipped student returns with a visible code" time="0.0005126">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="src/modules/queue/visibility.test.ts" time="0.624626">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/firebaseAuth/index.test.ts" timestamp="2026-09-25T19:20:37.876Z" hostname="Shivam-PC" tests="4" failures="1" errors="0" skipped="3" time="0.4577335">
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; returns a verified Indian phone number" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; rejects expired or wrong-project tokens" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; rejects identities without a valid Indian phone number" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="src/providers/firebaseAuth/index.test.ts" time="0.4577335">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/providers/firebaseAuth/index.ts:1:1
+            </failure>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/providers/firebaseAuth/index.ts:1:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/geocoding/index.test.ts" timestamp="2026-09-25T19:20:37.880Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/providers/geocoding/index.test.ts" name="src/providers/geocoding/index.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/providers/geocoding/index.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/storage/gcs.test.ts" timestamp="2026-09-25T19:20:37.882Z" hostname="Shivam-PC" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/providers/storage/gcs.test.ts" name="src/providers/storage/gcs.test.ts" time="0">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/providers/storage/gcs.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/storage/local.test.ts" timestamp="2026-09-25T19:20:37.885Z" hostname="Shivam-PC" tests="2" failures="1" errors="0" skipped="0" time="0.4912761">
+        <testcase classname="src/providers/storage/local.test.ts" name="local storage namespace &gt; places generated logical keys beneath the environment namespace" time="0.0295203">
+        </testcase>
+        <testcase classname="src/providers/storage/local.test.ts" name="src/providers/storage/local.test.ts" time="0.4912761">
+            <system-err>
+DATABASE_URL database name must include DATABASE_NAMESPACE
+DATABASE_URL must be a valid URL with an environment-specific database name
+
+            </system-err>
+            <failure message="process.exit unexpectedly called with &quot;1&quot;" type="Error">
+Error: process.exit unexpectedly called with &quot;1&quot;
+ ❯ src/config/env.ts:351:11
+ ❯ src/lib/redis.ts:2:1
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

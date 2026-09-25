@@ -2,11 +2,10 @@
 #
 # One combined web service runs the API + built web app + BullMQ workers in one
 # process (pilot mode, same as `npm run dev:api` locally) — see apps/api/src/server.ts.
-# This keeps STORAGE_DRIVER=local correct (one container, one filesystem) for the
-# free-tier testing phase. Splitting workers into their own service + moving to real
-# S3-compatible storage (e.g. Cloudflare R2) is the natural next step once you're
-# ready to pay and want LibreOffice crash-isolated from the API — see DEPLOY.md's
-# upgrade checklist.
+# The combined API/worker process remains a limited free-tier pilot runtime, but
+# uploaded documents must use private durable storage. The production GCS bucket
+# and Render secret file are provisioned out of band; never commit the key JSON.
+# Splitting API/conversion workers is still required before unrestricted launch.
 
 databases:
   - name: printq-db
@@ -25,6 +24,9 @@ services:
     type: web
     runtime: docker
     plan: free
+    # Promote only a CI- and development-QA-verified SHA with
+    # `render deploys create <service-id> --commit <sha> --wait`.
+    autoDeployTrigger: off
     dockerfilePath: ./Dockerfile
     dockerContext: .
     # preDeployCommand needs a paid plan — on free tier, migrations run instead
@@ -36,12 +38,18 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PRINTQ_ENVIRONMENT
+        value: production
       - key: RUN_WORKERS
         value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: printq-db
           property: connectionString
+      # Existing dedicated production database name, verified from Render.
+      # Do not point this deployment at development or a replacement database.
+      - key: DATABASE_NAMESPACE
+        value: printq_db_f68p
       - key: REDIS_URL
         fromService:
           name: printq-redis
@@ -61,6 +69,8 @@ services:
       # sync from ever falling back to Packkar.
       - key: STUDENT_AUTH_PROVIDER
         value: firebase
+      - key: FIREBASE_PROJECT_ID
+        value: printqs-production
       - key: FIREBASE_AUTH_API_KEY
         # Environment-specific public Firebase configuration belongs in the
         # platform environment, never in the repository or a Blueprint sync.
@@ -90,17 +100,27 @@ services:
       - key: OTP_PEPPER
         generateValue: true
 
-      # --- soft-launch defaults: flip these once you have real MSG91/Resend accounts ---
+      # --- communications ---
       - key: SMS_PROVIDER
         value: console
       - key: EMAIL_PROVIDER
-        value: console
+        value: resend
+      - key: EMAIL_FROM
+        value: PrintQs <support@mail.printqs.com>
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: ADMIN_BOOTSTRAP_PASSWORD_HASH
+        sync: false
 
-      # --- storage: local disk for the free-tier testing week (ephemeral — see DEPLOY.md) ---
+      # --- private production storage ---
       - key: STORAGE_DRIVER
-        value: local
-      - key: STORAGE_LOCAL_DIR
-        value: ./storage
+        value: gcs
+      - key: GCS_BUCKET
+        value: printqs-production-private
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/gcs-production-service-account.json
       - key: SOFFICE_PATH
         value: /usr/bin/soffice
       - key: LOG_LEVEL

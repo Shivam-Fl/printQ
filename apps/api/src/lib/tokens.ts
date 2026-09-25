@@ -15,6 +15,7 @@ export interface AdminClaims {
   typ: 'admin';
   sub: string;
   role: 'platform_admin';
+  sv: number;
 }
 export type AuthClaims = StudentClaims | ShopClaims | AdminClaims;
 
@@ -30,8 +31,8 @@ export function signShopToken(shopUserId: string, shopId: string, role: 'owner' 
 }
 
 /** Platform administration is deliberately a separate identity domain from a shop owner. */
-export function signAdminToken(adminId: string): string {
-  return jwt.sign({ typ: 'admin', role: 'platform_admin' }, env.JWT_SECRET, {
+export function signAdminToken(adminId: string, sessionVersion: number): string {
+  return jwt.sign({ typ: 'admin', role: 'platform_admin', sv: sessionVersion }, env.JWT_SECRET, {
     subject: adminId,
     expiresIn: '4h',
   });
@@ -52,8 +53,9 @@ export function verifyToken(token: string): AuthClaims | null {
     ) {
       return { typ: 'shop', sub: payload.sub, shopId: payload.shopId, role: payload.role };
     }
-    if (payload.typ === 'admin' && typeof payload.sub === 'string' && payload.role === 'platform_admin') {
-      return { typ: 'admin', sub: payload.sub, role: 'platform_admin' };
+    if (payload.typ === 'admin' && typeof payload.sub === 'string' && payload.role === 'platform_admin'
+      && Number.isSafeInteger(payload.sv) && payload.sv >= 0) {
+      return { typ: 'admin', sub: payload.sub, role: 'platform_admin', sv: payload.sv };
     }
     return null;
   } catch {

@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="19" failures="0" errors="0" time="0.2276468">
+    <testsuite name="src/api.test.ts" timestamp="2026-09-25T19:35:12.419Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="0.1814426">
+        <testcase classname="src/api.test.ts" name="student session renewal &gt; silently exchanges a persisted Firebase session and retries one failed request" time="0.0559706">
+        </testcase>
+        <testcase classname="src/api.test.ts" name="student session renewal &gt; coalesces concurrent refreshes so only one Firebase exchange is made" time="0.0030032">
+        </testcase>
+        <testcase classname="src/api.test.ts" name="student session renewal &gt; clears the stale PrintQ token only when trusted-device renewal is unavailable" time="0.0023195">
+        </testcase>
+        <testcase classname="src/api.test.ts" name="API base URL configuration &gt; trims deployment whitespace and trailing slashes" time="0.0004334">
+        </testcase>
+        <testcase classname="src/api.test.ts" name="API base URL configuration &gt; preserves same-origin mode for missing or whitespace-only configuration" time="0.0003576">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/pages/student/Home.test.ts" timestamp="2026-09-25T19:35:12.423Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.0056809">
+        <testcase classname="src/pages/student/Home.test.ts" name="home new print action &gt; opens the picker when the student has multiple remembered shops" time="0.0027638">
+        </testcase>
+        <testcase classname="src/pages/student/Home.test.ts" name="home new print action &gt; routes a no-history student to the directory" time="0.0003446">
+        </testcase>
+        <testcase classname="src/pages/student/Home.test.ts" name="home new print action &gt; opens the only available shop directly" time="0.0002883">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/pages/student/JobStatus.test.ts" timestamp="2026-09-25T19:35:12.425Z" hostname="Shivam-PC" tests="9" failures="0" errors="0" skipped="0" time="0.0076536">
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; shows a staff-confirmed pay-at-shop order as paid and exposes its receipt" time="0.0023179">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label pending as paid" time="0.0006082">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label failed as paid" time="0.0003174">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label refunding as paid" time="0.0001985">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label refunded as paid" time="0.000172">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label cash_due as paid" time="0.0002833">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="payment summary &gt; does not label counter_due as paid" time="0.0001859">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="counter UPI intent &gt; encodes the verified shop payee and exact final amount" time="0.0007259">
+        </testcase>
+        <testcase classname="src/pages/student/JobStatus.test.ts" name="counter UPI intent &gt; rejects an invalid amount before generating a payment intent" time="0.000943">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/pages/student/PublicLaunchCopy.test.ts" timestamp="2026-09-25T19:35:12.427Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0328697">
+        <testcase classname="src/pages/student/PublicLaunchCopy.test.ts" name="public launch copy &gt; describes counter payment rather than remote online payment" time="0.0274588">
+            <system-err>
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at footer
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at Login (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Login.tsx:11:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at Topbar (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/components/Topbar.tsx:6:19)
+    at div
+    at main
+    at Login (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Login.tsx:11:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/pages/student/PublicLaunchCopy.test.ts" name="public launch copy &gt; does not link students to a nonexistent demo shop" time="0.0030861">
+            <system-err>
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at nav
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at div
+    at section
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer&apos;s output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at LinkWithRef (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:10503:5)
+    at footer
+    at main
+    at Welcome (C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/src/pages/student/Welcome.tsx:13:57)
+    at Router (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:7036:13)
+    at MemoryRouter (file:///C:/Users/acer/Desktop/startup/printQ-prod-env-fix/apps/web/node_modules/react-router-dom/node_modules/react-router/dist/development/chunk-62JRHF6Z.mjs:6952:3)
+
+            </system-err>
+        </testcase>
+    </testsuite>
+</testsuites>

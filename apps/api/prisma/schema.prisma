@@ -251,6 +251,7 @@ model AdminUser {
   id           String    @id @default(uuid())
   email        String    @unique
   passwordHash String
+  sessionVersion Int     @default(0)
   name         String
   role         AdminRole @default(platform_admin)
   active       Boolean   @default(true)
@@ -258,6 +259,26 @@ model AdminUser {
   updatedAt    DateTime  @updatedAt
 
   auditEvents  AdminAuditEvent[]
+  resetOtps    AdminPasswordResetOtp[]
+}
+
+/// Kept separate from shop reset codes so an email shared by both identities
+/// cannot use a code issued for one authorization realm in the other.
+model AdminPasswordResetOtp {
+  id                  String    @id @default(uuid())
+  adminId             String
+  admin               AdminUser @relation(fields: [adminId], references: [id])
+  otpHash             String
+  attempts            Int       @default(0)
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  deliveryProvider    String?
+  deliveryMessageId   String?
+  deliveryAttemptedAt DateTime?
+  deliveryError       String?
+  createdAt           DateTime  @default(now())
+
+  @@index([adminId, createdAt])
 }
 
 /// Append-only operational audit trail for campus and shop-verification

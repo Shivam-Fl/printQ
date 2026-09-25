@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const blueprint = readFileSync(path.join(root, 'render.yaml'), 'utf8');
+
+function blueprintValue(key) {
+  const match = blueprint.match(new RegExp(`^\\s*- key: ${key}\\r?\\n\\s+value: ([^\\r\\n]+)`, 'm'));
+  return match?.[1].trim();
+}
+
+test('Render production binds the dedicated Firebase project and legacy production database', () => {
+  assert.equal(blueprintValue('NODE_ENV'), 'production');
+  assert.equal(blueprintValue('PRINTQ_ENVIRONMENT'), 'production');
+  assert.equal(blueprintValue('STUDENT_AUTH_PROVIDER'), 'firebase');
+  assert.equal(blueprintValue('FIREBASE_PROJECT_ID'), 'printqs-production');
+  assert.equal(blueprintValue('DATABASE_NAMESPACE'), 'printq_db_f68p');
+  assert.match(blueprint, /^\s*- key: FIREBASE_AUTH_API_KEY\r?\n(?:\s*#.*\r?\n)*\s*sync: false\s*$/m);
+});
+
+test('Render production requires verified email, bootstrap admin, and private durable storage', () => {
+  assert.equal(blueprintValue('EMAIL_PROVIDER'), 'resend');
+  assert.equal(blueprintValue('EMAIL_FROM'), 'PrintQs <support@mail.printqs.com>');
+  assert.match(blueprint, /^\s*- key: RESEND_API_KEY\r?\n\s*sync: false\s*$/m);
+  assert.match(blueprint, /^\s*- key: ADMIN_BOOTSTRAP_EMAIL\r?\n\s*sync: false\s*$/m);
+  assert.match(blueprint, /^\s*- key: ADMIN_BOOTSTRAP_PASSWORD_HASH\r?\n\s*sync: false\s*$/m);
+  assert.equal(blueprintValue('STORAGE_DRIVER'), 'gcs');
+  assert.equal(blueprintValue('GCS_BUCKET'), 'printqs-production-private');
+  assert.equal(blueprintValue('GOOGLE_APPLICATION_CREDENTIALS'), '/etc/secrets/gcs-production-service-account.json');
+});
+
+test('Render production deploys only an explicitly selected verified commit', () => {
+  assert.match(blueprint, /^\s+autoDeployTrigger: off\s*$/m);
+});

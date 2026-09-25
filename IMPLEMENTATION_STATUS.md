@@ -1,6 +1,18 @@
 # PrintQs launch implementation status
 
-Last updated: 2026-09-24 (Asia/Kolkata)
+> This file contains the earlier programme history and is not the current deployment handoff. For current production SHA, account/resource inventory, cost exposure, blockers, and next actions, read [PRODUCTION_RELEASE_LOG.md](PRODUCTION_RELEASE_LOG.md). Update that log after each consequential change.
+
+Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
+
+The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.
+
+Protected [PR #26](https://github.com/Shivam-Fl/printQ/pull/26) synchronized `development` with the current `master` history after required checks passed. [PR #25](https://github.com/Shivam-Fl/printQ/pull/25) now targets `development` and must pass fresh checks at its branch-sync head before integration. Neither change deployed production; Render auto-deploy remains off. No hosted development API, PostgreSQL, or Redis is running.
+
+The integration PR additionally carries a CI release-source guard so only `development` can propose a `master` PR; its regression tests and adjacent local tests/typecheck pass. It is pending the PR's exact-head hosted CI and merge, and does not replace the final QA-evidence gate.
+
+## Current local QA update
+
+Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser QA found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested on PR #25. A local console-mock student completed fresh signup, both New print actions, reload and logout. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.
 
 ## Current phase
 
