@@ -20,3 +20,14 @@ test('Render production binds the dedicated Firebase project and legacy producti
   assert.equal(blueprintValue('DATABASE_NAMESPACE'), 'printq_db_f68p');
   assert.match(blueprint, /^\s*- key: FIREBASE_AUTH_API_KEY\r?\n(?:\s*#.*\r?\n)*\s*sync: false\s*$/m);
 });
+
+test('Render production requires verified email, bootstrap admin, and private durable storage', () => {
+  assert.equal(blueprintValue('EMAIL_PROVIDER'), 'resend');
+  assert.equal(blueprintValue('EMAIL_FROM'), 'PrintQs <support@mail.printqs.com>');
+  assert.match(blueprint, /^\s*- key: RESEND_API_KEY\r?\n\s*sync: false\s*$/m);
+  assert.match(blueprint, /^\s*- key: ADMIN_BOOTSTRAP_EMAIL\r?\n\s*sync: false\s*$/m);
+  assert.match(blueprint, /^\s*- key: ADMIN_BOOTSTRAP_PASSWORD_HASH\r?\n\s*sync: false\s*$/m);
+  assert.equal(blueprintValue('STORAGE_DRIVER'), 'gcs');
+  assert.equal(blueprintValue('GCS_BUCKET'), 'printqs-production-private');
+  assert.equal(blueprintValue('GOOGLE_APPLICATION_CREDENTIALS'), '/etc/secrets/gcs-production-service-account.json');
+});

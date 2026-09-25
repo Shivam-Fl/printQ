@@ -1,5 +1,7 @@
 # PrintQs launch implementation status
 
+> This file contains the earlier programme history and is not the current deployment handoff. For current production SHA, account/resource inventory, cost exposure, blockers, and next actions, read [PRODUCTION_RELEASE_LOG.md](PRODUCTION_RELEASE_LOG.md). Update that log after each consequential change.
+
 Last updated: 2026-09-24 (Asia/Kolkata)
 
 ## Current phase
