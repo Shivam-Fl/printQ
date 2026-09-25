@@ -17,7 +17,7 @@ Last updated: 2026-09-26 IST. This is the durable handoff for every subsequent l
 | GitHub production branch | `origin/master` was `ff9f99fd2d2e28438fdc531875766c192026e359` when the Render failure was diagnosed. | Re-fetch before merging; this SHA passed master CI but **did not deploy**. |
 | Render live API | Service `srv-dafems740ujc73b080e0`, `https://api.printqs.com`, was still running `d9319e858e98f2d60160b761402f6c10ea0eae25` (deploy `dep-daqjk73l550s73bp7u8g`). `/healthz` returned 200. | Recheck live SHA after the next deploy. Health alone is not release QA. |
 | Failed candidate deploy | `dep-dar65rrncjis73c9iibg` built, applied 28 Prisma migrations, then exited: `STUDENT_AUTH_PROVIDER=firebase requires FIREBASE_PROJECT_ID`. | PR #25 pins the correct project and the existing database namespace; source has other production guards addressed below. Existing DB may now have newer schema than live code. |
-| Active fix PR | [#25](https://github.com/Shivam-Fl/printQ/pull/25), branch `codex/render-prod-env-fix`, original pushed SHA `9233a44ff5dcd60afe3f827c105062f1b79374d8`. CI, QA, Vercel checks passed at that SHA. | Current worktree has **additional uncommitted** GCS/Resend Blueprint and regression-test changes; rerun checks, push a new SHA, then merge only when required runtime variables are safely present. |
+| Active fix PR | [#25](https://github.com/Shivam-Fl/printQ/pull/25), branch `codex/render-prod-env-fix`. Firebase/DB fix SHA `9233a44ff5dcd60afe3f827c105062f1b79374d8` passed CI, QA, and Vercel checks. GCS/Resend Blueprint plus this log were pushed in commit `6558123`. | Check the current PR head and rerun required checks there; merge only when required runtime variables and email are verified. The latest PR head is authoritative, not a SHA copied into this file. |
 | Paid-plan proposal | PR #24 was closed without merge at owner direction. | Do not reopen without a new price/plan decision. |
 
 ## Accounts and infrastructure inventory
@@ -38,7 +38,7 @@ Last updated: 2026-09-26 IST. This is the durable handoff for every subsequent l
 ## This worktree's verified changes
 
 - PR #25's first commit pinned production Firebase project, Render production environment, and the exact existing production database namespace. A Blueprint regression test passed; all PR checks passed at that original SHA.
-- Pending worktree patch changes the production Blueprint from console email/local ephemeral storage to Resend and private GCS, with secret-backed `RESEND_API_KEY`, `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD_HASH`. `node --test scripts/verify-render-production.test.mjs`: 2/2 pass; `render blueprints validate ./render.yaml`: valid; `git diff --check`: pass. **These changes are not pushed, merged, or deployed yet.**
+- The Blueprint now specifies Resend and private GCS, with secret-backed `RESEND_API_KEY`, `ADMIN_BOOTSTRAP_EMAIL`, and `ADMIN_BOOTSTRAP_PASSWORD_HASH`. `node --test scripts/verify-render-production.test.mjs`: 2/2 pass; `render blueprints validate ./render.yaml`: valid; `git diff --check`: pass. These changes were pushed to PR #25 but are **not merged or deployed**.
 - Render's production storage JSON secret file and Resend key were saved with **Save only**; they were not used to deploy the old source.
 
 ## Open gates, in priority order
