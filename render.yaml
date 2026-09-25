@@ -36,12 +36,18 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PRINTQ_ENVIRONMENT
+        value: production
       - key: RUN_WORKERS
         value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: printq-db
           property: connectionString
+      # Existing dedicated production database name, verified from Render.
+      # Do not point this deployment at development or a replacement database.
+      - key: DATABASE_NAMESPACE
+        value: printq_db_f68p
       - key: REDIS_URL
         fromService:
           name: printq-redis
@@ -61,6 +67,8 @@ services:
       # sync from ever falling back to Packkar.
       - key: STUDENT_AUTH_PROVIDER
         value: firebase
+      - key: FIREBASE_PROJECT_ID
+        value: printqs-production
       - key: FIREBASE_AUTH_API_KEY
         # Environment-specific public Firebase configuration belongs in the
         # platform environment, never in the repository or a Blueprint sync.

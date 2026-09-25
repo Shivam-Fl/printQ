@@ -68,6 +68,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node --test scripts/verify-render-production.test.mjs
       - run: npm run db:generate -w apps/api
       - run: npm run ci:integration:ready
       - run: npm run db:deploy -w apps/api
