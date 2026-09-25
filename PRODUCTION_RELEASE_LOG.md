@@ -2,6 +2,10 @@
 
 Last updated: 2026-09-26 IST. This is the durable handoff for every subsequent launch turn. Read and update it before changing any account, infrastructure, PR, or deployed revision. Record evidence, not inferred success. Never add credentials, reset codes, personal documents, or key values here.
 
+## Latest local QA (2026-09-26)
+
+Docker Desktop now works. An isolated local PostgreSQL/Redis Compose project (`printq-local-qa-20260926`) and `printq_test` database passed 29/29 migrations, complete build/typecheck, 168 package tests (zero failures) and the 93-assertion print-agent simulator. Local browser smoke covered the landing, verified-shop directory, student login, shop sign-in and recovery entry. A dead `/s/demo` link and outdated online-payment copy were reproduced, regression-tested, and corrected in the current PR #25 worktree; the updated landing was rechecked in the browser. Four JUnit files, the initial configuration-failure report, commands, exact limitations and open cases are in [LOCAL_QA_STATUS.md](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md). This is **local mock-provider QA only**: hosted development, final 164-case matrix, real providers, physical printer, and production-safe subset are not passed. The optional MinIO image pull failed, so S3-compatible local storage was not covered. Other-project Docker containers were untouched. No production infrastructure or money was changed by this QA run.
+
 ## Decisions and release identity
 
 - `master` is the user-selected production source; `development` is integration. `main` is unused. Changes go through feature PRs and CI; the owner authorized in-scope PR merges.

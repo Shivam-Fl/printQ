@@ -74,7 +74,7 @@ export default function MyJobs() {
           <div className="empty-state">
             <strong>No prints yet</strong>
             <p>
-              Tap <strong>Print</strong> below, or <Link to="/s/demo">try the demo shop</Link>.
+              Tap <strong>Print</strong> below, or <Link to="/shops">find a verified shop</Link>.
             </p>
           </div>
         )}

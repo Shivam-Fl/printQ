@@ -25,7 +25,7 @@ export default function Welcome() {
           <span className="eyebrow-label">Campus printing, without the crowd</span>
           <h1>Upload anywhere.<br />Queue on arrival.</h1>
           <p className="welcome-lede">
-            Upload and pay from anywhere. Your walk-in position starts only after you reach the shop, so remote orders never waste the physical line.
+            Prepare your order anywhere. Pay at the shop by cash or the shop's own UPI. Your walk-in position starts only after you reach the shop.
           </p>
           <div className="welcome-actions">
             <Link to="/login" className="button-link large">Start a print <IconChevron /></Link>
@@ -44,7 +44,7 @@ export default function Welcome() {
               <span className="queue-demo-kicker">CURRENT ORDER</span>
               <strong>Assignment-final.pdf</strong>
             </div>
-            <span className="status-dot done">Paid</span>
+            <span className="status-dot done">Checked in</span>
           </div>
           <div className="queue-number">
             <span>Your position</span>
@@ -52,9 +52,9 @@ export default function Welcome() {
             <small>about 8 minutes</small>
           </div>
           <div className="queue-route">
-            <div className="done"><i />Order confirmed</div>
-            <div className="active"><i />Check in after arrival</div>
-            <div><i />Show counter code</div>
+            <div className="done"><i />Order prepared</div>
+            <div className="active"><i />Checked in on arrival</div>
+            <div><i />Pay at counter, then print</div>
           </div>
           <div className="queue-tip">Upload at home. Join the line only when you are physically at the shop.</div>
         </div>
@@ -73,7 +73,7 @@ export default function Welcome() {
             <div>
               <span className="role-label">For students</span>
               <h3>Send a print</h3>
-              <p>Upload, configure, pay and track without waiting at the shop.</p>
+              <p>Upload and configure remotely, then pay at the shop and track your print.</p>
               <span className="role-link">Continue with phone <IconChevron /></span>
             </div>
           </Link>
@@ -82,7 +82,7 @@ export default function Welcome() {
             <div>
               <span className="role-label">For print shops</span>
               <h3>Run your queue</h3>
-              <p>Prepared orders stay separate from checked-in students. One code finds the right order and confirms cash when needed.</p>
+              <p>Prepared orders stay separate from checked-in students. One code finds the right order and confirms cash or UPI when received.</p>
               <span className="role-link">Open shop dashboard <IconChevron /></span>
             </div>
           </Link>
@@ -92,7 +92,7 @@ export default function Welcome() {
       <footer className="public-footer">
         <span>PrintQ</span>
         <span>Less waiting. Better printing.</span>
-        <Link to="/s/demo">Try the demo shop</Link>
+        <Link to="/shops">Find a verified shop</Link>
       </footer>
     </main>
   );

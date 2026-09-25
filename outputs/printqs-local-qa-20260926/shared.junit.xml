@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="47" failures="0" errors="0" time="0.0546208">
+    <testsuite name="src/assignment.test.ts" timestamp="2026-09-25T19:34:55.980Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="0.0073115">
+        <testcase classname="src/assignment.test.ts" name="rankPrinters &gt; filters out offline and jammed printers" time="0.0031377">
+        </testcase>
+        <testcase classname="src/assignment.test.ts" name="rankPrinters &gt; filters by paper size, colour and finishing capability" time="0.0011204">
+        </testcase>
+        <testcase classname="src/assignment.test.ts" name="rankPrinters &gt; recommends the printer with the shortest estimated completion" time="0.0005186">
+        </testcase>
+        <testcase classname="src/assignment.test.ts" name="rankPrinters &gt; a fast busy printer can beat a slow free one" time="0.0002619">
+        </testcase>
+        <testcase classname="src/assignment.test.ts" name="rankPrinters &gt; counts copies in queue load" time="0.0002088">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/pageRange.test.ts" timestamp="2026-09-25T19:34:55.986Z" hostname="Shivam-PC" tests="7" failures="0" errors="0" skipped="0" time="0.0093302">
+        <testcase classname="src/pageRange.test.ts" name="parsePageRange &gt; parses single pages, ranges and mixes" time="0.003304">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="parsePageRange &gt; de-duplicates overlapping selections" time="0.0003492">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="parsePageRange &gt; rejects malformed input" time="0.0015651">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="parsePageRange &gt; rejects out-of-bounds and inverted ranges" time="0.000636">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="parsePageRange &gt; uses safe, actionable validation messages" time="0.0005749">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="countSelectedPages &gt; returns total pages when range is null" time="0.0003918">
+        </testcase>
+        <testcase classname="src/pageRange.test.ts" name="countSelectedPages &gt; counts the selected pages otherwise" time="0.0002079">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/pricing.test.ts" timestamp="2026-09-25T19:34:55.989Z" hostname="Shivam-PC" tests="13" failures="0" errors="0" skipped="0" time="0.0092045">
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; prices a simple A4 B/W job" time="0.0023924">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; multiplies by copies" time="0.0002617">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; uses the colour rate" time="0.0002066">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; respects page ranges (with de-duplication)" time="0.0004618">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; adds binding cost once per job, not per copy" time="0.0003545">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; supports a custom shop paper like a college sheet" time="0.0005383">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; throws when the paper is not offered by the shop" time="0.0002385">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="computePrice &gt; uses integer paise throughout" time="0.0003452">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="applyCoupon &gt; applies a percent-off discount" time="0.0004128">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="applyCoupon &gt; applies a flat paise-off discount" time="0.0004055">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="applyCoupon &gt; never discounts below the minimum order floor" time="0.0001729">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="applyPlatformMarkup &gt; turns a shop base rate of ₹2 into a ₹2.50 student rate at 25%" time="0.0005362">
+        </testcase>
+        <testcase classname="src/pricing.test.ts" name="applyPlatformMarkup &gt; marks up finishing while preserving exact integer totals" time="0.0002562">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/queueing.test.ts" timestamp="2026-09-25T19:34:55.993Z" hostname="Shivam-PC" tests="7" failures="0" errors="0" skipped="0" time="0.0082518">
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; picks oldest instant when no scheduled jobs are due" time="0.0024338">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; a scheduled job inside its lead window beats instants on a fresh printer" time="0.0006832">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; alternates: after a scheduled promotion, an instant goes next" time="0.0006305">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; due scheduled jobs are served in slot order" time="0.0004526">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; an overdue slot (student booked, time passed) still counts as due" time="0.0004174">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="pickNextJob &gt; returns null when only future-slot jobs wait" time="0.0003499">
+        </testcase>
+        <testcase classname="src/queueing.test.ts" name="isPendingScheduled &gt; true outside the lead window, false inside" time="0.0006495">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/schemas.test.ts" timestamp="2026-09-25T19:34:55.994Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0102191">
+        <testcase classname="src/schemas.test.ts" name="pay-at-shop request contracts &gt; does not let a student select an online payment rail" time="0.0064945">
+        </testcase>
+        <testcase classname="src/schemas.test.ts" name="pay-at-shop request contracts &gt; accepts only an explicit counter cash or merchant-UPI confirmation" time="0.0011022">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/stateMachine.test.ts" timestamp="2026-09-25T19:34:55.995Z" hostname="Shivam-PC" tests="13" failures="0" errors="0" skipped="0" time="0.0103037">
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; walks the happy path end to end" time="0.002615">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; prepares a cash order without pretending an online payment happened" time="0.0003294">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; closes a failed cash print after staff physically returns the money" time="0.0002202">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; closes a failed pay-at-shop print after staff records the returned counter payment" time="0.0001851">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; removes an absent arrival without cancelling the paid order, then permits a fresh arrival" time="0.0002374">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; does not provide a location-free requeue path for legacy no-show records" time="0.0006337">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; returns a failed print to otp_verified for re-dispatch" time="0.000217">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; waits for staff to complete manual finishing before pickup" time="0.000193">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; allows cancel only before release" time="0.000467">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; keeps a skipped arrival paid and directly recoverable without blocking the line" time="0.0002937">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; rejects payment confirmation twice" time="0.0002464">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; terminal states accept no events at all" time="0.0011417">
+        </testcase>
+        <testcase classname="src/stateMachine.test.ts" name="job state machine &gt; keeps all launch states reachable while retaining legacy records for recovery only" time="0.0010859">
+        </testcase>
+    </testsuite>
+</testsuites>
