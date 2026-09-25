@@ -1,37 +1,30 @@
 # Render Blueprint — see DEPLOY.md for the full setup walkthrough.
 #
-# One combined web service runs the API + built web app + BullMQ workers in one
-# process (pilot mode, same as `npm run dev:api` locally) — see apps/api/src/server.ts.
-# This keeps STORAGE_DRIVER=local correct (one container, one filesystem) for the
-# free-tier testing phase. Splitting workers into their own service + moving to real
-# S3-compatible storage (e.g. Cloudflare R2) is the natural next step once you're
-# ready to pay and want LibreOffice crash-isolated from the API — see DEPLOY.md's
-# upgrade checklist.
+# The paid pilot keeps the existing combined API/workers service until conversion
+# is split out and verified. Do not accept real document uploads with local
+# ephemeral storage: configure private object storage and pass retention QA first.
 
 databases:
   - name: printq-db
-    plan: free
+    plan: 0.5c-1g
     postgresMajorVersion: "16"
 
 services:
   - name: printq-redis
     type: keyvalue
-    plan: free
-    ipAllowList:
-      - source: 0.0.0.0/0
-        description: everywhere (tighten once you're off the free plan)
+    plan: 256mb
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+    ipAllowList: []
 
   - name: printq-web
     type: web
     runtime: docker
-    plan: free
+    plan: 1c-2g
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # preDeployCommand needs a paid plan — on free tier, migrations run instead
-    # via the image's own CMD (docker-entrypoint.sh: migrate deploy, then start
-    # the server). No dockerCommand override here — Render's dockerCommand
-    # string isn't reliably shell-parsed (a quoted `&&` chain got passed
-    # through as one literal token in testing), so the fix lives in the image.
+    # Migrations still run via docker-entrypoint.sh. Confirm deploy rollback and
+    # migration compatibility before splitting workers or changing storage.
     healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
