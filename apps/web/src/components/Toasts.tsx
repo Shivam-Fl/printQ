@@ -18,15 +18,23 @@ export default function Toasts() {
 
   useEffect(() => {
     const socket = getStudentSocket();
-    if (!socket) return;
     const onNotify = (p: { title: string; body: string; url?: string }) => {
       const toast = { id: nextId++, ...p };
       setToasts((t) => [...t.slice(-2), toast]);
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== toast.id)), 6000);
     };
-    socket.on('notify', onNotify);
+    const onFirebaseNotify = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== 'object') return;
+      const payload = detail as { title?: unknown; body?: unknown; url?: unknown };
+      if (typeof payload.title !== 'string' || typeof payload.body !== 'string') return;
+      onNotify({ title: payload.title, body: payload.body, url: typeof payload.url === 'string' ? payload.url : undefined });
+    };
+    socket?.on('notify', onNotify);
+    window.addEventListener('printq:firebase-notification', onFirebaseNotify);
     return () => {
-      socket.off('notify', onNotify);
+      socket?.off('notify', onNotify);
+      window.removeEventListener('printq:firebase-notification', onFirebaseNotify);
     };
   }, []);
 

@@ -1,4 +1,10 @@
-import { getApp, getApps, initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import {
+  getToken as getAppCheckToken,
+  initializeAppCheck,
+  ReCaptchaV3Provider,
+  type AppCheck,
+} from 'firebase/app-check';
 import {
   browserLocalPersistence,
   getAuth,
@@ -8,29 +14,89 @@ import {
   signOut,
   type ConfirmationResult,
 } from 'firebase/auth';
+import type { Messaging } from 'firebase/messaging';
+import {
+  firebaseCoreConfigured,
+  firebaseFcmVapidKey,
+  firebaseMessagingEnabled,
+  firebasePhoneAuthEnabled,
+  firebaseWebConfig,
+} from './firebaseConfig.js';
 
-const provider = import.meta.env.VITE_STUDENT_AUTH_PROVIDER as string | undefined;
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
-};
+export { firebasePhoneAuthEnabled };
 
-export const firebasePhoneAuthEnabled =
-  provider === 'firebase' && Object.values(firebaseConfig).every((value) => Boolean(value));
+const appCheckMode = import.meta.env.VITE_FIREBASE_APP_CHECK_MODE as string | undefined;
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY as string | undefined;
 
 let verifier: RecaptchaVerifier | null = null;
 let confirmation: ConfirmationResult | null = null;
+let appCheck: AppCheck | null = null;
+let firebaseMessaging: Messaging | null = null;
+let foregroundMessageBound = false;
 const OTP_SEND_COOLDOWN_MS = 60_000;
 const OTP_SEND_KEY = 'printq:student:otp-sent-at';
 
+export function getFirebaseApp(): FirebaseApp {
+  if (!firebaseCoreConfigured) throw new Error('Firebase is not configured');
+  return getApps().length ? getApp() : initializeApp(firebaseWebConfig);
+}
+
 function auth() {
   if (!firebasePhoneAuthEnabled) throw new Error('Phone verification is not configured');
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  const app = getFirebaseApp();
   const instance = getAuth(app);
   instance.useDeviceLanguage();
   return instance;
+}
+
+/**
+ * Returns an App Check assertion for the custom API without ever placing it
+ * in a URL. This is deliberately opt-in: monitor mode is enabled only after
+ * the matching Firebase web provider has been configured in that environment.
+ */
+export async function getFirebaseAppCheckToken(): Promise<string | null> {
+  if (appCheckMode === 'disabled' || !appCheckMode || !appCheckSiteKey || !firebaseCoreConfigured) return null;
+  const app = getFirebaseApp();
+  appCheck ??= initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(appCheckSiteKey),
+    isTokenAutoRefreshEnabled: true,
+  });
+  const token = await getAppCheckToken(appCheck, false);
+  return token.token;
+}
+
+/**
+ * Fetch an FCM registration token only after a user-triggered notification
+ * permission request. The token is opaque, never logged, and exchanged with
+ * the API over the authenticated student session.
+ */
+export async function getFirebaseMessagingToken(
+  serviceWorkerRegistration: ServiceWorkerRegistration,
+): Promise<string | null> {
+  if (!firebaseMessagingEnabled || !firebaseFcmVapidKey) return null;
+  const messagingSdk = await import('firebase/messaging');
+  if (!(await messagingSdk.isSupported())) return null;
+  firebaseMessaging ??= messagingSdk.getMessaging(getFirebaseApp());
+
+  if (!foregroundMessageBound) {
+    messagingSdk.onMessage(firebaseMessaging, (payload) => {
+      const data = payload.data ?? {};
+      window.dispatchEvent(new CustomEvent('printq:firebase-notification', {
+        detail: {
+          title: payload.notification?.title ?? 'PrintQ',
+          body: payload.notification?.body ?? '',
+          url: data.url,
+          eventKey: data.eventKey,
+        },
+      }));
+    });
+    foregroundMessageBound = true;
+  }
+
+  return messagingSdk.getToken(firebaseMessaging, {
+    vapidKey: firebaseFcmVapidKey,
+    serviceWorkerRegistration,
+  });
 }
 
 /** Reuse Firebase's trusted-device session so returning students do not need

@@ -19,6 +19,13 @@ interface SetupStatus {
     onlineAgents: number;
   };
   studentUrl: string;
+  verification: {
+    status: 'draft' | 'submitted' | 'verified' | 'rejected';
+    submittedAt: string | null;
+    verifiedAt: string | null;
+    publishedAt: string | null;
+    canSubmit: boolean;
+  };
 }
 
 const STEPS = [
@@ -70,6 +77,7 @@ export default function ShopSetup() {
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
+  const [submittingVerification, setSubmittingVerification] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -111,6 +119,19 @@ export default function ShopSetup() {
     setTimeout(() => setCopied(false), 1600);
   }
 
+  async function submitVerification() {
+    setSubmittingVerification(true);
+    setError('');
+    try {
+      await api('/api/shop/verification/submit', { method: 'POST', role: 'shop' });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not submit the shop for verification.');
+    } finally {
+      setSubmittingVerification(false);
+    }
+  }
+
   return (
     <div className="page wide shop-page">
       <ShopNav />
@@ -135,7 +156,7 @@ export default function ShopSetup() {
       {setup?.ready && (
         <div className="notice success-notice">
           <div>
-            <strong>Your shop is ready to accept live orders.</strong>
+            <strong>Your shop is verified and published.</strong>
             <p>Keep the agent running on the counter PC and share your student link.</p>
           </div>
           <Link className="button-link" to="/dashboard">Open live queue</Link>
@@ -159,7 +180,28 @@ export default function ShopSetup() {
         })}
       </div>
 
-      {setup && (
+      {setup && !setup.ready && (
+        <section className="share-panel">
+          <div className="share-copy">
+            <span className="eyebrow-label">Independent verification</span>
+            <h2>{setup.verification.status === 'submitted' ? 'Verification requested' : setup.verification.status === 'verified' ? 'Awaiting publication' : 'Request publication review'}</h2>
+            {setup.verification.status === 'submitted' ? (
+              <p>Your configuration is in the platform review queue. Students cannot discover this counter until it is verified and published.</p>
+            ) : setup.verification.status === 'verified' ? (
+              <p>Your counter is verified. A platform administrator still needs to publish it before it is visible to students.</p>
+            ) : (
+              <p>After the five practical setup steps are complete, submit the counter for a platform review. This prevents unverified locations appearing to students.</p>
+            )}
+            {setup.verification.canSubmit && (
+              <button className="button-link" onClick={submitVerification} disabled={submittingVerification}>
+                {submittingVerification ? 'Submitting…' : 'Request verification'}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {setup?.ready && (
         <section className="share-panel">
           <div className="share-copy">
             <span className="eyebrow-label">Student ordering link</span>

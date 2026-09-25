@@ -15,8 +15,7 @@ import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.j
 import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
-import { paymentProvider } from '../../providers/payment/index.js';
-import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, onCashSelected, requeueJob } from '../queue/engine.js';
+import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
@@ -27,7 +26,6 @@ import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperational } from '../shops/availability.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
-import { getProjectedCashSettlementBalance } from '../earnings/service.js';
 
 export const jobsRouter = Router();
 
@@ -66,21 +64,21 @@ jobsRouter.post(
 );
 
 /**
- * Create a job (pending_payment) + a payment order. The job only enters the
- * queue when payment is confirmed server-side (webhook / mock confirm).
+ * Create a prepared pay-at-shop job. Uploading creates no physical position;
+ * location check-in does, and only authenticated counter staff can confirm
+ * the final server-calculated amount before a printer receives the document.
  */
 jobsRouter.post(
   '/',
   requireStudent,
   validateBody(createJobSchema),
   asyncHandler(async (req, res) => {
-    const { fileId, specs, mode, scheduledTime, couponCode, paymentMethod } = req.body as {
+    const { fileId, specs, mode, scheduledTime, couponCode } = req.body as {
       fileId: string;
       specs: JobSpecs;
       mode: 'instant' | 'scheduled';
       scheduledTime?: Date;
       couponCode?: string;
-      paymentMethod: 'online' | 'cash';
     };
     const file = await prisma.uploadedFile.findFirst({
       where: { id: fileId, studentId: req.student!.id, status: 'ready' },
@@ -91,24 +89,6 @@ jobsRouter.post(
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
     }
-    if (paymentMethod === 'cash' && !file.shop.cashPaymentsEnabled) {
-      throw conflict('This shop is not accepting cash orders. Pay online or ask the shop to enable cash.');
-    }
-    if (paymentMethod === 'cash') {
-      const existingCashOrder = await prisma.job.count({
-        where: {
-          shopId: file.shopId,
-          studentId: req.student!.id,
-          paymentProvider: 'cash',
-          paymentStatus: 'cash_due',
-          status: { notIn: ['completed', 'expired', 'cancelled'] },
-        },
-      });
-      if (existingCashOrder > 0) {
-        throw conflict('Finish or cancel your existing cash order at this shop before creating another.');
-      }
-    }
-
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
     const platformMarkupPaise = breakdown.totalPaise - shopBase.totalPaise;
@@ -119,14 +99,6 @@ jobsRouter.post(
       resolvedCouponCode = resolved.code;
     }
     if (breakdown.totalPaise < 100) throw badRequest('Minimum order is ₹1');
-    if (paymentMethod === 'cash') {
-      const projectedBalance = await getProjectedCashSettlementBalance(file.shopId);
-      const thisOrderSettlement = shopBase.totalPaise - breakdown.totalPaise;
-      if (projectedBalance + thisOrderSettlement < -env.MAX_SHOP_CASH_DEBT_PAISE) {
-        throw conflict('Cash is temporarily unavailable at this shop. Pay online while the shop settles its cash balance.');
-      }
-    }
-
     const job = await prisma.job.create({
       data: {
         shopId: file.shopId,
@@ -143,29 +115,15 @@ jobsRouter.post(
         discountPaise: breakdown.discountPaise,
         mode,
         scheduledTime: mode === 'scheduled' ? scheduledTime : null,
-        paymentProvider: paymentMethod === 'cash' ? 'cash' : null,
+        paymentProvider: 'pay_at_shop',
       },
     });
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
-    if (paymentMethod === 'cash') {
-      await onCashSelected(job.id);
-      res.status(201).json({
-        job: { id: job.id, status: 'awaiting_arrival', totalPaise: job.totalPaise },
-        checkout: { mode: 'cash', amountPaise: job.totalPaise },
-      });
-      return;
-    }
-
-    const order = await paymentProvider.createOrder(job.id, breakdown.totalPaise, 'print_job');
-    await prisma.job.update({
-      where: { id: job.id },
-      data: { paymentProvider: order.provider, paymentOrderId: order.providerOrderId },
-    });
-
+    await preparePayAtShopOrder(job.id);
     res.status(201).json({
-      job: { id: job.id, status: job.status, totalPaise: job.totalPaise },
-      checkout: order.checkout,
+      job: { id: job.id, status: 'awaiting_arrival', totalPaise: job.totalPaise },
+      checkout: { mode: 'pay_at_shop', amountPaise: job.totalPaise },
     });
   }),
 );
@@ -223,18 +181,33 @@ jobsRouter.get(
         checkInCount: true,
         assignedPrinterId: true,
         paymentStatus: true,
-        paymentProvider: true,
-        cashCollectedAt: true,
         printError: true,
         printAttempts: true,
         rating: true,
-        shop: { select: { name: true, slug: true, address: true } },
+        shop: {
+          select: {
+            name: true,
+            slug: true,
+            address: true,
+            counterUpiVpa: true,
+            counterUpiPayeeName: true,
+            counterUpiVerifiedAt: true,
+          },
+        },
         file: { select: { originalName: true, pages: true } },
       },
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, nearFrontNotifiedAt, ...safeJob } = job;
+    const { releaseCodeEncrypted, shopId, nearFrontNotifiedAt, shop, ...safeJob } = job;
+    const safeShop = {
+      name: shop.name,
+      slug: shop.slug,
+      address: shop.address,
+      counterUpi: shop.counterUpiVerifiedAt && shop.counterUpiVpa && shop.counterUpiPayeeName
+        ? { vpa: shop.counterUpiVpa, payeeName: shop.counterUpiPayeeName }
+        : null,
+    };
     const codeVisible = isCounterCodeAvailable(
       job.status,
       live.position,
@@ -247,11 +220,12 @@ jobsRouter.get(
     res.json({
       job: {
         ...safeJob,
+        shop: safeShop,
         ...live,
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
         counterCodeAvailable: codeVisible,
         counterCodeThreshold: env.NEAR_FRONT_THRESHOLD,
-        canCheckIn: ['paid', 'cash_due'].includes(job.paymentStatus)
+        canCheckIn: ['paid', 'counter_due', 'cash_due'].includes(job.paymentStatus)
           && ['awaiting_arrival', 'no_show', 'requeued'].includes(job.status),
         checkInOpensAt,
       },
@@ -328,12 +302,15 @@ jobsRouter.post(
     ) {
       throw conflict('Job can no longer be cancelled');
     }
+    if (job.paymentProvider === 'pay_at_shop' && job.paymentStatus === 'paid') {
+      throw conflict('Counter payment has been confirmed. Ask shop staff or PrintQs support to record an auditable refund.');
+    }
     const updated = await applyTransition(
       job.id,
       job.status,
       'CANCEL',
       { type: 'student', id: req.student!.id },
-      job.paymentProvider === 'cash' && job.paymentStatus === 'cash_due'
+      ['counter_due', 'cash_due'].includes(job.paymentStatus)
         ? { paymentStatus: 'failed' }
         : {},
     );

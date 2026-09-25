@@ -46,6 +46,7 @@ export function setupRealtime(httpServer: HttpServer): Server {
       socket.data.studentId = claims.sub;
       return next();
     }
+    if (claims.typ !== 'shop') return next(new Error('unauthorized'));
     socket.data.kind = 'shop';
     socket.data.shopId = claims.shopId;
     return next();

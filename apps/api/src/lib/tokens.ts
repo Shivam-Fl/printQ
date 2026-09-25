@@ -11,7 +11,12 @@ export interface ShopClaims {
   shopId: string;
   role: 'owner' | 'staff';
 }
-export type AuthClaims = StudentClaims | ShopClaims;
+export interface AdminClaims {
+  typ: 'admin';
+  sub: string;
+  role: 'platform_admin';
+}
+export type AuthClaims = StudentClaims | ShopClaims | AdminClaims;
 
 export function signStudentToken(studentId: string): string {
   return jwt.sign({ typ: 'student' }, env.JWT_SECRET, { subject: studentId, expiresIn: '30d' });
@@ -21,6 +26,14 @@ export function signShopToken(shopUserId: string, shopId: string, role: 'owner' 
   return jwt.sign({ typ: 'shop', shopId, role }, env.JWT_SECRET, {
     subject: shopUserId,
     expiresIn: '12h',
+  });
+}
+
+/** Platform administration is deliberately a separate identity domain from a shop owner. */
+export function signAdminToken(adminId: string): string {
+  return jwt.sign({ typ: 'admin', role: 'platform_admin' }, env.JWT_SECRET, {
+    subject: adminId,
+    expiresIn: '4h',
   });
 }
 
@@ -38,6 +51,9 @@ export function verifyToken(token: string): AuthClaims | null {
       (payload.role === 'owner' || payload.role === 'staff')
     ) {
       return { typ: 'shop', sub: payload.sub, shopId: payload.shopId, role: payload.role };
+    }
+    if (payload.typ === 'admin' && typeof payload.sub === 'string' && payload.role === 'platform_admin') {
+      return { typ: 'admin', sub: payload.sub, role: 'platform_admin' };
     }
     return null;
   } catch {

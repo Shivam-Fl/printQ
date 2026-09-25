@@ -13,12 +13,14 @@
     "dev:sim": "tsx watch src/index.ts --simulate",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "test": "vitest run --pool=threads",
     "desktop": "electron dist/desktop.js",
     "test:desktop": "node ../../scripts/desktop-smoke.mjs",
     "package:windows": "npm run build && electron-builder --win nsis --x64 --publish never",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.6.0",
     "socket.io-client": "^4.8.0"
   },
@@ -27,7 +29,8 @@
     "electron": "38.8.6",
     "electron-builder": "26.15.3",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
   },
   "build": {
     "appId": "com.printqs.shop",

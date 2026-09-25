@@ -8,6 +8,7 @@ import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { generalLimiter } from './middleware/rateLimit.js';
+import { createAppCheckMiddleware } from './middleware/appCheck.js';
 import { errorHandler } from './middleware/error.js';
 import { HttpError } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
@@ -18,6 +19,7 @@ import { shopRouter } from './modules/shops/routes.js';
 import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
+import { adminRouter } from './modules/admin/routes.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -63,6 +65,7 @@ export function createApp(): express.Express {
 
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', generalLimiter);
+  app.use('/api', createAppCheckMiddleware());
 
   app.use('/api/auth', authRouter);
   app.use('/api/public', publicRouter);
@@ -71,6 +74,7 @@ export function createApp(): express.Express {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/push', pushRouter);
   app.use('/api/shop', shopRouter);
+  app.use('/api/admin', adminRouter);
   app.use('/api/agent', agentRouter);
 
   // Single-domain production deploy: serve the built web app from the API so

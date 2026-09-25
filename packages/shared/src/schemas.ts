@@ -125,8 +125,16 @@ export const releaseOtpSchema = z.object({
   printerId: z.string().uuid().optional(),
   /** Explicit staff confirmation for a paid order outside the near-front window. */
   overrideQueue: z.boolean().default(false),
-  /** Required before a cash order can transition to the printer. */
-  cashReceived: z.boolean().default(false),
+  /**
+   * An attended counter confirmation. Amount is deliberately absent: the API
+   * always records the immutable server-calculated job total, never a value
+   * supplied by a browser or a staff member.
+   */
+  paymentConfirmation: z.object({
+    method: z.enum(['cash', 'shop_upi']),
+    /** Optional merchant-app reference observed by staff; it is never proof by itself. */
+    reference: z.string().trim().min(1).max(120).optional(),
+  }).strict().optional(),
 });
 
 export const couponCodeSchema = z.string().trim().min(1).max(40);
@@ -139,8 +147,11 @@ export const createJobSchema = z
     /** required for scheduled mode: 15 min – 72 h ahead */
     scheduledTime: z.coerce.date().optional(),
     couponCode: couponCodeSchema.optional(),
-    paymentMethod: z.enum(['online', 'cash']).default('online'),
   })
+  // There is one student checkout option: pay at shop. Reject stale online
+  // and cash selector fields rather than silently accepting a client-selected
+  // money rail during a rolling release.
+  .strict()
   .superRefine((val, ctx) => {
     if (val.mode === 'scheduled') {
       if (!val.scheduledTime) {

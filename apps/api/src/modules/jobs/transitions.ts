@@ -17,27 +17,37 @@ export async function applyTransition(
   event: JobEvent,
   actor: { type: ActorType; id?: string },
   extraData: Prisma.JobUncheckedUpdateInput = {},
+  /** Optional immutable audit label when one state transition has extra significance. */
+  auditEvent?: string,
 ): Promise<Job | null> {
   const to = transition(from, event); // throws InvalidTransitionError on bad input
 
-  const result = await prisma.job.updateMany({
-    where: { id: jobId, status: from },
-    data: { ...extraData, status: to },
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.job.updateMany({
+      where: { id: jobId, status: from },
+      data: { ...extraData, status: to },
+    });
+    if (result.count === 0) {
+      // someone else transitioned first — caller decides whether that matters
+      logger.warn({ jobId, from, event }, 'transition_lost_race');
+      return null;
+    }
+    const updated = await tx.job.findUnique({ where: { id: jobId } });
+    if (!updated) throw new Error('Transitioned job disappeared before audit write');
+    const jobEvent = await tx.jobEvent.create({
+      data: {
+        jobId,
+        fromStatus: from,
+        toStatus: to,
+        event: auditEvent ?? event,
+        actorType: actor.type,
+        actorId: actor.id ?? null,
+      },
+    });
+    // The projection event is committed with the authoritative transition.
+    // A Firebase outage therefore delays only a rebuildable view, never loses
+    // the state change or makes Firestore a financial/queue authority.
+    await tx.realtimeOutbox.create({ data: { jobEventId: jobEvent.id, jobId } });
+    return updated;
   });
-  if (result.count === 0) {
-    // someone else transitioned first — caller decides whether that matters
-    logger.warn({ jobId, from, event }, 'transition_lost_race');
-    return null;
-  }
-  await prisma.jobEvent.create({
-    data: {
-      jobId,
-      fromStatus: from,
-      toStatus: to,
-      event,
-      actorType: actor.type,
-      actorId: actor.id ?? null,
-    },
-  });
-  return prisma.job.findUnique({ where: { id: jobId } });
 }

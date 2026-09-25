@@ -14,6 +14,7 @@ const vitest = path.join(root, 'node_modules', 'vitest', 'vitest.mjs');
 const workspaces = [
   ['shared', path.join(root, 'packages', 'shared')],
   ['api', path.join(root, 'apps', 'api')],
+  ['agent', path.join(root, 'apps', 'agent')],
   ['web', path.join(root, 'apps', 'web')],
 ];
 
@@ -22,10 +23,13 @@ await mkdir(reportDir, { recursive: true });
 
 for (const [name, cwd] of workspaces) {
   const report = path.join(reportDir, `${name}.junit.xml`);
+  // Electron's Windows toolchain launches cleanly under Vitest's thread pool;
+  // this is a runner choice, not a test exclusion or a reduced test set.
+  const vitestArgs = [vitest, 'run', ...(name === 'agent' ? ['--pool=threads'] : []), '--reporter=junit', `--outputFile=${report}`];
   const exitCode = await new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [vitest, 'run', '--reporter=junit', `--outputFile=${report}`],
+      vitestArgs,
       { cwd, env: process.env, stdio: 'inherit', windowsHide: true },
     );
     child.once('error', reject);

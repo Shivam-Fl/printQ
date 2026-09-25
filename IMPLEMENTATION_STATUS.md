@@ -1,62 +1,112 @@
 # PrintQs launch implementation status
 
-Last updated: 2026-09-15 (Asia/Kolkata)
+Last updated: 2026-09-24 (Asia/Kolkata)
 
 ## Current phase
 
-Phase 0 — baseline frozen; Phase 1 CI/release implementation in progress.
+Phases 0–7 and Windows-agent hardening remain implemented in unmerged PRs #9–#19. The pay-at-shop candidate is [PR #20](https://github.com/Shivam-Fl/printQ/pull/20); its current head must be read from that PR before deployment. The repository became public on 2026-09-24 and GitHub Actions runners started on rerun attempt 2 of `36008434332`. PostgreSQL/Redis, migrations, builds, typechecks, package tests and secret scan passed, but the simulator exposed a real staff counter-code 429 lockout after repeated valid multi-step prompts. A failing regression test reproduced this before the local fix; the focused test and typecheck now pass. The full simulator has **not** passed on the current source candidate. Weekly Razorpay TEST mandate creation, notice delivery, exact debit dispatch, and signed settlement are not implemented or tested. No Cloud Run service or launch candidate has been deployed. No real shop orders may be accepted under this candidate.
 
-## Ownership and branch
+## Ownership and release source
 
 | Item | Value |
 | --- | --- |
 | Integration owner | Codex lead implementation agent |
-| Isolated worktree | `C:\Users\acer\Desktop\startup\printQ-ci-release` |
-| Feature branch | `codex/ci-release-baseline` |
-| Baseline commit | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
-| Production branch at audit | `master` at the same SHA |
-| New release branches | `development` and `main`, both created from the frozen baseline |
+| User-owned source tree | `C:\Users\acer\Desktop\startup\printQ` — deliberately untouched; it contains QA/generated changes |
+| Isolated implementation worktree | `C:\Users\acer\Desktop\startup\printQ-pay-at-shop` |
+| Verified retention branch / PR | `codex/storage-completion-retention` / [PR #9](https://github.com/Shivam-Fl/printQ/pull/9) |
+| Required-check retention SHA | `2be8a674a8a1ebca333d6d6fc5e994dfa1b20ee9` |
+| Active stacked isolation branch / PR | `codex/environment-isolation` / [PR #10](https://github.com/Shivam-Fl/printQ/pull/10) (code fix `9ef164e`; stacked on the retention candidate and not mergeable until its prerequisite and a development deployment path are verified) |
+| Active Cloud Run runtime branch / PR | `codex/cloud-run-runtime` / [PR #12](https://github.com/Shivam-Fl/printQ/pull/12) (based on the isolation candidate; unmerged and undeployed) |
+| Active GCS storage branch / PR | `codex/gcs-storage-runtime` / [PR #13](https://github.com/Shivam-Fl/printQ/pull/13) (stacked on the Cloud Run candidate; unmerged and undeployed) |
+| Active App Check branch / PR | `codex/firebase-projections` / [PR #14](https://github.com/Shivam-Fl/printQ/pull/14) (stacked on the GCS candidate; unmerged and undeployed) |
+| Active Firebase outbox branch / PR | `codex/firebase-outbox` / [PR #15](https://github.com/Shivam-Fl/printQ/pull/15) (stacked on the App Check candidate; unmerged and undeployed) |
+| Active FCM branch / PR | `codex/fcm-notifications` / [PR #16](https://github.com/Shivam-Fl/printQ/pull/16) (stacked on the Firebase outbox candidate; unmerged and undeployed) |
+| Active Resend branch / PR | `codex/resend-password-recovery` / [PR #17](https://github.com/Shivam-Fl/printQ/pull/17) (stacked on the FCM candidate; unmerged and undeployed) |
+| Active campus/discovery branch / PR | `codex/campus-verification` / [PR #18](https://github.com/Shivam-Fl/printQ/pull/18) (current SHA is tracked by the PR; stacked on Resend, unmerged and undeployed) |
+| Active Windows-agent branch / PR | `codex/windows-agent-hardening` / [PR #19](https://github.com/Shivam-Fl/printQ/pull/19), SHA `39568e35bc064c938f5c38bf4989ea3f8ccd3097`; required CI + secret scan passed; unmerged and undeployed |
+| Active pay-at-shop branch / PR | `codex/pay-at-shop-ledger` / [PR #20](https://github.com/Shivam-Fl/printQ/pull/20) (integrated candidate targets `master`; unmerged; exact current head is in GitHub) |
+| Current release source | `master` (user-directed; `main` remains protected but is not a release path) |
+| Frozen deployed baseline | `18c89ef62bbf73a2128028f2f62a4a96a08cf477` |
+| Current audited master base | `dd2c94bd0db444a634abc1f30eba10a98cd61731` |
 
-## Baseline evidence
+## Completed, evidenced controls
 
-- Source working tree was deliberately left untouched. It contains user-owned modified and untracked QA/generated materials.
-- The isolated worktree starts clean from the audited deployed SHA above.
-- Existing QA workbook: `outputs/printqs-production-qa-20260915/PrintQs_Production_QA_Matrix.xlsx`; 164 cases, 147 pass, 17 externally/device/provider-blocked at the historical run, and one open launch-hygiene defect (`DEF-010`, QA shops publicly discoverable).
-- Current CI workflow has Node 22 but does not provision PostgreSQL or Redis and runs no Prisma migration/integration environment. This is the first defect to repair.
-- Existing deployment configuration is Render/free/local storage, combined API/worker, console reset email, and legacy student Razorpay/Route paths. These are historical and are not production-launch compliant.
+- The historical deployed SHA was recorded before implementation. The original working tree and its user-owned QA files were preserved.
+- CI now provisions disposable PostgreSQL 16 and Redis 7, verifies connectivity, applies Prisma migrations, builds all workspaces, runs the full test suite and agent simulator, retains JUnit/simulator evidence, checks production dependencies, and scans secrets.
+- GitHub Actions run `35124027115` passed for the current audited `master` base. The earlier CI repair passed in run `35006008738`; cancelled runs are not accepted as evidence.
+- `master`, `development`, and the unused `main` have strict required `CI / check` and `CI / secret scan`; direct, content-identical push probes to `master` and `development` were rejected by GitHub (`GH006`). No explicit pull-request-review requirement was found in the branch-protection audit; do not represent that as configured.
+- A separate Firebase development project was created in the Firebase console with Analytics/Gemini disabled and a registered development web application. Six development-only browser configuration values are stored as GitHub **development environment** secrets; no values are in Git.
+- Docker Desktop remains unavailable on this workstation. No Docker Desktop repair or user-service mutation was attempted. Local validation uses pure/unit/build checks and GitHub Actions supplies disposable PostgreSQL/Redis integration services.
 
-## Environment and provider status
+## Active retention change (awaiting CI/PR)
 
-| Area | Audited state | Launch status |
-| --- | --- | --- |
-| Development | No isolated branch-scoped environment evidenced | Not created |
-| Production compute | Render combined API/worker configuration | Must move to Cloud Run |
-| File storage | Local/ephemeral configuration | Must replace with private durable object storage |
-| Student checkout | Online Razorpay plus cash legacy options | Must become pay-at-shop only |
-| Shop collection | Route payout/mock balance payment legacy path | Must become receivable + weekly recurring collection |
-| Razorpay UPI AutoPay | Account approval not evidenced; stated unavailable | External approval required before test/live mandate |
-| Resend domain | Verification not evidenced | External DNS/account action required |
-| Physical printer | Simulator evidence only | Physical acceptance required |
+- A Windows spool acknowledgement is now recorded separately and cannot mark an order printed, post earnings, notify pickup, or start deletion.
+- Deterministic simulator completion is permitted only when explicitly enabled outside production. Real jobs remain visibly awaiting an authenticated staff member's **Printed successfully** confirmation.
+- PostgreSQL records the print confirmation method/time, deletion schedule, deletion attempts/error, and deletion completion. The confirmed successful print or terminal cancellation/expiry creates a fixed T+10-minute deadline; an earlier deadline can never be extended by retries.
+- A delayed deletion job targets each exact deadline; a one-minute PostgreSQL-backed sweeper reconciles missed schedules and a retry-exhausted job lands in a content-free dead-letter queue. Deletion removes every source/converted/preview object, scrubs stored filename/source metadata, and retains only non-content audit/order metadata. Outages/overdue recoverable jobs are recorded instead of silently extending retention.
+- The simulator/E2E contract has been updated to declare deterministic completion explicitly. The real Windows agent reports only `spool_accepted` and removes its temporary cache in its existing `finally` block.
 
 ## Tests and evidence
 
 | Command / evidence | Result | Notes |
 | --- | --- | --- |
-| Historical `npm test` / typecheck / build | Historical pass only | Must be re-run in the isolated environment |
-| Historical production matrix | 147 pass / 17 blocked | Not valid for the new architecture |
-| `npm run typecheck` | Passed | All workspaces after CI/test teardown changes |
-| `npm run test` | Passed | 88 tests: 44 shared, 29 API, 15 web |
-| `npm run test:ci` | Passed | 88 tests and JUnit reports for shared/API/web workspaces |
-| `npm run build` | Passed | All packages; existing web bundle-size warning remains tracked |
-| `npm audit --omit=dev --audit-level=high` | Passed | 0 reported production dependency vulnerabilities |
-| Local Docker integration run | Deferred | Docker Desktop engine failed locally; no user-owned services were used. GitHub Actions supplies isolated PostgreSQL/Redis for the required migration and simulator run. |
-| CI run `35005552170` | Cancelled | Simulator defaulted to Redis `6380` while CI exposes `6379`; secret scan also lacked its required read-only pull-request permission. Both defects are fixed before rerun; no result from this run is accepted as launch evidence. |
+| `npm run db:generate -w apps/api` | Passed | Prisma client regenerated from the active schema. |
+| `npx prisma validate --schema apps/api/prisma/schema.prisma` | Passed | Executed with an isolated disposable test connection string. |
+| `npm run typecheck -w apps/api` | Passed | After the retention/confirmation change. |
+| `npm run test -w apps/api` | Passed | 13 files / 33 tests; includes strict deadline and object-deletion-manifest regression coverage. |
+| `npm run build -w apps/web` | Passed | Existing bundle-size warning remains; no failure. |
+| `npm run test:ci` | Passed | Shared, API, and web JUnit reports written under `.tmp/ci-results/`. |
+| Full local migration/E2E | Deferred safely | Requires PostgreSQL/Redis; GitHub CI will run the disposable migration and simulator path. Docker Desktop is not used as a workaround. |
+| GitHub Actions `35131596603` | Passed | Exact candidate migration deploy/status, build, typecheck, JUnit suite, full print-agent simulator, dependency audit, and CI artifact upload. |
+| GitHub Actions `35131203760` | Rejected | Simulator correctly caught the initial premature legacy earning credit. Commit `2b2c630` moves the credit to verified physical print status and the full rerun above passes. |
+| User-owned SDLC `qa` `35131698781` | Not a release gate; failed | Its validation expects `qa-report.json`, but its own workflow did not produce one for this master-targeted PR. `gh pr checks --required` confirms only `CI / check` and `CI / secret scan`, both passed. The workflow is preserved unchanged. |
+| Isolation branch local suite | Passed | API 16 files / 40 tests, all-workspace typecheck, web production build, root JUnit suite with zero failures/errors, and Prisma schema validation. |
+| PR #10 CI regression reproduction | Passed locally and in CI | GitHub run `35133141729` correctly caught a test that hard-coded `printq-test` while the CI environment uses `printq-ci-test`; the assertion now derives `QUEUE_NAMESPACE`. The affected test and API suite (16 files / 40 tests) pass under the exact CI namespace, followed by API typecheck and the GitHub rerun below. |
+| GitHub Actions `35347722899` | Passed | Required CI and secret scan passed for `9ef164e`: disposable PostgreSQL/Redis readiness, Prisma deploy/status, all builds/typechecks, JUnit suite, agent simulator, dependency audit, and retained artifacts. The user-owned non-required `qa` workflow failed again because its workflow expects an artifact it does not create; it was not modified. |
+| Cloud Run runtime branch local suite | Passed | API role contract: 17 files / 42 tests; API and all-workspace typechecks; API production build; root JUnit reports with zero failures/errors. Cloud Run API/worker/job templates rendered with dummy development-only values and passed YAML structural validation. No Docker Desktop use or cloud deployment occurred. |
+| GitHub Actions `35350351902` | Passed | Required `CI / check` and `CI / secret scan` passed for Cloud Run candidate code `3440790`: disposable PostgreSQL/Redis readiness, Prisma deploy/status, full build/typecheck/JUnit suite, agent simulator, dependency audit, and retained artifacts. The user-owned non-required `qa` workflow failed for its known missing `qa-report.json` artifact and remains unchanged. |
+| GCS storage branch local suite | Passed | GCS namespace/save/download/delete/V4 signed-preview regressions and environment-isolation tests: 18 API files / 46 tests. All-workspace typecheck, root JUnit suite, and web production build passed. All four manifests rendered with dummy development-only values and passed YAML structural validation. Runtime production-dependency audit has no high findings; the Google client dependency transitively retains two moderate `uuid` findings, recorded for dependency follow-up rather than auto-upgrading. |
+| App Check branch local suite | Passed | App Check monitor/enforce policy and invalid-project regressions: API 13 focused tests plus web API 5 focused tests. All-workspace typecheck, root JUnit suite, API build, and web production build passed. App Check uses the Firebase Admin SDK with application-default credentials and sends assertions only in the `X-Firebase-AppCheck` header. Runtime production-dependency audit has no high findings; two transitive moderate `uuid` findings remain recorded for follow-up. |
+| Firebase transactional-outbox local suite | Passed | 20 focused tests and the complete API suite (21 files / 57 tests) cover atomic transition/audit/outbox creation, Firebase UID identity binding, scoped projection paths, automatic position refresh for every active shop-queue job, and no-document/no-location/no-phone/no-money payloads. Prisma generation/validation, all-workspace typecheck, root JUnit suite, API and web builds passed. The runtime production-dependency audit has no high findings; the existing two transitive moderate `uuid` findings remain recorded for dependency follow-up. |
+| FCM notification-outbox local suite | Passed | FCM registration, privacy-minimal payload, invalid-token pruning, durable event-key de-duplication, lease contention, and retry-release regressions pass. Full API (23 files / 63 tests), web (3 files / 15 tests), all-workspace typecheck, root JUnit suite, Prisma generation/validation, and API/web production builds pass. The registry audit endpoint returned HTTP 503 twice on 2026-09-19; the last successful production audit had no high findings and the same two recorded transitive moderate `uuid` findings. |
+| Resend reset-recovery local suite | Passed | Resend request authentication, redacted provider-error handling, delivery-id-only audit data, persistent per-email limits, and production console-provider rejection regressions pass. Full API (24 files / 66 tests), web (3 files / 15 tests), all-workspace typecheck, root JUnit suite, Prisma generation/validation, and API/web production builds pass. The npm advisory endpoint remained unavailable (HTTP 503); no audit result is claimed for this rerun. |
+| FCM/Resend required CI rerun | Passed | FCM SHA `d49358c` (run `35458814884`) and Resend SHA `6ae5c1d` (run `35458834649`) passed required CI and secret scan after auditing each deployable workspace independently. The gate remains hard on high-severity production findings; API retains two transitive moderate `uuid` findings. The unrelated non-required `qa` workflow remains broken by its own absent `qa-report.json` producer. |
+| Campus/discovery local suite | Passed with documented local infrastructure limit | Prisma schema generation/validation and migration-datamodel rendering, API typecheck, 26 API files / 71 tests, web typecheck/build, 3 web files / 15 tests, and root JUnit suite all pass. Regressions cover published/verified/active-campus filtering, rounded nearby distances without GPS fields, separate admin claims, and production admin bootstrap enforcement. Full simulator/migration execution is deferred to GitHub CI because Docker Desktop is unavailable and no local Redis/PostgreSQL service was started. Workspace production audits contain no high findings; API retains the recorded two transitive moderate `uuid` findings. |
+| Windows-agent hardening local suite | Passed | Agent security/test-page/backoff tests (7 files / 12 tests), focused API selection contract (2 tests), all-workspace typecheck, Prisma generation/validation and migration-datamodel rendering, production builds, and root JUnit suite (shared/API/agent/web) passed. The test page is a locally generated PDF; it cannot create a customer job, alter a queue, or imply physical customer-print completion. |
+| Campus candidate CI `35459845726` | Failed correctly; remediation pending rerun | The required simulator caught its obsolete self-launch expectation: it did not create a canonical campus or perform the separate admin verification/publication flow, so setup remained non-ready. The top stacked candidate now creates an ephemeral in-memory CI administrator, provisions a campus through the admin API, submits the shop, then verifies and publishes it through the same protected admin routes. Local `node --check`, root JUnit suite, typecheck, and production workspace builds pass; disposable PostgreSQL/Redis simulator evidence must be re-run in GitHub CI. |
+| PR #19 required CI `35586880837` | Passed | The top Windows-agent/campus remediation SHA `39568e3` passed disposable PostgreSQL/Redis migration, simulator, build, typecheck, and secret-scan gates. The unrelated `qa` workflow remains non-required and fails because it does not generate the `qa-report.json` it expects. |
+| Pay-at-shop focused regressions | Passed | Shared payment/state contracts: 15 tests. API commission arithmetic, counter-code contract, weekly statement arithmetic, notice/debit gate, and environment collection-mode guards: 25 focused tests. API/web/shared typechecks pass. Local Prisma schema validation passes with a disposable connection string; Docker Desktop was not used. |
+| Pay-at-shop full local package tests, 2026-09-23 | Passed | API 29 files / 85 tests; web 3 files / 17 tests; shared 6 files / 47 tests. Full root `npm run test:ci`, API/web/shared typechecks, Prisma generate/validate, production `npm run build`, simulator syntax, and `git diff --check` passed. The generated agent tarball changed with the production build. |
+| Pay-at-shop first PostgreSQL/Redis CI, run `35886699620` at `ac47c16` | Failed at simulator assertion | Prisma migrations, production build, all package tests, typechecks, and most cash/UPI/refund/print-simulator journeys passed. The paused-shop case expected payment confirmation without handling an out-of-order queue/manual-printer prompt. Commit `3665f15` updates that regression case. |
+| Pay-at-shop original CI attempt, run `36008434332` at `3665f15` | Infrastructure-blocked, historical | Attempt 1 was refused before runner start with a billing/spending-limit annotation. After the repository became public, attempt 2 started normally; use its actual test result below. |
+| Pay-at-shop public-repo CI rerun `36008434332`, attempt 2 at `3665f15` | **Failed at simulator; real regression** | PostgreSQL 16/Redis 7 services, migrations, build, typecheck, all package tests and secret scan passed. The simulator reached the paused-shop order and received HTTP 429 after repeated valid queue/printer/payment prompts. Regression test first failed on the eleventh valid prompt; a distinct counter-release limiter now uncounts successful prompts but preserves 10 invalid attempts/minute per IP. Focused test and adjacent queue tests pass locally; full rerun pending new SHA. |
+| Pay-at-shop local rerun, 2026-09-24 | Passed, partial launch gate | `node --check scripts/e2e-sim.mjs`, `git diff --check`, seven focused queue tests, complete `npm run test:ci`, and all-workspace `npm run typecheck` passed after the simulator patch. The PostgreSQL/Redis simulator itself is **not** yet complete on this SHA. A local PostgreSQL 18 service listens on port 5433; no Redis service was present. Developer-only Memurai `winget` installation failed with exit 1603 because its MSI custom action could not create a temp directory (access denied); it is not installed and was never intended for live orders. |
+
+## Environment/provider status and blockers
+
+| Area | Current status | Required next action / owner |
+| --- | --- | --- |
+| Development Firebase | Isolated project and GitHub environment secrets created | Enable Auth/App Check/realtime/FCM after application wiring; use only development configuration. |
+| Development private GCS | Provisioned, empty; app not deployed | `printqs-development-documents-20260923` in `printqs-development`, Mumbai Standard; public access prevention enforced, uniform access enabled, soft delete/versioning/retention off. GitHub `development` environment variable `DEV_GCS_BUCKET` binds its name. Ten-minute runtime deletion and signed-URL invalidation still require live QA. |
+| Development Artifact Registry | Provisioned, empty; no image pushed | `printqs-development-images` in Mumbai, Standard Docker, immutable tags enabled, automatic vulnerability scanning disabled; GitHub `development` variables bind repository/project/region. The first create attempt returned a generic console error; a minimal retry succeeded, and immutability was enabled and verified in edit settings. |
+| Development private network | Provisioned and verified; no database or worker attached | Custom VPC `printqs-development` in the development project has one `asia-south1` subnet `printqs-development-mumbai`, `10.67.0.0/24`, and zero explicit firewall rules. Both names are bound as GitHub `development` environment variables. It is a distinct project/VPC from production. |
+| Development PostgreSQL/Redis/compute | Not provisioned | No Cloud Run service, private DB, Redis, workload identity federation, runtime/deploy identity, or image exists. Compute Engine and Cloud SQL Admin APIs were enabled in the development project on 2026-09-24. Dev manifests now use the Cloud Run v1 project-number namespace and Direct VPC egress; the workflow checks private bucket settings and resource names. Its YAML and all shell steps parse, but no deployment has exercised them yet. Do not reuse production. |
+| Production compute/storage | Render combined/local-storage configuration remains legacy; production Cloud Run page showed zero services on 2026-09-23 | Cloud Run + separate workers + private object storage remain required before real orders. A source-controlled production deployment gate is in progress. |
+| Historical secret scan | Full-history scan detects an old Firebase browser key in Git history | Coordinate key restriction/rotation before history remediation; do not expose its value. |
+| GitHub Actions | Repository became public on 2026-09-24; runner starts now | The exact-SHA CI rerun uncovered an actual counter-code 429 defect. A narrow fix is local and must pass the full PostgreSQL/Redis simulator in a new PR-head run. No failed-check bypass is needed while hosted CI executes. |
+| Razorpay AutoPay | UPI AutoPay approval is not evidenced and must remain unclaimed; source fails closed for live collection | Razorpay's official on-demand Recurring Payments API documents variable subsequent payments but requires account activation. Obtain written variable-weekly B2B approval, fees/bank/app/retry terms and authorization for the enablement request. Then configure isolated TEST mandates, signed webhooks, and reconciliation evidence. No live mandate/debit occurs under this candidate. |
+| Resend | Domain verification not evidenced | Founder/DNS owner must verify a sender domain. |
+| Physical printer | Simulator only | Shop owner must complete and document real Windows printer acceptance before advertising capabilities. |
+| Windows signing/updater | No code-signing certificate, signed release channel, or rollback artifact is evidenced | Release owner must provide a valid Windows code-signing identity and a controlled signed-update/release channel; the agent must not be represented as signed or auto-updating before that evidence exists. |
 
 ## Rollback
 
-- Code rollback target is the immutable baseline commit `18c89ef62bbf73a2128028f2f62a4a96a08cf477`.
-- No deployment, migration, provider configuration, or live-money action has been performed by this implementation stream.
+- Before this active branch is merged: close its PR; `master` stays at `dd2c94bd0db444a634abc1f30eba10a98cd61731`.
+- After a future merge but before deployment: revert the exact merge commit through a protected feature PR; do not rewrite shared history.
+- No Cloud Run, database, storage, Firebase Auth, Razorpay, Resend, production deployment, live key, mandate, or real-money action has been performed by this stream.
+- Before the campus/discovery candidate is merged: close its PR; the preceding Resend candidate remains unchanged. After a future merge, revert only its merge commit through a protected PR; never directly amend `master`.
+- Before the Windows-agent candidate is merged: close its PR; the campus/discovery candidate remains unchanged. After a future merge, revert only its merge commit through a protected PR; no desktop installer has been published from this branch.
 
 ## Next action
 
-Push the CI repair as a feature branch PR to `development`, verify GitHub's disposable PostgreSQL/Redis migration and simulator run, then protect `development` and `main` with the observed required checks.
+Finish the isolated full PostgreSQL/Redis migration and simulator rerun on the current source candidate, either after GitHub Actions billing is restored or with a documented local/server-side equivalent. Resolve the supported Cloud Run private network and project-number namespace, then provision only isolated development DB/Redis/identities. Complete TEST recurring collection and signed settlement, deploy the exact tested candidate, collect live browser/storage/provider/printer evidence, and execute the full dated release QA matrix. Do not merge to `master` while its Render auto-deploy can expose an unverified customer-order path. Production promotion requires the final clean QA rerun and still requires immediate explicit confirmation before live keys, a production mandate, or a real shop debit.
