@@ -9,12 +9,12 @@ Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are 
 | Field | Verified state |
 | --- | --- |
 | Phase / owner | Phase 10 weekly collection and production release gates; lead agent. Phases 2 and 12 remain open. |
-| Branch / PR | `codex/weekly-collection-test` from `development` SHA `6497d191`; PR not yet created. |
-| Implemented this batch | Regression-tested binding of an eligible TEST mandate to a frozen weekly commission statement. Production live collection remains fail-closed. |
-| Tests | Commission 11/11, API 93/93, root JUnit 172/172, all-workspace typecheck and production build passed locally. Provider TEST/live dispatch and settlement E2E have not passed. |
-| Environment / evidence | Render free production settings were staged with Save only; Resend `mail.printqs.com` is verified. Masked screenshots are retained locally outside public Git; details in `PRODUCTION_RELEASE_LOG.md`. No new production SHA was deployed. |
-| Blockers | Production has 0 admins, 0 verified/published shops and 0 mandates; Razorpay dashboard requested login and on-demand recurring approval is unverified. Final 100+ case hosted QA, durable production database/queue and live-money confirmation remain outstanding. |
-| Rollback / next action | Old Render deploy `dep-daqjk73l550s73bp7u8g` remains live. Finish TEST adapter/reconciliation and protected PR; only after exact-SHA QA and startup credentials should a release PR/deploy replace it. |
+| Branch / PR | TEST mandate fix [PR #30](https://github.com/Shivam-Fl/printQ/pull/30) merged to `development` SHA `2d71cbf6`; current webhook isolation branch `codex/recurring-webhook-isolation` has no PR yet. |
+| Implemented this batch | Regression-tested binding of an eligible TEST mandate to a frozen weekly commission statement. Recurring webhook now uses its own fail-closed HMAC secret on the current feature branch. Production live collection remains disabled. |
+| Tests | PR #30 required CI, secret scan and post-merge development CI passed. Commission 11/11, API 93/93, root JUnit 172/172, all-workspace typecheck and production build passed locally for that PR. Focused webhook tests 4/4 pass on the next branch; its full CI is pending. Provider TEST/live dispatch and settlement E2E have not passed. |
+| Environment / evidence | Render free production settings were staged with Save only; Resend `mail.printqs.com` is verified. Razorpay Live Subscriptions UPI/card/eMandate are enabled, but the only approved website is `www.packkar.in`. Screenshots are retained locally outside public Git; details in `PRODUCTION_RELEASE_LOG.md`. No new production SHA was deployed. |
+| Blockers | Production has 0 admins, 0 verified/published shops and 0 mandates. PrintQs website and variable B2B commission approval on Razorpay are unverified; live key is not enabled in PrintQs. Final 100+ case hosted QA, durable production database/queue and immediate live-money confirmation remain outstanding. |
+| Rollback / next action | Old Render deploy `dep-daqjk73l550s73bp7u8g` remains live. Finish webhook isolation and TEST adapter/reconciliation via protected PRs; only after exact-SHA QA and startup credentials should a release PR/deploy replace it. |
 
 
 The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.
