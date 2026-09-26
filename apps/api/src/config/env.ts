@@ -331,9 +331,19 @@ if (env.PRINTQ_ENVIRONMENT === 'development' && env.CORS_ORIGINS.some((origin) =
   console.error('Development CORS cannot trust a production PrintQs origin');
   process.exit(1);
 }
-if (env.PRINTQ_ENVIRONMENT === 'production' && env.CORS_ORIGINS.some((origin) => /localhost|127\.0\.0\.1/i.test(origin))) {
+if (env.PRINTQ_ENVIRONMENT === 'production' && env.CORS_ORIGINS.some((origin) => {
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || /(^|[.-])(?:dev|development)(?=[.-]|$)/.test(host);
+})) {
   // eslint-disable-next-line no-console
-  console.error('Production CORS cannot trust a localhost origin');
+  console.error('Production CORS cannot trust a development origin');
   process.exit(1);
 }
 try {
