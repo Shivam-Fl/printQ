@@ -141,6 +141,32 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('Development cannot use a production Firebase project');
   });
 
+  it('rejects production web origins in development', () => {
+    const result = loadConfig({ CORS_ORIGINS: 'https://printqs.com' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Development CORS cannot trust a production PrintQs origin');
+  });
+
+  it('rejects development web origins in production', () => {
+    for (const origin of ['https://development.printqs.com', 'https://printqs-development.web.app']) {
+      const result = loadConfig({
+        NODE_ENV: 'production',
+        PRINTQ_ENVIRONMENT: 'production',
+        DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+        DATABASE_NAMESPACE: 'production',
+        QUEUE_NAMESPACE: 'printq-production',
+        STORAGE_NAMESPACE: 'printq-production',
+        CORS_ORIGINS: origin,
+        STORAGE_DRIVER: 's3',
+        S3_BUCKET: 'printq-production-test-fixture',
+        S3_ACCESS_KEY_ID: 'test-access-key',
+        S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      });
+      expect(result.status, origin).toBe(1);
+      expect(result.stderr, origin).toContain('Production CORS cannot trust a development origin');
+    }
+  });
+
   it('requires a Firebase project before App Check can be monitored or enforced', () => {
     const result = loadConfig({ FIREBASE_APP_CHECK_MODE: 'monitor' });
     expect(result.status).toBe(1);

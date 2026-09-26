@@ -10,6 +10,8 @@ Protected [PR #26](https://github.com/Shivam-Fl/printQ/pull/26) synchronized `de
 
 The development source now carries a CI release-source guard so only `development` can propose a `master` PR; its regression tests and hosted CI pass. It is **not on `master` yet**, so it cannot be claimed as a fully enforced production branch gate. It also does not replace the final QA-evidence gate.
 
+The protected production baseline dump has now passed a local restore rehearsal with matching aggregate counts; its temporary restore database was removed and the original dump remains intact. A production-CORS cross-environment acceptance defect was reproduced, regression-tested and fixed on a feature branch for `development`; focused configuration tests/typecheck pass, while the adjacent HTTP CORS test requires CI's Redis service because no local listener is available.
+
 ## Current local QA update
 
 Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser QA found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested on PR #25. A local console-mock student completed fresh signup, both New print actions, reload and logout. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.
