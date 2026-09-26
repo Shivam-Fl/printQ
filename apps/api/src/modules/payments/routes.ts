@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { logger } from '../../lib/logger.js';
 import { asyncHandler } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { parseCapturedRecurringPayment, settleTestCapturedRecurringPayment } from '../commission/settlementService.js';
 import { verifyRazorpayRecurringWebhookSignature } from '../../providers/payment/index.js';
 
 /**
@@ -34,15 +35,19 @@ webhookRouter.post(
       ? receivedEventId
       : `razorpay_sha256_${createHash('sha256').update(req.body as Buffer).digest('hex')}`;
 
-    // Store delivery evidence idempotently for the forthcoming TEST-only
-    // recurring-collection handler. No payment, transfer, payout or student
-    // order side effect is permitted from this router.
+    // Preserve delivery evidence without customer or document payloads. The
+    // settlement service itself is TEST-only and verifies order, amount and
+    // mandate before posting exactly one PostgreSQL ledger reversal.
     await prisma.paymentEvent.upsert({
       where: { providerEventId },
       create: { provider: 'razorpay_recurring_pending', providerEventId, jobId: null, payload: { event } },
       update: {},
     });
-    logger.info({ event, providerEventId }, 'razorpay_webhook_recorded_without_money_effect');
+    const captured = parseCapturedRecurringPayment(payload);
+    const testStatementSettled = captured
+      ? await settleTestCapturedRecurringPayment(captured)
+      : false;
+    logger.info({ event, providerEventId, testStatementSettled }, 'razorpay_recurring_webhook_processed');
     res.json({ ok: true });
   }),
 );
