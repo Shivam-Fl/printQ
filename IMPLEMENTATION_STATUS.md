@@ -6,9 +6,9 @@ Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are 
 
 The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.
 
-Protected [PR #26](https://github.com/Shivam-Fl/printQ/pull/26) synchronized `development` with the current `master` history after required checks passed. [PR #25](https://github.com/Shivam-Fl/printQ/pull/25) now targets `development` and must pass fresh checks at its branch-sync head before integration. Neither change deployed production; Render auto-deploy remains off. No hosted development API, PostgreSQL, or Redis is running.
+Protected [PR #26](https://github.com/Shivam-Fl/printQ/pull/26) synchronized `development` with the current `master` history, then [PR #25](https://github.com/Shivam-Fl/printQ/pull/25) merged into `development` after final-head checks passed. Post-merge development CI [run 36185663896](https://github.com/Shivam-Fl/printQ/actions/runs/36185663896) passed at `23a85865414ad8aa38be704e075aff5168cb2c51`. Neither change deployed production; Render auto-deploy remains off. No hosted development API, PostgreSQL, or Redis is running.
 
-The integration PR additionally carries a CI release-source guard so only `development` can propose a `master` PR; its regression tests and adjacent local tests/typecheck pass. It is pending the PR's exact-head hosted CI and merge, and does not replace the final QA-evidence gate.
+The development source now carries a CI release-source guard so only `development` can propose a `master` PR; its regression tests and hosted CI pass. It is **not on `master` yet**, so it cannot be claimed as a fully enforced production branch gate. It also does not replace the final QA-evidence gate.
 
 ## Current local QA update
 
