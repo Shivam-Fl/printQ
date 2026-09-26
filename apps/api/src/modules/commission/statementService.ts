@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { env } from '../../config/env.js';
 import { conflict } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS } from './statements.js';
@@ -45,9 +46,34 @@ export async function freezeWeeklyCommissionStatement(shopId: string, period: St
     const amounts = deriveStatementAmounts(entries);
     // A surplus credit must remain available for a future statement.
     if (hasUnappliedCredit(amounts)) return null;
+    // Freeze is immutable: bind only a currently valid mandate from this
+    // isolated TEST environment. Production live collection remains disabled
+    // until its separately approved adapter and release gates exist.
+    const testCollectionEnabled = env.SHOP_COLLECTION_MODE === 'test'
+      && env.PRINTQ_ENVIRONMENT !== 'production';
+    const mandate = amounts.amountDuePaise > 0 && testCollectionEnabled
+      ? await tx.shopCollectionMandate.findFirst({
+        where: {
+          shopId,
+          provider: 'razorpay',
+          environment: 'test',
+          status: 'active',
+          frequency: 'weekly',
+          maxAmountPaise: { gte: amounts.amountDuePaise },
+          validFrom: { lte: now },
+          validUntil: { gt: now },
+          cancellationTermsAcceptedAt: { not: null },
+          providerCustomerId: { not: null },
+          providerMandateId: { not: null },
+        },
+        orderBy: [{ activatedAt: 'desc' }, { id: 'asc' }],
+        select: { id: true },
+      })
+      : null;
     return tx.shopCommissionStatement.create({
       data: {
         shopId,
+        mandateId: mandate?.id ?? null,
         periodStart: period.start,
         periodEnd: period.end,
         ...amounts,
