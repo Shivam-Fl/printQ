@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { logger } from '../../lib/logger.js';
 import { asyncHandler } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
-import { verifyRazorpayWebhookSignature } from '../../providers/payment/index.js';
+import { verifyRazorpayRecurringWebhookSignature } from '../../providers/payment/index.js';
 
 /**
  * There is deliberately no student-payment API. Students pay the shop at the
@@ -21,7 +21,7 @@ webhookRouter.post(
   raw({ type: 'application/json' }),
   asyncHandler(async (req, res) => {
     const signature = req.headers['x-razorpay-signature'];
-    if (typeof signature !== 'string' || !verifyRazorpayWebhookSignature(req.body as Buffer, signature)) {
+    if (typeof signature !== 'string' || !verifyRazorpayRecurringWebhookSignature(req.body as Buffer, signature)) {
       logger.warn('razorpay_webhook_bad_signature');
       res.status(400).json({ error: 'Invalid signature' });
       return;
