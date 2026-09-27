@@ -4,7 +4,11 @@
 
 Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
-## Latest technical deployment (2026-09-27 IST)
+## Current release checkpoint (2026-09-27 IST)
+
+Protected [PR #39](https://github.com/Shivam-Fl/printQ/pull/39) updated `master` to `de26fd6061002ed36828c8bfc0d196a4a536b4fc`. Render deploy `dep-dasl1dgjo6nc73c8q190` is live and Vercel deploy `dpl_3DeBCigEjuNnanFbdfgSmVLVtwLJ` is Ready at the same SHA. API/web smoke and public authorization passed; the Home hero New print action no longer offers unpublished historical shops. Post-deploy browser QA found the bottom `+` still uses a stale remembered slug. `codex/bottom-new-print-route` has a failing-then-passing regression and focused 5/5 tests; it awaits feature/release PR CI and deployment. The admin recovery email was delivered through Resend, but owner password setup/login and shop verification remain. Windows installer build passed at `de26fd6` as an Actions artifact; it is unsigned and physical printing is unverified. Five agents need re-pairing. Full matrix, hosted dev, production durability and live Razorpay approval remain open. [Detailed evidence](PRODUCTION_RELEASE_LOG.md).
+
+## Earlier technical deployment (2026-09-27 IST; superseded above)
 
 Protected [release PR #37](https://github.com/Shivam-Fl/printQ/pull/37) reached `master` SHA `498377065d414b3b1b1450bcf46af3d903d7f748`. Render API deploy `dep-dash0g97lnhs7395bddg` is live and Vercel production deploy `dpl_GHpKSgxq5r8zHwPGwg4AsKVUyZ1f` is Ready at that exact SHA. API health, web HTTP 200 and public-discovery smoke passed; zero shops/campuses are published. The logging leak was fixed and production-probed; five tokens for agents at unpublished shops were invalidated after checking zero active jobs, so desktop agents need re-pairing. A Home chooser regression showing unpublished historical shops is fixed locally on branch `codex/home-published-chooser` (focused 6/6, web typecheck/build) but not yet merged/deployed. One admin exists; password recovery delivery/login remain unverified. Full 164-case QA, printer hardware, hosted dev, durable paid production PostgreSQL/queue, real shop verification and Razorpay live approval remain open. This is a technical dark/pilot deployment, **not market-launch readiness**. [Evidence and rollback](PRODUCTION_RELEASE_LOG.md).
 
