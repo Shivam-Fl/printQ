@@ -6,6 +6,8 @@ Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are 
 
 ## Current execution checkpoint (2026-09-27 IST)
 
+Latest release checkpoint: draft [development → master PR #34](https://github.com/Shivam-Fl/printQ/pull/34) is open at development SHA `bf0c3c95b8afd31b97890271623b81f747015054`; required CI/secret scan passed. Render's actual failed-deploy log named missing `FIREBASE_PROJECT_ID`, which is now present by name in its saved production environment. Vercel production already runs master `ff9f99f`, while Render still runs old `d9319e8`. The approved owner admin email has been saved in Render without deploying. Feature branch `codex/admin-email-bootstrap` removes the need to transmit an initial password/hash by using an unknown random initial password and the existing emailed recovery flow; local API 118/118, all-workspace typecheck, API build and root JUnit suite pass. This branch still needs feature PR CI/merge, followed by the refreshed release PR, exact-SHA QA, and verified deployments. No live Razorpay money is enabled. [Full evidence and rollback](PRODUCTION_RELEASE_LOG.md).
+
 | Field | Verified state |
 | --- | --- |
 | Phase / owner | Phase 10 weekly collection and production release gates; lead agent. Phases 2 and 12 remain open. |
