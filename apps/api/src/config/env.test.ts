@@ -146,7 +146,25 @@ describe('environment isolation contract', () => {
       ADMIN_BOOTSTRAP_PASSWORD_HASH: '',
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
+    expect(result.stderr).toContain('Production requires ADMIN_BOOTSTRAP_EMAIL');
+  });
+
+  it('accepts email-only admin bootstrap when production email recovery is enabled', () => {
+    const result = loadConfig({
+      NODE_ENV: 'production',
+      PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production',
+      QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production',
+      CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      ADMIN_BOOTSTRAP_PASSWORD_HASH: '',
+    });
+    expect(result.status).toBe(0);
   });
 
   it('rejects a production Firebase project in development', () => {

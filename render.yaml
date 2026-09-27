@@ -111,6 +111,8 @@ services:
         sync: false
       - key: ADMIN_BOOTSTRAP_EMAIL
         sync: false
+      # Optional: without this hash, the first admin gets an unknown random
+      # password and sets a usable one via verified Resend password recovery.
       - key: ADMIN_BOOTSTRAP_PASSWORD_HASH
         sync: false
 

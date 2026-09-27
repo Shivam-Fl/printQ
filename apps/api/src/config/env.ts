@@ -123,9 +123,9 @@ const envSchema = z.object({
   // allowed because Resend supports it, so do not over-constrain its format.
   EMAIL_FROM: z.string().min(3).max(320).regex(/^[^\r\n]+$/).optional(),
 
-  // The first platform administrator is inserted idempotently at API boot
-  // from an argon2id hash. This is a deployment secret, never a browser value
-  // and never a plaintext password or service-account credential.
+  // The first administrator is inserted idempotently at API boot. A supplied
+  // argon2id hash is optional; otherwise the initial password is random and
+  // unknown, and the owner must set one through emailed admin recovery.
   ADMIN_BOOTSTRAP_EMAIL: optionalSecret(z.string().trim().toLowerCase().email().max(254)),
   ADMIN_BOOTSTRAP_PASSWORD_HASH: optionalSecret(z.string().min(40).regex(/^\$argon2(?:id|i|d)\$/)),
 
@@ -265,11 +265,11 @@ if (env.NODE_ENV === 'production' && env.EMAIL_PROVIDER !== 'resend') {
   console.error('Production requires EMAIL_PROVIDER=resend');
   process.exit(1);
 }
-if (env.NODE_ENV === 'production' && (!env.ADMIN_BOOTSTRAP_EMAIL || !env.ADMIN_BOOTSTRAP_PASSWORD_HASH)) {
-  // Production must have a separately authenticated platform administrator
-  // before a shop can be verified or published.
+if (env.NODE_ENV === 'production' && !env.ADMIN_BOOTSTRAP_EMAIL) {
+  // Production must have an explicitly bound admin mailbox before a shop can
+  // be verified or published. Resend is mandatory above for password setup.
   // eslint-disable-next-line no-console
-  console.error('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
+  console.error('Production requires ADMIN_BOOTSTRAP_EMAIL');
   process.exit(1);
 }
 if ((env.VAPID_PUBLIC_KEY && !env.VAPID_PRIVATE_KEY) || (!env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY)) {
