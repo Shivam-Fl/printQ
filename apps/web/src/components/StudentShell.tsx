@@ -3,6 +3,11 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { IconHome, IconJobs, IconPlus, IconUser } from './Icons.js';
 import { lastShopSlug } from '../api.js';
 
+/** A saved shop can become unpublished; the directory rechecks live eligibility. */
+export function resolveBottomNewPrintPath(_rememberedSlug: string | null): string {
+  return '/shops';
+}
+
 /**
  * Wraps every logged-in student screen: content + a fixed bottom tab bar with
  * a raised "New print" action. This is the app's spine — no screen is a dead end.
@@ -11,8 +16,7 @@ export default function StudentShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   function newPrint() {
-    const slug = lastShopSlug();
-    navigate(slug ? `/s/${slug}` : '/shops');
+    navigate(resolveBottomNewPrintPath(lastShopSlug()));
   }
 
   const cls = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : '');
