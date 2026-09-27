@@ -848,6 +848,8 @@ model ShopCommissionCollectionAttempt {
   amountPaise            Int
   status                 CommissionCollectionAttemptStatus @default(pending)
   provider               String
+  /// Persist the exact Razorpay order before any recurring charge request.
+  providerOrderId        String?                           @unique
   providerCollectionId   String?                           @unique
   idempotencyKey         String                            @unique
   failureReason          String?
