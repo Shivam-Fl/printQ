@@ -1,25 +1,30 @@
-import { pino } from 'pino';
+import { pino, type DestinationStream } from 'pino';
 import { env } from '../config/env.js';
 
 /** Structured JSON logs — searchable/aggregatable, per scalability pillar 4. */
-export const logger = pino({
-  level: env.LOG_LEVEL,
-  base: { service: 'printq-api' },
-  redact: {
-    // never log credentials, tokens or OTPs even accidentally
-    paths: [
-      'req.headers.authorization',
-      'req.headers.cookie',
-      "req.headers['set-cookie']",
-      '*.authorization',
-      '*.password',
-      '*.passwordHash',
-      '*.otp',
-      '*.resetCode',
-      '*.token',
-      '*.idToken',
-      '*.apiKey',
-    ],
-    censor: '[redacted]',
-  },
-});
+export function createLogger(destination?: DestinationStream) {
+  const options = {
+    level: env.LOG_LEVEL,
+    base: { service: 'printq-api' },
+    redact: {
+      // Request/response headers can contain agent tokens, App Check tokens,
+      // webhook signatures and future credentials. Never serialize any of them.
+      paths: [
+        'req.headers',
+        'res.headers',
+        '*.authorization',
+        '*.password',
+        '*.passwordHash',
+        '*.otp',
+        '*.resetCode',
+        '*.token',
+        '*.idToken',
+        '*.apiKey',
+      ],
+      censor: '[redacted]',
+    },
+  };
+  return destination ? pino(options, destination) : pino(options);
+}
+
+export const logger = createLogger();
