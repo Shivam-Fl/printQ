@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { env } from '../../config/env.js';
 import { conflict } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
-import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS } from './statements.js';
+import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS, UPI_PRE_DEBIT_NOTICE_MS } from './statements.js';
 
 export interface StatementPeriod {
   start: Date;
@@ -45,9 +46,37 @@ export async function freezeWeeklyCommissionStatement(shopId: string, period: St
     const amounts = deriveStatementAmounts(entries);
     // A surplus credit must remain available for a future statement.
     if (hasUnappliedCredit(amounts)) return null;
+    // Freeze is immutable: bind only a currently valid mandate from this
+    // isolated TEST environment. Production live collection remains disabled
+    // until its separately approved adapter and release gates exist.
+    const testCollectionEnabled = env.SHOP_COLLECTION_MODE === 'test'
+      && env.PRINTQ_ENVIRONMENT !== 'production';
+    const mandate = amounts.amountDuePaise > 0 && testCollectionEnabled
+      ? await tx.shopCollectionMandate.findFirst({
+        where: {
+          shopId,
+          provider: 'razorpay',
+          environment: 'test',
+          status: 'active',
+          frequency: 'weekly',
+          maxAmountPaise: { gte: amounts.amountDuePaise },
+          validFrom: { lte: now },
+          validUntil: { gt: now },
+          cancellationTermsAcceptedAt: { not: null },
+          providerCustomerId: { not: null },
+          providerMandateId: { not: null },
+          providerTokenId: { not: null },
+          ownerDebitEmail: { not: null },
+          ownerDebitContactE164: { not: null },
+        },
+        orderBy: [{ activatedAt: 'desc' }, { id: 'asc' }],
+        select: { id: true },
+      })
+      : null;
     return tx.shopCommissionStatement.create({
       data: {
         shopId,
+        mandateId: mandate?.id ?? null,
         periodStart: period.start,
         periodEnd: period.end,
         ...amounts,
@@ -93,12 +122,20 @@ export async function freezeCompletedWeeklyStatements(now = new Date()): Promise
  * pretend notification.
  */
 export async function recordPreDebitNoticeDelivered(statementId: string, deliveredAt = new Date()) {
+  const statement = await prisma.shopCommissionStatement.findUnique({
+    where: { id: statementId },
+    select: { mandate: { select: { method: true } } },
+  });
+  if (!statement?.mandate) throw conflict('Statement has no collection mandate');
+  const noticeMs = statement.mandate.method === 'upi_autopay'
+    ? UPI_PRE_DEBIT_NOTICE_MS
+    : PRE_DEBIT_NOTICE_MS;
   const updated = await prisma.shopCommissionStatement.updateMany({
     where: { id: statementId, status: 'frozen', preDebitNoticeSentAt: null },
     data: {
       status: 'notice_sent',
       preDebitNoticeSentAt: deliveredAt,
-      debitNotBefore: new Date(deliveredAt.getTime() + PRE_DEBIT_NOTICE_MS),
+      debitNotBefore: new Date(deliveredAt.getTime() + noticeMs),
     },
   });
   if (updated.count !== 1) throw conflict('Statement is not awaiting its first pre-debit notice');

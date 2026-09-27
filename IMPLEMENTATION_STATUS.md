@@ -1,6 +1,35 @@
 # PrintQs launch implementation status
 
-Last updated: 2026-09-24 (Asia/Kolkata)
+> This file contains the earlier programme history and is not the current deployment handoff. For current production SHA, account/resource inventory, cost exposure, blockers, and next actions, read [PRODUCTION_RELEASE_LOG.md](PRODUCTION_RELEASE_LOG.md). Update that log after each consequential change.
+
+Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
+
+## Current execution checkpoint (2026-09-27 IST)
+
+Latest release checkpoint: draft [development → master PR #34](https://github.com/Shivam-Fl/printQ/pull/34) is open at development SHA `bf0c3c95b8afd31b97890271623b81f747015054`; required CI/secret scan passed. Render's actual failed-deploy log named missing `FIREBASE_PROJECT_ID`, which is now present by name in its saved production environment. Vercel production already runs master `ff9f99f`, while Render still runs old `d9319e8`. The approved owner admin email has been saved in Render without deploying. Feature branch `codex/admin-email-bootstrap` removes the need to transmit an initial password/hash by using an unknown random initial password and the existing emailed recovery flow; local API 118/118, all-workspace typecheck, API build and root JUnit suite pass. This branch still needs feature PR CI/merge, followed by the refreshed release PR, exact-SHA QA, and verified deployments. No live Razorpay money is enabled. [Full evidence and rollback](PRODUCTION_RELEASE_LOG.md).
+
+| Field | Verified state |
+| --- | --- |
+| Phase / owner | Phase 10 weekly collection and production release gates; lead agent. Phases 2 and 12 remain open. |
+| Branch / PR | TEST mandate [PR #30](https://github.com/Shivam-Fl/printQ/pull/30), webhook isolation [PR #31](https://github.com/Shivam-Fl/printQ/pull/31), and TEST settlement [PR #32](https://github.com/Shivam-Fl/printQ/pull/32) merged to `development` (latest SHA `cf676cff`); current branch is `codex/recurring-test-dispatch`, not yet a PR. |
+| Implemented this batch | TEST mandate binding, fail-closed recurring HMAC, and order-bound TEST settlement are merged. Current branch adds TEST-only provider transport, token/contact schema and single-shot dispatch with a 48-hour UPI notice gate and no ambiguous retry. No worker or route invokes it yet; production live collection remains disabled. |
+| Tests | PRs #30–#32 required CI/secret scans and exact post-merge development CI passed. Current branch: focused affected tests 27/27, adjacent commission/webhook tests 19/19, Prisma validation, API typecheck/build pass. Full local API suite cannot pass without local Redis; it was stopped after connection refusals. New migration/full suite/simulator await PR CI. Real Razorpay TEST mandate/debit and hosted QA have not passed. |
+| Environment / evidence | Render free production settings were staged with Save only; Resend `mail.printqs.com` is verified. Razorpay Live Subscriptions UPI/card/eMandate are enabled, but the only approved website is `www.packkar.in`. Screenshots are retained locally outside public Git; details in `PRODUCTION_RELEASE_LOG.md`. No new production SHA was deployed. |
+| Blockers | Production has 0 admins, 0 verified/published shops and 0 mandates. PrintQs website and variable B2B commission approval on Razorpay are unverified; live key is not enabled in PrintQs. Final 100+ case hosted QA, durable production database/queue and immediate live-money confirmation remain outstanding. |
+| Rollback / next action | Old Render deploy `dep-daqjk73l550s73bp7u8g` remains live. Finish TEST adapter review/CI through a feature PR, then owner authorization, verified notice, dev deployment and provider TEST E2E. Only after exact-SHA QA and startup credentials should a release PR/deploy replace it. |
+
+
+The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.
+
+Protected PRs [#26](https://github.com/Shivam-Fl/printQ/pull/26), [#25](https://github.com/Shivam-Fl/printQ/pull/25), [#27](https://github.com/Shivam-Fl/printQ/pull/27), and [#28](https://github.com/Shivam-Fl/printQ/pull/28) merged into `development` after exact-head checks passed. Last verified code candidate `d8b530ad0ff7e7fe45bdb6cd8377969df4537760` passed post-merge [CI run 36246828601](https://github.com/Shivam-Fl/printQ/actions/runs/36246828601); recheck branch head after documentation-only merges. None deployed production; Render auto-deploy remains off. No hosted development API, PostgreSQL, or Redis is running.
+
+The development source now carries a CI release-source guard so only `development` can propose a `master` PR; its regression tests and hosted CI pass. It is **not on `master` yet**, so it cannot be claimed as a fully enforced production branch gate. It also does not replace the final QA-evidence gate.
+
+The protected production baseline dump passed a local restore rehearsal with matching aggregate counts; its temporary restore database was removed and the original dump remains intact. A production-CORS cross-environment acceptance defect was reproduced and fixed through PR #28; focused configuration tests/typecheck and full PostgreSQL/Redis CI pass on the merged `development` SHA. This does not verify a hosted environment or fix the old live production revision.
+
+## Current local QA update
+
+Docker Desktop is now usable. The isolated `printq-local-qa-20260926` Compose stack passed a fresh 29-migration deploy/status, all-workspace build/typecheck, 168 package tests, and 93 simulator assertions. Local browser QA found a dead demo-shop link and outdated remote-payment copy; the fix is regression-tested on PR #25. A local console-mock student completed fresh signup, both New print actions, reload and logout. [Local QA evidence](outputs/printqs-local-qa-20260926/LOCAL_QA_STATUS.md) records environment, commands, JUnit files and untested areas. This does not supersede the final release matrix or prove a hosted development/production deployment.
 
 ## Current phase
 

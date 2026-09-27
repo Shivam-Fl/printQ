@@ -19,7 +19,7 @@ export default function Login() {
           <span className="eyebrow-label">What happens next</span>
           <ol>
             <li><span>1</span><div><strong>Choose a shop</strong><p>Open its link or scan the QR at the counter.</p></div></li>
-            <li><span>2</span><div><strong>Send your files</strong><p>Preview, configure and pay from your phone.</p></div></li>
+            <li><span>2</span><div><strong>Send your files</strong><p>Preview and configure on your phone. Pay at the shop.</p></div></li>
             <li><span>3</span><div><strong>Check in when present</strong><p>Your walk-in position starts only after you reach the shop.</p></div></li>
           </ol>
         </div>

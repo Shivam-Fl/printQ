@@ -87,6 +87,24 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
   });
 
+  it('rejects live recurring credentials in development and TEST credentials in production', () => {
+    const liveInDev = loadConfig({ RAZORPAY_RECURRING_TEST_KEY_ID: 'rzp_live_forbidden' });
+    expect(liveInDev.status).toBe(1);
+    expect(liveInDev.stderr).toContain('recurring TEST key');
+
+    const testInProd = loadConfig({
+      NODE_ENV: 'production', PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production', QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production', CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3', S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key', S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      RAZORPAY_RECURRING_TEST_KEY_ID: 'rzp_test_forbidden',
+    });
+    expect(testInProd.status).toBe(1);
+    expect(testInProd.stderr).toContain('production cannot hold recurring TEST credentials');
+  });
+
   it('fails closed for live recurring collection before explicit cutover code exists', () => {
     const result = loadConfig({ SHOP_COLLECTION_MODE: 'live' });
     expect(result.status).toBe(1);
@@ -128,7 +146,25 @@ describe('environment isolation contract', () => {
       ADMIN_BOOTSTRAP_PASSWORD_HASH: '',
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
+    expect(result.stderr).toContain('Production requires ADMIN_BOOTSTRAP_EMAIL');
+  });
+
+  it('accepts email-only admin bootstrap when production email recovery is enabled', () => {
+    const result = loadConfig({
+      NODE_ENV: 'production',
+      PRINTQ_ENVIRONMENT: 'production',
+      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+      DATABASE_NAMESPACE: 'production',
+      QUEUE_NAMESPACE: 'printq-production',
+      STORAGE_NAMESPACE: 'printq-production',
+      CORS_ORIGINS: 'https://api.example.test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'printq-production-test-fixture',
+      S3_ACCESS_KEY_ID: 'test-access-key',
+      S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      ADMIN_BOOTSTRAP_PASSWORD_HASH: '',
+    });
+    expect(result.status).toBe(0);
   });
 
   it('rejects a production Firebase project in development', () => {
@@ -139,6 +175,32 @@ describe('environment isolation contract', () => {
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Development cannot use a production Firebase project');
+  });
+
+  it('rejects production web origins in development', () => {
+    const result = loadConfig({ CORS_ORIGINS: 'https://printqs.com' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Development CORS cannot trust a production PrintQs origin');
+  });
+
+  it('rejects development web origins in production', () => {
+    for (const origin of ['https://development.printqs.com', 'https://printqs-development.web.app']) {
+      const result = loadConfig({
+        NODE_ENV: 'production',
+        PRINTQ_ENVIRONMENT: 'production',
+        DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+        DATABASE_NAMESPACE: 'production',
+        QUEUE_NAMESPACE: 'printq-production',
+        STORAGE_NAMESPACE: 'printq-production',
+        CORS_ORIGINS: origin,
+        STORAGE_DRIVER: 's3',
+        S3_BUCKET: 'printq-production-test-fixture',
+        S3_ACCESS_KEY_ID: 'test-access-key',
+        S3_SECRET_ACCESS_KEY: 'test-secret-key',
+      });
+      expect(result.status, origin).toBe(1);
+      expect(result.stderr, origin).toContain('Production CORS cannot trust a development origin');
+    }
   });
 
   it('requires a Firebase project before App Check can be monitored or enforced', () => {

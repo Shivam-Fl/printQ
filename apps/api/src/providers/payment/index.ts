@@ -109,3 +109,14 @@ export function verifyRazorpayWebhookSignature(rawBody: Buffer, signature: strin
   const b = Buffer.from(signature, 'utf8');
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+/** The shop-collection webhook must never trust the retired student secret. */
+export function verifyRazorpayRecurringWebhookSignature(
+  rawBody: Buffer,
+  signature: string,
+  secret = env.RAZORPAY_RECURRING_WEBHOOK_SECRET,
+): boolean {
+  if (!secret || !/^[0-9a-fA-F]{64}$/.test(signature)) return false;
+  const expected = createHmac('sha256', secret).update(rawBody).digest();
+  return timingSafeEqual(expected, Buffer.from(signature, 'hex'));
+}

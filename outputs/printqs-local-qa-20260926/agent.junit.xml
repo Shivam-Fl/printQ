@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="14" failures="0" errors="0" time="0.1760616">
+    <testsuite name="dist/cliToken.test.js" timestamp="2026-09-25T19:35:10.496Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0073648">
+        <testcase classname="dist/cliToken.test.js" name="loadEphemeralAgentToken &gt; uses an injected token without prompting" time="0.0042195">
+        </testcase>
+        <testcase classname="dist/cliToken.test.js" name="loadEphemeralAgentToken &gt; prompts for a token but never returns a persistence instruction" time="0.000746">
+        </testcase>
+    </testsuite>
+    <testsuite name="dist/printerTestPage.test.js" timestamp="2026-09-25T19:35:10.499Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.0622226">
+        <testcase classname="dist/printerTestPage.test.js" name="createPrinterTestPage &gt; creates a locally generated PDF with no customer document content" time="0.059623">
+        </testcase>
+    </testsuite>
+    <testsuite name="dist/restartPolicy.test.js" timestamp="2026-09-25T19:35:10.500Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.0078499">
+        <testcase classname="dist/restartPolicy.test.js" name="restartDelayMs &gt; backs off repeated crashes and caps the retry interval" time="0.0046243">
+        </testcase>
+    </testsuite>
+    <testsuite name="dist/secureConfig.test.js" timestamp="2026-09-25T19:35:10.501Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.0108149">
+        <testcase classname="dist/secureConfig.test.js" name="desktop secure configuration &gt; persists an encrypted token without a plaintext fallback" time="0.0053772">
+        </testcase>
+        <testcase classname="dist/secureConfig.test.js" name="desktop secure configuration &gt; rejects a legacy plaintext token instead of silently using it" time="0.0006367">
+        </testcase>
+        <testcase classname="dist/secureConfig.test.js" name="desktop secure configuration &gt; fails closed when Windows secure storage is unavailable" time="0.0021626">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/cliToken.test.ts" timestamp="2026-09-25T19:35:10.503Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0102331">
+        <testcase classname="src/cliToken.test.ts" name="loadEphemeralAgentToken &gt; uses an injected token without prompting" time="0.0073121">
+        </testcase>
+        <testcase classname="src/cliToken.test.ts" name="loadEphemeralAgentToken &gt; prompts for a token but never returns a persistence instruction" time="0.0007075">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/printerTestPage.test.ts" timestamp="2026-09-25T19:35:10.504Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.0607022">
+        <testcase classname="src/printerTestPage.test.ts" name="createPrinterTestPage &gt; creates a locally generated PDF with no customer document content" time="0.0583048">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/restartPolicy.test.ts" timestamp="2026-09-25T19:35:10.504Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.006461">
+        <testcase classname="src/restartPolicy.test.ts" name="restartDelayMs &gt; backs off repeated crashes and caps the retry interval" time="0.0028326">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/secureConfig.test.ts" timestamp="2026-09-25T19:35:10.505Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.0104131">
+        <testcase classname="src/secureConfig.test.ts" name="desktop secure configuration &gt; persists an encrypted token without a plaintext fallback" time="0.0042689">
+        </testcase>
+        <testcase classname="src/secureConfig.test.ts" name="desktop secure configuration &gt; rejects a legacy plaintext token instead of silently using it" time="0.0003632">
+        </testcase>
+        <testcase classname="src/secureConfig.test.ts" name="desktop secure configuration &gt; fails closed when Windows secure storage is unavailable" time="0.0014429">
+        </testcase>
+    </testsuite>
+</testsuites>

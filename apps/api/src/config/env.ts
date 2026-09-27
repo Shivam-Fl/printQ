@@ -104,6 +104,9 @@ const envSchema = z.object({
   SHOP_COLLECTION_MODE: z.enum(['disabled', 'test', 'live']).default('disabled'),
   SHOP_COLLECTION_PILOT_CAP_PAISE: z.coerce.number().int().min(100).max(1_500_000).default(1_500_000),
   RAZORPAY_RECURRING_WEBHOOK_SECRET: z.string().optional(),
+  // Distinct from retired student checkout keys and never accepted in production.
+  RAZORPAY_RECURRING_TEST_KEY_ID: z.string().optional(),
+  RAZORPAY_RECURRING_TEST_KEY_SECRET: z.string().optional(),
 
   // Student login OTPs happen pre-session, so they can't be in-app — an SMS
   // provider is required for a real launch (console just logs to the API).
@@ -120,9 +123,9 @@ const envSchema = z.object({
   // allowed because Resend supports it, so do not over-constrain its format.
   EMAIL_FROM: z.string().min(3).max(320).regex(/^[^\r\n]+$/).optional(),
 
-  // The first platform administrator is inserted idempotently at API boot
-  // from an argon2id hash. This is a deployment secret, never a browser value
-  // and never a plaintext password or service-account credential.
+  // The first administrator is inserted idempotently at API boot. A supplied
+  // argon2id hash is optional; otherwise the initial password is random and
+  // unknown, and the owner must set one through emailed admin recovery.
   ADMIN_BOOTSTRAP_EMAIL: optionalSecret(z.string().trim().toLowerCase().email().max(254)),
   ADMIN_BOOTSTRAP_PASSWORD_HASH: optionalSecret(z.string().min(40).regex(/^\$argon2(?:id|i|d)\$/)),
 
@@ -197,6 +200,17 @@ if (env.SHOP_COLLECTION_MODE === 'test' && env.PRINTQ_ENVIRONMENT === 'productio
   console.error('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
   process.exit(1);
 }
+if (env.RAZORPAY_RECURRING_TEST_KEY_ID && !env.RAZORPAY_RECURRING_TEST_KEY_ID.startsWith('rzp_test_')) {
+  // eslint-disable-next-line no-console
+  console.error('Dedicated recurring TEST key must use Razorpay TEST mode');
+  process.exit(1);
+}
+if (env.PRINTQ_ENVIRONMENT === 'production'
+  && (env.RAZORPAY_RECURRING_TEST_KEY_ID || env.RAZORPAY_RECURRING_TEST_KEY_SECRET)) {
+  // eslint-disable-next-line no-console
+  console.error('PrintQs production cannot hold recurring TEST credentials');
+  process.exit(1);
+}
 if (env.SHOP_COLLECTION_MODE === 'live') {
   // There is intentionally no source-controlled switch for live recurring
   // money movement. This fail-closed guard remains until a separately audited
@@ -251,11 +265,11 @@ if (env.NODE_ENV === 'production' && env.EMAIL_PROVIDER !== 'resend') {
   console.error('Production requires EMAIL_PROVIDER=resend');
   process.exit(1);
 }
-if (env.NODE_ENV === 'production' && (!env.ADMIN_BOOTSTRAP_EMAIL || !env.ADMIN_BOOTSTRAP_PASSWORD_HASH)) {
-  // Production must have a separately authenticated platform administrator
-  // before a shop can be verified or published.
+if (env.NODE_ENV === 'production' && !env.ADMIN_BOOTSTRAP_EMAIL) {
+  // Production must have an explicitly bound admin mailbox before a shop can
+  // be verified or published. Resend is mandatory above for password setup.
   // eslint-disable-next-line no-console
-  console.error('Production requires ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD_HASH');
+  console.error('Production requires ADMIN_BOOTSTRAP_EMAIL');
   process.exit(1);
 }
 if ((env.VAPID_PUBLIC_KEY && !env.VAPID_PRIVATE_KEY) || (!env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY)) {
@@ -331,9 +345,19 @@ if (env.PRINTQ_ENVIRONMENT === 'development' && env.CORS_ORIGINS.some((origin) =
   console.error('Development CORS cannot trust a production PrintQs origin');
   process.exit(1);
 }
-if (env.PRINTQ_ENVIRONMENT === 'production' && env.CORS_ORIGINS.some((origin) => /localhost|127\.0\.0\.1/i.test(origin))) {
+if (env.PRINTQ_ENVIRONMENT === 'production' && env.CORS_ORIGINS.some((origin) => {
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || /(^|[.-])(?:dev|development)(?=[.-]|$)/.test(host);
+})) {
   // eslint-disable-next-line no-console
-  console.error('Production CORS cannot trust a localhost origin');
+  console.error('Production CORS cannot trust a development origin');
   process.exit(1);
 }
 try {

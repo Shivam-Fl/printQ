@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="88" failures="0" errors="0" time="35.1966944">
+    <testsuite name="src/config/env.test.ts" timestamp="2026-09-25T19:35:07.749Z" hostname="Shivam-PC" tests="16" failures="0" errors="0" skipped="0" time="9.6297049">
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; accepts matching development identities and namespaced resources" time="1.346711">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a live Razorpay key in development" time="0.7816964">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a Razorpay TEST key in production" time="0.8815691">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; permits recurring collection test mode only outside production" time="1.0645354">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; fails closed for live recurring collection before explicit cutover code exists" time="0.4099267">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; parses a literal false simulator flag as false in production" time="0.3815009">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a separately bootstrapped platform administrator in production" time="0.3942938">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a production Firebase project in development" time="0.2994094">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before App Check can be monitored or enforced" time="0.28741">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before realtime projections can be enabled" time="0.3304875">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a Firebase project before FCM delivery can be enabled" time="0.29626">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects the console password-reset provider in production" time="0.2791486">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects an unrecognised worker role before it can start a mixed worker process" time="0.2432928">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; accepts a namespaced private GCS bucket without static cloud credentials" time="0.2445512">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; requires a bucket when GCS is selected" time="0.255594">
+        </testcase>
+        <testcase classname="src/config/env.test.ts" name="environment isolation contract &gt; rejects a GCS bucket that does not declare the active environment" time="1.0322144">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/fileRetention.test.ts" timestamp="2026-09-25T19:35:07.860Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.1520859">
+        <testcase classname="src/lib/fileRetention.test.ts" name="strict file-retention deadlines &gt; sets verified-print deletion exactly ten minutes after physical confirmation" time="0.0043332">
+        </testcase>
+        <testcase classname="src/lib/fileRetention.test.ts" name="strict file-retention deadlines &gt; sets cancelled and expired content deletion within the same ten-minute limit" time="0.0008283">
+        </testcase>
+        <testcase classname="src/lib/fileRetention.test.ts" name="strict file-retention deadlines &gt; keeps unprinted uploads below the independent 24-hour hard maximum" time="0.000691">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/geo.test.ts" timestamp="2026-09-25T19:35:07.864Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5759511">
+        <testcase classname="src/lib/geo.test.ts" name="distanceMeters &gt; returns zero for the same point" time="0.0042364">
+        </testcase>
+        <testcase classname="src/lib/geo.test.ts" name="distanceMeters &gt; measures a short shop-scale distance" time="0.0008658">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/otp.test.ts" timestamp="2026-09-25T19:35:07.872Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="2.0680668">
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; generates 6-digit numeric codes" time="0.0063268">
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; verifies a correct OTP and rejects a wrong one" time="1.333869">
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; verifyOtpHash never throws on garbage hashes" time="0.0007889">
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="release/login OTPs &gt; encrypts stable counter codes and scopes their lookup digest to one shop" time="0.0077191">
+        </testcase>
+        <testcase classname="src/lib/otp.test.ts" name="agent tokens &gt; returns a long token and stores only its sha256" time="0.0060958">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/preparePrintPdf.test.ts" timestamp="2026-09-25T19:35:07.987Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5001679">
+        <testcase classname="src/lib/preparePrintPdf.test.ts" name="preparePrintPdf &gt; returns the source unchanged when all pages are requested" time="0.0348172">
+        </testcase>
+        <testcase classname="src/lib/preparePrintPdf.test.ts" name="preparePrintPdf &gt; sends only the selected, de-duplicated pages to the printer" time="0.0791047">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/queues.test.ts" timestamp="2026-09-25T19:35:07.992Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.3340914">
+        <testcase classname="src/lib/queues.test.ts" name="environment queue namespace &gt; puts every queue in the explicit test namespace" time="0.0040977">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/tokens.test.ts" timestamp="2026-09-25T19:35:07.993Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5125305">
+        <testcase classname="src/lib/tokens.test.ts" name="separate authentication claims &gt; issues a platform-admin token that cannot be mistaken for a shop or student token" time="0.016316">
+        </testcase>
+        <testcase classname="src/lib/tokens.test.ts" name="separate authentication claims &gt; keeps shop and student claims in their own authorization domains" time="0.0040857">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/realtime/projections.test.ts" timestamp="2026-09-25T19:35:07.996Z" hostname="Shivam-PC" tests="4" failures="0" errors="0" skipped="0" time="0.0248601">
+        <testcase classname="src/realtime/projections.test.ts" name="Firebase realtime projections &gt; contains queue state only and never exposes document, location, phone, or money fields" time="0.0100331">
+        </testcase>
+        <testcase classname="src/realtime/projections.test.ts" name="Firebase realtime projections &gt; writes each projection to a scoped deterministic document path" time="0.0055569">
+        </testcase>
+        <testcase classname="src/realtime/projections.test.ts" name="Firebase realtime projections &gt; does not create a student-readable projection before Firebase identity linking" time="0.001037">
+        </testcase>
+        <testcase classname="src/realtime/projections.test.ts" name="Firebase realtime projections &gt; refreshes every active queue projection when another job leaves the queue" time="0.0007897">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/appCheck.test.ts" timestamp="2026-09-25T19:35:07.997Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.2158385">
+        <testcase classname="src/middleware/appCheck.test.ts" name="Firebase App Check policy &gt; permits monitor-mode requests but never treats a missing assertion as verified" time="0.0058752">
+        </testcase>
+        <testcase classname="src/middleware/appCheck.test.ts" name="Firebase App Check policy &gt; rejects missing and invalid assertions when enforcement is enabled" time="0.0025962">
+        </testcase>
+        <testcase classname="src/middleware/appCheck.test.ts" name="Firebase App Check policy &gt; accepts a server-verified assertion and exposes only its app id" time="0.0007832">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/cors.test.ts" timestamp="2026-09-25T19:35:08.004Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="6.2654468">
+        <testcase classname="src/middleware/cors.test.ts" name="CORS origin validation &gt; returns JSON 403 without ACAO for an unapproved origin" time="0.1485491">
+        </testcase>
+        <testcase classname="src/middleware/cors.test.ts" name="CORS origin validation &gt; allows an approved origin" time="0.0130702">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/counterReleaseLimiter.test.ts" timestamp="2026-09-25T19:35:08.006Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.8642035">
+        <testcase classname="src/middleware/counterReleaseLimiter.test.ts" name="staff counter-code rate limit &gt; does not lock out valid multi-step releases, but limits invalid code guesses" time="0.658971">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/middleware/error.test.ts" timestamp="2026-09-25T19:35:08.007Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.40186">
+        <testcase classname="src/middleware/error.test.ts" name="errorHandler upload and validation errors &gt; returns JSON 413 for an over-limit Multer upload" time="0.0097209">
+        </testcase>
+        <testcase classname="src/middleware/error.test.ts" name="errorHandler upload and validation errors &gt; returns JSON 400 for an invalid page range" time="0.0017608">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/workers/conversion.test.ts" timestamp="2026-09-25T19:35:08.009Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.0065714">
+        <testcase classname="src/workers/conversion.test.ts" name="stored document deletion manifest &gt; includes every original and derivative exactly once" time="0.0027285">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/workers/roles.test.ts" timestamp="2026-09-25T19:35:08.014Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.496968">
+        <testcase classname="src/workers/roles.test.ts" name="Cloud Run worker roles &gt; keeps legacy combined mode while isolating conversion from maintenance" time="0.0056899">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/admin/recovery.test.ts" timestamp="2026-09-25T19:35:08.015Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="3.5183302">
+        <testcase classname="src/modules/admin/recovery.test.ts" name="platform-admin recovery boundary &gt; does not reveal whether an admin email exists" time="0.7449941">
+        </testcase>
+        <testcase classname="src/modules/admin/recovery.test.ts" name="platform-admin recovery boundary &gt; consumes a valid code once and revokes the previous admin session" time="1.4992768">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/files/routes.test.ts" timestamp="2026-09-25T19:35:08.016Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="3.9019498">
+        <testcase classname="src/modules/files/routes.test.ts" name="local preview security headers &gt; allows framing only from configured concrete origins and preserves the PDF sandbox" time="0.0142997">
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="local preview security headers &gt; does not turn a wildcard or malformed CORS value into a frame permission" time="0.0019468">
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; accepts a matching PDF extension, browser MIME type and signature" time="0.0110238">
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; rejects a PDF disguised as a text file" time="0.0014165">
+        </testcase>
+        <testcase classname="src/modules/files/routes.test.ts" name="upload type contract &gt; rejects a matching extension when the declared MIME type conflicts" time="0.0009485">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/commission/service.test.ts" timestamp="2026-09-25T19:35:08.019Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.2980561">
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; reconciles positive commission without fractional paise" time="0.0058916">
+        </testcase>
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; records a coupon below shop base as an explicit shop-funded discount, never a negative receivable" time="0.0007579">
+        </testcase>
+        <testcase classname="src/modules/commission/service.test.ts" name="deriveCommissionSnapshot &gt; rejects non-integer or negative values" time="0.0010908">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/commission/statements.test.ts" timestamp="2026-09-25T19:35:08.021Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="0.3403738">
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly commission statement arithmetic &gt; keeps every paise explained by commission or credit" time="0.0062262">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly commission statement arithmetic &gt; does not create a negative debit when credit exceeds commission" time="0.0012334">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="variable recurring-debit gate &gt; allows an exact test debit only after the 24-hour notice window" time="0.0008728">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="variable recurring-debit gate &gt; blocks early, oversized and inactive-mandate attempts" time="0.0010324">
+        </testcase>
+        <testcase classname="src/modules/commission/statements.test.ts" name="weekly statement period &gt; uses the last complete Monday–Sunday IST window" time="0.002813">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/public/discovery.test.ts" timestamp="2026-09-25T19:35:08.131Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5160282">
+        <testcase classname="src/modules/public/discovery.test.ts" name="public shop discovery &gt; requires verification, publication, and an active canonical campus" time="0.0051302">
+        </testcase>
+        <testcase classname="src/modules/public/discovery.test.ts" name="public shop discovery &gt; returns only a rounded distance and never coordinates" time="0.0047296">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/jobs/transitions.test.ts" timestamp="2026-09-25T19:35:08.138Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.3657832">
+        <testcase classname="src/modules/jobs/transitions.test.ts" name="authoritative transition outbox &gt; records the audit event and rebuildable projection delivery in the same transaction" time="0.0150346">
+        </testcase>
+        <testcase classname="src/modules/jobs/transitions.test.ts" name="authoritative transition outbox &gt; does not create an audit or projection record when optimistic concurrency loses" time="0.0018041">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/legacyTimers.test.ts" timestamp="2026-09-25T19:35:08.139Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0120083">
+        <testcase classname="src/modules/queue/legacyTimers.test.ts" name="legacy no-show timer compatibility &gt; does not remove a notified legacy job while a newer OTP window remains open" time="0.0040725">
+        </testcase>
+        <testcase classname="src/modules/queue/legacyTimers.test.ts" name="legacy no-show timer compatibility &gt; permits only timer work for an absent or expired legacy window" time="0.0008012">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/release.contract.test.ts" timestamp="2026-09-25T19:35:08.141Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.0138563">
+        <testcase classname="src/modules/queue/release.contract.test.ts" name="counter-code queue contract &gt; keeps a removed or legacy queued paid job discoverable by its stable code" time="0.0060766">
+        </testcase>
+        <testcase classname="src/modules/queue/release.contract.test.ts" name="counter-code queue contract &gt; does not mistake an in-flight or terminal job for a new counter release" time="0.0009249">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/queue/visibility.test.ts" timestamp="2026-09-25T19:35:08.142Z" hostname="Shivam-PC" tests="5" failures="0" errors="0" skipped="0" time="0.4867546">
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; hides the code before arrival and outside the near-front window" time="0.0039515">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; reveals automatically at the threshold and never hides it again" time="0.0007837">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="counter-code visibility &gt; keeps the code available for collection" time="0.0004136">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="physical counter release order &gt; requires an override for a near-front job that is not first" time="0.0006983">
+        </testcase>
+        <testcase classname="src/modules/queue/visibility.test.ts" name="physical counter release order &gt; requires an override when a skipped student returns with a visible code" time="0.000615">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/modules/shops/printerTest.test.ts" timestamp="2026-09-25T19:35:08.245Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5102393">
+        <testcase classname="src/modules/shops/printerTest.test.ts" name="selectPrinterTestAgent &gt; allows only an online agent that is linked to the requested printer" time="0.0044678">
+        </testcase>
+        <testcase classname="src/modules/shops/printerTest.test.ts" name="selectPrinterTestAgent &gt; does not guess when more than one computer can reach the printer" time="0.0005325">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/email/index.test.ts" timestamp="2026-09-25T19:35:08.247Z" hostname="Shivam-PC" tests="2" failures="0" errors="0" skipped="0" time="0.5011264">
+        <testcase classname="src/providers/email/index.test.ts" name="Resend password-reset delivery &gt; uses the authenticated Resend endpoint and records only its non-secret delivery id" time="0.0920797">
+        </testcase>
+        <testcase classname="src/providers/email/index.test.ts" name="Resend password-reset delivery &gt; does not expose a provider response body when delivery fails" time="0.0070131">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/geocoding/index.test.ts" timestamp="2026-09-25T19:35:08.249Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.5997384">
+        <testcase classname="src/providers/geocoding/index.test.ts" name="shop location search &gt; limits searches to India, identifies PrintQs and caches repeated queries" time="0.094823">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/firebaseAuth/index.test.ts" timestamp="2026-09-25T19:35:08.250Z" hostname="Shivam-PC" tests="3" failures="0" errors="0" skipped="0" time="0.8083353">
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; returns a verified Indian phone number" time="0.0956654">
+        </testcase>
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; rejects expired or wrong-project tokens" time="0.0021245">
+        </testcase>
+        <testcase classname="src/providers/firebaseAuth/index.test.ts" name="Firebase phone token verification &gt; rejects identities without a valid Indian phone number" time="0.0022799">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/fcm/index.test.ts" timestamp="2026-09-25T19:35:08.253Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.2276496">
+        <testcase classname="src/providers/fcm/index.test.ts" name="Firebase Cloud Messaging delivery &gt; sends only minimal notification data and removes invalid registrations without logging a token" time="0.017">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/fcm/outbox.test.ts" timestamp="2026-09-25T19:35:08.254Z" hostname="Shivam-PC" tests="4" failures="0" errors="0" skipped="0" time="0.1942368">
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; stores a stable event key so duplicate publication shares one durable delivery record" time="0.0117227">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; leases then marks a successful FCM delivery exactly once" time="0.0066825">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; does not send when another worker already holds the delivery lease" time="0.0014866">
+        </testcase>
+        <testcase classname="src/providers/fcm/outbox.test.ts" name="Firebase notification outbox &gt; releases a failed delivery lease so the scheduled worker can retry" time="0.0022943">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/storage/gcs.test.ts" timestamp="2026-09-25T19:35:08.262Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.3252916">
+        <testcase classname="src/providers/storage/gcs.test.ts" name="GCS storage namespace and private-object contract &gt; uses the environment namespace for every object operation and creates a short-lived read URL" time="0.0193681">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/providers/storage/local.test.ts" timestamp="2026-09-25T19:35:08.263Z" hostname="Shivam-PC" tests="1" failures="0" errors="0" skipped="0" time="0.5285897">
+        <testcase classname="src/providers/storage/local.test.ts" name="local storage namespace &gt; places generated logical keys beneath the environment namespace" time="0.083302">
+        </testcase>
+    </testsuite>
+</testsuites>
