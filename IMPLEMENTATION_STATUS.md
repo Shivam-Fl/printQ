@@ -4,7 +4,11 @@
 
 Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
-## Current execution checkpoint (2026-09-27 IST)
+## Latest production checkpoint (2026-09-27 IST)
+
+The owner merged [release PR #34](https://github.com/Shivam-Fl/printQ/pull/34) to protected `master` at `bffc9a5fcc7205d18984ae44463b5ff8f2a72acc`. Render automatically built it and applied 31 migrations, but startup failed because a retired Razorpay TEST key was present in production. The legacy student Razorpay ID/secret/webhook variables were removed with **Save only**; no key value was viewed, and no live collection was enabled. The old API revision remains live pending an exact-SHA redeploy. A security regression exposed agent authentication headers in HTTP logs; branch `codex/redact-request-headers` removes all request/response headers from logs and passes focused 4/4, API 119/119, API typecheck/build. This patch needs protected CI/merge and deployment. Vercel's new build was in progress at the last check. The green `sdlc-qa` job skipped browser QA; the 164-case matrix, isolated hosted development, physical printer, durable production backing services and Razorpay live approval are not done. See [release log](PRODUCTION_RELEASE_LOG.md) for evidence, rollback, and next actions.
+
+## Earlier execution checkpoint (2026-09-27 IST; superseded above)
 
 Latest release checkpoint: draft [development → master PR #34](https://github.com/Shivam-Fl/printQ/pull/34) is open at development SHA `bf0c3c95b8afd31b97890271623b81f747015054`; required CI/secret scan passed. Render's actual failed-deploy log named missing `FIREBASE_PROJECT_ID`, which is now present by name in its saved production environment. Vercel production already runs master `ff9f99f`, while Render still runs old `d9319e8`. The approved owner admin email has been saved in Render without deploying. Feature branch `codex/admin-email-bootstrap` removes the need to transmit an initial password/hash by using an unknown random initial password and the existing emailed recovery flow; local API 118/118, all-workspace typecheck, API build and root JUnit suite pass. This branch still needs feature PR CI/merge, followed by the refreshed release PR, exact-SHA QA, and verified deployments. No live Razorpay money is enabled. [Full evidence and rollback](PRODUCTION_RELEASE_LOG.md).
 
