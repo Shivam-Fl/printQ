@@ -4,6 +4,8 @@ const state = vi.hoisted(() => ({
   mandate: { id: 'mandate-test-1' } as { id: string } | null,
   mandateQuery: vi.fn(),
   createdData: null as Record<string, unknown> | null,
+  noticeMethod: 'upi_autopay' as 'upi_autopay' | 'card_recurring',
+  noticeUpdate: null as Record<string, unknown> | null,
   env: { SHOP_COLLECTION_MODE: 'test', PRINTQ_ENVIRONMENT: 'development' },
 }));
 
@@ -15,7 +17,12 @@ vi.mock('../../lib/prisma.js', () => {
   const tx = {
     $queryRaw: vi.fn(async () => [{ id: 'shop-1' }]),
     shopCommissionStatement: {
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async ({ where }: { where: { id?: string } }) =>
+        where.id ? { id: where.id, status: 'frozen', mandate: { method: state.noticeMethod } } : null),
+      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        state.noticeUpdate = data;
+        return { count: 1 };
+      }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         state.createdData = data;
         return { id: 'statement-1', ...data };
@@ -34,10 +41,11 @@ vi.mock('../../lib/prisma.js', () => {
   return { prisma: {
     $disconnect: vi.fn(async () => undefined),
     $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    shopCommissionStatement: tx.shopCommissionStatement,
   } };
 });
 
-import { freezeWeeklyCommissionStatement } from './statementService.js';
+import { freezeWeeklyCommissionStatement, recordPreDebitNoticeDelivered } from './statementService.js';
 
 describe('weekly statement mandate binding', () => {
   const period = {
@@ -50,6 +58,8 @@ describe('weekly statement mandate binding', () => {
     state.mandate = { id: 'mandate-test-1' };
     state.mandateQuery.mockClear();
     state.createdData = null;
+    state.noticeMethod = 'upi_autopay';
+    state.noticeUpdate = null;
     state.env.SHOP_COLLECTION_MODE = 'test';
     state.env.PRINTQ_ENVIRONMENT = 'development';
   });
@@ -62,6 +72,9 @@ describe('weekly statement mandate binding', () => {
         environment: 'test',
         status: 'active',
         maxAmountPaise: { gte: 250 },
+        providerTokenId: { not: null },
+        ownerDebitEmail: { not: null },
+        ownerDebitContactE164: { not: null },
       }),
     }));
     expect(state.createdData).toMatchObject({ mandateId: 'mandate-test-1', amountDuePaise: 250 });
@@ -79,5 +92,13 @@ describe('weekly statement mandate binding', () => {
     await freezeWeeklyCommissionStatement('shop-1', period, now);
     expect(state.mandateQuery).not.toHaveBeenCalled();
     expect(state.createdData).toMatchObject({ mandateId: null, amountDuePaise: 250 });
+  });
+
+  it('records a 48-hour UPI notice window and 24-hour card window', async () => {
+    await recordPreDebitNoticeDelivered('statement-1', now);
+    expect(state.noticeUpdate?.debitNotBefore).toEqual(new Date(now.getTime() + 48 * 60 * 60_000));
+    state.noticeMethod = 'card_recurring';
+    await recordPreDebitNoticeDelivered('statement-2', now);
+    expect(state.noticeUpdate?.debitNotBefore).toEqual(new Date(now.getTime() + 24 * 60 * 60_000));
   });
 });

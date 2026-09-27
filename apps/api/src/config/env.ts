@@ -104,6 +104,9 @@ const envSchema = z.object({
   SHOP_COLLECTION_MODE: z.enum(['disabled', 'test', 'live']).default('disabled'),
   SHOP_COLLECTION_PILOT_CAP_PAISE: z.coerce.number().int().min(100).max(1_500_000).default(1_500_000),
   RAZORPAY_RECURRING_WEBHOOK_SECRET: z.string().optional(),
+  // Distinct from retired student checkout keys and never accepted in production.
+  RAZORPAY_RECURRING_TEST_KEY_ID: z.string().optional(),
+  RAZORPAY_RECURRING_TEST_KEY_SECRET: z.string().optional(),
 
   // Student login OTPs happen pre-session, so they can't be in-app — an SMS
   // provider is required for a real launch (console just logs to the API).
@@ -195,6 +198,17 @@ if (env.SHOP_PAYOUT_PROVIDER === 'razorpay_route') {
 if (env.SHOP_COLLECTION_MODE === 'test' && env.PRINTQ_ENVIRONMENT === 'production') {
   // eslint-disable-next-line no-console
   console.error('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
+  process.exit(1);
+}
+if (env.RAZORPAY_RECURRING_TEST_KEY_ID && !env.RAZORPAY_RECURRING_TEST_KEY_ID.startsWith('rzp_test_')) {
+  // eslint-disable-next-line no-console
+  console.error('Dedicated recurring TEST key must use Razorpay TEST mode');
+  process.exit(1);
+}
+if (env.PRINTQ_ENVIRONMENT === 'production'
+  && (env.RAZORPAY_RECURRING_TEST_KEY_ID || env.RAZORPAY_RECURRING_TEST_KEY_SECRET)) {
+  // eslint-disable-next-line no-console
+  console.error('PrintQs production cannot hold recurring TEST credentials');
   process.exit(1);
 }
 if (env.SHOP_COLLECTION_MODE === 'live') {

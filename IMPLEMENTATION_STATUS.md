@@ -2,19 +2,19 @@
 
 > This file contains the earlier programme history and is not the current deployment handoff. For current production SHA, account/resource inventory, cost exposure, blockers, and next actions, read [PRODUCTION_RELEASE_LOG.md](PRODUCTION_RELEASE_LOG.md). Update that log after each consequential change.
 
-Last updated: 2026-09-26 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
+Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
-## Current execution checkpoint (2026-09-26 evening IST)
+## Current execution checkpoint (2026-09-27 IST)
 
 | Field | Verified state |
 | --- | --- |
 | Phase / owner | Phase 10 weekly collection and production release gates; lead agent. Phases 2 and 12 remain open. |
-| Branch / PR | TEST mandate fix [PR #30](https://github.com/Shivam-Fl/printQ/pull/30) and isolated recurring webhook [PR #31](https://github.com/Shivam-Fl/printQ/pull/31) merged to `development` (latest SHA `26c0939d`); TEST settlement [PR #32](https://github.com/Shivam-Fl/printQ/pull/32) is open. |
-| Implemented this batch | Eligible TEST mandate binding and dedicated fail-closed recurring webhook secret are merged. Current branch adds order-bound TEST settlement with one immutable reversing entry, not provider debit dispatch. Production live collection remains disabled. |
-| Tests | PRs #30/#31 required CI and secret scans passed. PR #30 local commission 11/11, API 93/93, root JUnit 172/172, all-workspace typecheck/build passed. PR #32 local TEST settlement/schema/webhook focused tests 11/11, Prisma validation, API typecheck/build passed; full PR CI is pending. Provider TEST/live dispatch and settlement E2E have not passed. |
+| Branch / PR | TEST mandate [PR #30](https://github.com/Shivam-Fl/printQ/pull/30), webhook isolation [PR #31](https://github.com/Shivam-Fl/printQ/pull/31), and TEST settlement [PR #32](https://github.com/Shivam-Fl/printQ/pull/32) merged to `development` (latest SHA `cf676cff`); current branch is `codex/recurring-test-dispatch`, not yet a PR. |
+| Implemented this batch | TEST mandate binding, fail-closed recurring HMAC, and order-bound TEST settlement are merged. Current branch adds TEST-only provider transport, token/contact schema and single-shot dispatch with a 48-hour UPI notice gate and no ambiguous retry. No worker or route invokes it yet; production live collection remains disabled. |
+| Tests | PRs #30–#32 required CI/secret scans and exact post-merge development CI passed. Current branch: focused affected tests 27/27, adjacent commission/webhook tests 19/19, Prisma validation, API typecheck/build pass. Full local API suite cannot pass without local Redis; it was stopped after connection refusals. New migration/full suite/simulator await PR CI. Real Razorpay TEST mandate/debit and hosted QA have not passed. |
 | Environment / evidence | Render free production settings were staged with Save only; Resend `mail.printqs.com` is verified. Razorpay Live Subscriptions UPI/card/eMandate are enabled, but the only approved website is `www.packkar.in`. Screenshots are retained locally outside public Git; details in `PRODUCTION_RELEASE_LOG.md`. No new production SHA was deployed. |
 | Blockers | Production has 0 admins, 0 verified/published shops and 0 mandates. PrintQs website and variable B2B commission approval on Razorpay are unverified; live key is not enabled in PrintQs. Final 100+ case hosted QA, durable production database/queue and immediate live-money confirmation remain outstanding. |
-| Rollback / next action | Old Render deploy `dep-daqjk73l550s73bp7u8g` remains live. Finish TEST settlement validation, then TEST adapter/reconciliation via protected PRs; only after exact-SHA QA and startup credentials should a release PR/deploy replace it. |
+| Rollback / next action | Old Render deploy `dep-daqjk73l550s73bp7u8g` remains live. Finish TEST adapter review/CI through a feature PR, then owner authorization, verified notice, dev deployment and provider TEST E2E. Only after exact-SHA QA and startup credentials should a release PR/deploy replace it. |
 
 
 The [fresh phase 0–2 audit](outputs/printqs-release-audit-20260926/PHASE_0_2_AUDIT.md) records the verified live Render SHA, protected branches, production backup, commit-gated deployment change, live draft-shop exposure, and development isolation gaps. Phase 0 baseline is recorded; phases 1–2 are not yet fully through their hosted-development exit gates.

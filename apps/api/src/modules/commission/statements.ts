@@ -1,5 +1,7 @@
 /** Minimum required notice before a variable recurring debit. */
 export const PRE_DEBIT_NOTICE_MS = 24 * 60 * 60 * 1_000;
+/** Razorpay recommends 48 hours for UPI AutoPay subsequent payments. */
+export const UPI_PRE_DEBIT_NOTICE_MS = 48 * 60 * 60 * 1_000;
 
 export interface CommissionEntryForStatement {
   id: string;

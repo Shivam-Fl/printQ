@@ -1,6 +1,12 @@
 # PrintQs production release log
 
-Last updated: 2026-09-26 IST. This is the durable handoff for every subsequent launch turn. Read and update it before changing any account, infrastructure, PR, or deployed revision. Record evidence, not inferred success. Never add credentials, reset codes, personal documents, or key values here.
+Last updated: 2026-09-27 IST. This is the durable handoff for every subsequent launch turn. Read and update it before changing any account, infrastructure, PR, or deployed revision. Record evidence, not inferred success. Never add credentials, reset codes, personal documents, or key values here.
+
+## 2026-09-27 verified development SHA and next TEST collection slice
+
+- [PR #32](https://github.com/Shivam-Fl/printQ/pull/32) merged into `development` as `cf676cffbff7674ba75507ed83c6fd735367a06d`. Its exact head `b908bd672463a9606905b8194e6e055b783de74c` had 7/7 successful checks, including [CI and secret scan](https://github.com/Shivam-Fl/printQ/actions/runs/36252894820); [post-merge CI](https://github.com/Shivam-Fl/printQ/actions/runs/36314871939) also passed for the merge SHA. This is TEST-only signed settlement, not production debit enablement.
+- Current isolated branch `codex/recurring-test-dispatch` adds a TEST-only Razorpay order/charge transport and single-shot order-bound dispatch service. Provider calls are not wired to any worker or public route. Tests are mocked, not an actual Razorpay TEST mandate/debit. The current schema adds separate private recurring token and owner debit-contact fields; owner authorization, regulatory pre-debit delivery, approval and provider TEST evidence remain missing. Focused affected tests passed 27/27 and adjacent commission/webhook tests 19/19; Prisma validation and API typecheck/build passed. A local full API run was interrupted after Redis connection refusals because Docker/WSL are unavailable; do not count it as passing. Protected CI must apply the new migration and run the full isolated suite before merge.
+- External Chrome was used for the authenticated Render, Resend and Razorpay checks recorded below. On 2026-09-27 its extension transport became unavailable despite Chrome, extension and native-host diagnostics passing, so no further signed-in UI/account change was attempted. Continue safe CLI/code work; re-verify in external Chrome when it reconnects. No production deploy or live-money cutover occurred.
 
 ## 2026-09-26 evening: owner-requested free-Render deploy and Razorpay recheck
 

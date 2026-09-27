@@ -788,6 +788,10 @@ model ShopCollectionMandate {
   cancellationTermsAcceptedAt DateTime?
   providerCustomerId     String?
   providerMandateId      String?                  @unique
+  /// The owner-authorized Razorpay recurring token, never returned by an API.
+  providerTokenId        String?                  @unique
+  ownerDebitEmail        String?
+  ownerDebitContactE164  String?
   activatedAt            DateTime?
   revokedAt              DateTime?
   createdAt              DateTime                 @default(now())

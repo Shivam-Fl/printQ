@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { env } from '../../config/env.js';
 import { conflict } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
-import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS } from './statements.js';
+import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS, UPI_PRE_DEBIT_NOTICE_MS } from './statements.js';
 
 export interface StatementPeriod {
   start: Date;
@@ -65,6 +65,9 @@ export async function freezeWeeklyCommissionStatement(shopId: string, period: St
           cancellationTermsAcceptedAt: { not: null },
           providerCustomerId: { not: null },
           providerMandateId: { not: null },
+          providerTokenId: { not: null },
+          ownerDebitEmail: { not: null },
+          ownerDebitContactE164: { not: null },
         },
         orderBy: [{ activatedAt: 'desc' }, { id: 'asc' }],
         select: { id: true },
@@ -119,12 +122,20 @@ export async function freezeCompletedWeeklyStatements(now = new Date()): Promise
  * pretend notification.
  */
 export async function recordPreDebitNoticeDelivered(statementId: string, deliveredAt = new Date()) {
+  const statement = await prisma.shopCommissionStatement.findUnique({
+    where: { id: statementId },
+    select: { mandate: { select: { method: true } } },
+  });
+  if (!statement?.mandate) throw conflict('Statement has no collection mandate');
+  const noticeMs = statement.mandate.method === 'upi_autopay'
+    ? UPI_PRE_DEBIT_NOTICE_MS
+    : PRE_DEBIT_NOTICE_MS;
   const updated = await prisma.shopCommissionStatement.updateMany({
     where: { id: statementId, status: 'frozen', preDebitNoticeSentAt: null },
     data: {
       status: 'notice_sent',
       preDebitNoticeSentAt: deliveredAt,
-      debitNotBefore: new Date(deliveredAt.getTime() + PRE_DEBIT_NOTICE_MS),
+      debitNotBefore: new Date(deliveredAt.getTime() + noticeMs),
     },
   });
   if (updated.count !== 1) throw conflict('Statement is not awaiting its first pre-debit notice');
