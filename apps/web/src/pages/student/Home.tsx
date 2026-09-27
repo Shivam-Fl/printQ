@@ -37,11 +37,20 @@ export function resolveNewPrintAction(
   return { kind: 'directory' };
 }
 
+export function filterPublishedHistoryShops<T extends { slug: string }>(
+  historyShops: T[],
+  publishedShops: Array<{ slug: string }>,
+): T[] {
+  const published = new Set(publishedShops.map((shop) => shop.slug));
+  return historyShops.filter((shop) => published.has(shop.slug));
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [me, setMe] = useState<Me | null>(null);
   const [jobs, setJobs] = useState<JobRow[]>([]);
+  const [publishedShops, setPublishedShops] = useState<Array<{ slug: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [pickOpen, setPickOpen] = useState(params.get('pick') === '1');
   const [error, setError] = useState('');
@@ -56,10 +65,12 @@ export default function Home() {
     Promise.all([
       api<{ student: Me }>('/api/auth/student/me', { role: 'student' }),
       api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student' }),
+      api<{ shops: Array<{ slug: string }> }>('/api/public/shops'),
     ])
-      .then(([m, j]) => {
+      .then(([m, j, published]) => {
         setMe(m.student);
         setJobs(j.jobs);
+        setPublishedShops(published.shops);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your prints'))
       .finally(() => setLoading(false));
@@ -69,8 +80,8 @@ export default function Home() {
   const shops = useMemo(() => {
     const seen = new Map<string, { slug: string; name: string }>();
     for (const j of jobs) if (!seen.has(j.shop.slug)) seen.set(j.shop.slug, j.shop);
-    return [...seen.values()];
-  }, [jobs]);
+    return filterPublishedHistoryShops([...seen.values()], publishedShops);
+  }, [jobs, publishedShops]);
 
   useEffect(() => {
     if (loading || !pickOpen || shops.length > 0) return;

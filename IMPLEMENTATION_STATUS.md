@@ -4,7 +4,11 @@
 
 Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
-## Latest production checkpoint (2026-09-27 IST)
+## Latest technical deployment (2026-09-27 IST)
+
+Protected [release PR #37](https://github.com/Shivam-Fl/printQ/pull/37) reached `master` SHA `498377065d414b3b1b1450bcf46af3d903d7f748`. Render API deploy `dep-dash0g97lnhs7395bddg` is live and Vercel production deploy `dpl_GHpKSgxq5r8zHwPGwg4AsKVUyZ1f` is Ready at that exact SHA. API health, web HTTP 200 and public-discovery smoke passed; zero shops/campuses are published. The logging leak was fixed and production-probed; five tokens for agents at unpublished shops were invalidated after checking zero active jobs, so desktop agents need re-pairing. A Home chooser regression showing unpublished historical shops is fixed locally on branch `codex/home-published-chooser` (focused 6/6, web typecheck/build) but not yet merged/deployed. One admin exists; password recovery delivery/login remain unverified. Full 164-case QA, printer hardware, hosted dev, durable paid production PostgreSQL/queue, real shop verification and Razorpay live approval remain open. This is a technical dark/pilot deployment, **not market-launch readiness**. [Evidence and rollback](PRODUCTION_RELEASE_LOG.md).
+
+## Earlier production checkpoint (2026-09-27 IST; superseded above)
 
 The owner merged [release PR #34](https://github.com/Shivam-Fl/printQ/pull/34) to protected `master` at `bffc9a5fcc7205d18984ae44463b5ff8f2a72acc`. Render automatically built it and applied 31 migrations, but startup failed because a retired Razorpay TEST key was present in production. The legacy student Razorpay ID/secret/webhook variables were removed with **Save only**; no key value was viewed, and no live collection was enabled. The old API revision remains live pending an exact-SHA redeploy. A security regression exposed agent authentication headers in HTTP logs; branch `codex/redact-request-headers` removes all request/response headers from logs and passes focused 4/4, API 119/119, API typecheck/build. This patch needs protected CI/merge and deployment. Vercel's new build was in progress at the last check. The green `sdlc-qa` job skipped browser QA; the 164-case matrix, isolated hosted development, physical printer, durable production backing services and Razorpay live approval are not done. See [release log](PRODUCTION_RELEASE_LOG.md) for evidence, rollback, and next actions.
 
