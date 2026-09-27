@@ -4,7 +4,11 @@
 
 Last updated: 2026-09-27 (Asia/Kolkata). Historical programme entries below are preserved; for current state use the linked release log.
 
-## Current release checkpoint (2026-09-27 IST)
+## Verified current production SHA (2026-09-27 IST)
+
+Protected `master` is `827041462838564ec28f4f113305e1e38e9c9dc0`. Render `dep-dasl72t9fdbs73duv8ng` is live and Vercel `dpl_HQcq7ECJoTu8wCQgLNGi5UthSNfJ` is Ready at that exact SHA. API/web/public-discovery smoke passed; an authenticated student retested both New print actions and reached the verified-shop directory. Exact-SHA Windows installer packaging passed, but is unsigned and physically unverified. Admin recovery mail was delivered, yet no reset was consumed or admin login proven. Zero shops/campuses are published; five rotated desktop agents require re-pairing. Shop collection is disabled. Full 164-case QA, hosted isolated development, durable paid production PostgreSQL/queue (Free DB expires 2026-10-07), live Razorpay approval/confirmation, and real shop/printer acceptance remain open. [Current release record, rollback and evidence](PRODUCTION_RELEASE_LOG.md).
+
+## Earlier release checkpoint (2026-09-27 IST; superseded above)
 
 Protected [PR #39](https://github.com/Shivam-Fl/printQ/pull/39) updated `master` to `de26fd6061002ed36828c8bfc0d196a4a536b4fc`. Render deploy `dep-dasl1dgjo6nc73c8q190` is live and Vercel deploy `dpl_3DeBCigEjuNnanFbdfgSmVLVtwLJ` is Ready at the same SHA. API/web smoke and public authorization passed; the Home hero New print action no longer offers unpublished historical shops. Post-deploy browser QA found the bottom `+` still uses a stale remembered slug. `codex/bottom-new-print-route` has a failing-then-passing regression and focused 5/5 tests; it awaits feature/release PR CI and deployment. The admin recovery email was delivered through Resend, but owner password setup/login and shop verification remain. Windows installer build passed at `de26fd6` as an Actions artifact; it is unsigned and physical printing is unverified. Five agents need re-pairing. Full matrix, hosted dev, production durability and live Razorpay approval remain open. [Detailed evidence](PRODUCTION_RELEASE_LOG.md).
 
