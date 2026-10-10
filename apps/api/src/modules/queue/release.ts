@@ -120,6 +120,9 @@ export async function releaseByOtp(
     });
     if (disarmed.count === 0) {
       matched = (await prisma.job.findFirst({ where: { id: matched.id, shopId } })) ?? matched;
+    } else if (matched.revealDeadlineAt !== null) {
+      // Tell the dashboard and the student so the stale countdown disappears.
+      await emitQueueUpdate(shopId);
     }
   }
 

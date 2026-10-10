@@ -365,8 +365,14 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       await prisma.job.update({ where: { id: a.jobId }, data: { revealDeadlineAt: new Date(Date.now() - 1_000) } });
       // Lookup without payment confirmation only returns the payment prompt,
       // but proves the student is at the counter, so the timer must stop.
+      sent.events.length = 0;
       const prompt = await releaseByOtp(shopId, await code(a.jobId), ownerId);
       expect(prompt.requiresPaymentConfirmation).toBe(true);
+      // The dashboard and the student must stop showing the stale countdown.
+      const pushed = sent.events.filter((e) => e.room === `shop:${shopId}` && e.event === 'queue:update');
+      expect(pushed.length).toBeGreaterThan(0);
+      const last = pushed[pushed.length - 1].payload as { jobs: { jobId: string; revealDeadlineAt: string | null }[] };
+      expect(last.jobs.find((j) => j.jobId === a.jobId)?.revealDeadlineAt).toBeNull();
       expect(await expireReveal(a.jobId)).toBe(false);
       expect(await sweepExpiredReveals()).toBe(0);
       expect((await row(a.jobId)).status).toBe('queued');
