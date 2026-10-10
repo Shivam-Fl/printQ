@@ -174,7 +174,8 @@ jobsRouter.get(
         scheduledTime: true,
         createdAt: true,
         releaseCodeEncrypted: true,
-        nearFrontNotifiedAt: true,
+        revealedAt: true,
+        absentAt: true,
         otpExpiresAt: true,
         noShowCount: true,
         arrivedAt: true,
@@ -199,7 +200,7 @@ jobsRouter.get(
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, nearFrontNotifiedAt, shop, ...safeJob } = job;
+    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, ...safeJob } = job;
     const safeShop = {
       name: shop.name,
       slug: shop.slug,
@@ -208,12 +209,10 @@ jobsRouter.get(
         ? { vpa: shop.counterUpiVpa, payeeName: shop.counterUpiPayeeName }
         : null,
     };
-    const codeVisible = isCounterCodeAvailable(
-      job.status,
-      live.position,
-      env.NEAR_FRONT_THRESHOLD,
-      nearFrontNotifiedAt !== null,
-    );
+    // The code is decrypted only in the revealed band (or when ready for
+    // pickup). Arriving/waiting/absent responses never carry it.
+    const codeVisible = isCounterCodeAvailable(job.status, revealedAt)
+      && (job.status === 'ready_for_pickup' || live.band === 'revealed');
     const checkInOpensAt = job.mode === 'scheduled' && job.scheduledTime
       ? new Date(job.scheduledTime.getTime() - env.SCHEDULE_LEAD_MINUTES * 60_000).toISOString()
       : null;
@@ -224,7 +223,8 @@ jobsRouter.get(
         ...live,
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
         counterCodeAvailable: codeVisible,
-        counterCodeThreshold: env.NEAR_FRONT_THRESHOLD,
+        // Missed turn: back in awaiting_arrival, must check in again to get a new place.
+        absent: absentAt !== null && job.status === 'awaiting_arrival',
         canCheckIn: ['paid', 'counter_due', 'cash_due'].includes(job.paymentStatus)
           && ['awaiting_arrival', 'no_show', 'requeued'].includes(job.status),
         checkInOpensAt,

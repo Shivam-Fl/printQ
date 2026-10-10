@@ -17,3 +17,8 @@ export function distanceMeters(from: Coordinates, to: Coordinates): number {
     + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(haversine));
 }
+
+/** Exact boundary: a student exactly on the radius is inside; anything beyond is out. */
+export function isWithinRadius(distanceM: number, radiusM: number): boolean {
+  return distanceM <= radiusM;
+}

@@ -1,24 +1,21 @@
-import type { JobStatus } from '@printq/shared';
+import type { JobStatus, QueueBand } from '@printq/shared';
 
 /**
- * Counter codes are revealed automatically once a checked-in order reaches
- * the shop's near-front window. Once revealed they stay available if the
- * queue shifts or the student is marked absent, so recovery never depends on
- * getting the same position again.
+ * The stable counter code is shown only while a job is in the REVEALED band
+ * (revealedAt is set while it is queued) or once it is printed and waiting
+ * for collection. ARRIVING/WAITING jobs, absent jobs and prepared-but-not-
+ * checked-in jobs never receive it, in any API, socket or push payload.
  */
-export function isCounterCodeAvailable(
-  status: JobStatus,
-  position: number | null,
-  nearFrontThreshold: number,
-  wasPreviouslyAvailable: boolean,
-): boolean {
+export function isCounterCodeAvailable(status: JobStatus, revealedAt: Date | null): boolean {
   if (status === 'ready_for_pickup') return true;
-  if (wasPreviouslyAvailable && ['awaiting_arrival', 'queued', 'notified', 'no_show'].includes(status)) return true;
-  if (status !== 'queued' && status !== 'notified') return false;
-  return position !== null && position <= nearFrontThreshold;
+  return (status === 'queued' || status === 'notified') && revealedAt !== null;
 }
 
-/** Only the head of an active physical queue can be released without a warning. */
-export function isNormalCounterRelease(status: JobStatus, position: number | null): boolean {
-  return (status === 'queued' || status === 'notified') && position === 1;
+/**
+ * Staff may serve any revealed student without a warning: the counter can
+ * handle `counterCapacity` people at once, so position 1 is no longer special.
+ * Anything else (arriving/waiting, absent, not checked in) needs an override.
+ */
+export function isNormalCounterRelease(status: JobStatus, band: QueueBand | null): boolean {
+  return (status === 'queued' || status === 'notified') && band === 'revealed';
 }

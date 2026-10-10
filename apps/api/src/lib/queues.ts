@@ -29,7 +29,7 @@ export function queueName(name: string): string {
   return `${env.QUEUE_NAMESPACE}-${name}`;
 }
 
-export type TimerJobName = 'noShowCheck' | 'graceExpiry' | 'scheduledDue';
+export type TimerJobName = 'noShowCheck' | 'graceExpiry' | 'scheduledDue' | 'revealExpiry';
 
 /** File conversion (upload → print-ready PDF). */
 export const convertQueue = new Queue<{ fileId: string }>(queueName('convert'), {
