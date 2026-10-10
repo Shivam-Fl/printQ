@@ -131,3 +131,9 @@ Docker Desktop now works. An isolated local PostgreSQL/Redis Compose project (`p
 The live Render revision remains `dep-daqjk73l550s73bp7u8g` until a new deploy is independently verified. If a new deploy fails, Render has been serving its prior successful revision; verify this rather than assuming. Revert bad source through a protected feature PR, not a direct `master` push. Database migrations already applied by a failed deploy are **not** automatically rolled back; inspect schema compatibility before any rollback. No production mandate or live debit has been initiated.
 
 2026-09-26 read-only recheck: `origin/master` is still `ff9f99fd2d2e28438fdc531875766c192026e359`; Render lists `dep-dar65rrncjis73c9iibg` as `update_failed` and `dep-daqjk73l550s73bp7u8g` as `live`; `https://api.printqs.com/healthz` returned HTTP 200 with `{"ok":true}`. This is service availability only, **not** proof the new candidate deployed or is launch-safe.
+
+## 2026-10-10 - Production database moved to Supabase
+
+Render's free Postgres expired on 2026-10-07. Production now uses a Supabase free-tier Postgres through the session pooler (port 5432, `sslmode=require`). `DATABASE_URL` is a Render secret set out of band (`sync: false`); `DATABASE_NAMESPACE=postgres` (Supabase's database is always named `postgres`; isolation comes from a dedicated production project). `render.yaml` no longer declares a `databases` block. The old database held only QA data; nothing was migrated.
+
+Risks: Supabase free projects pause after about one week of inactivity and have no managed backups. Upgrade and add a backup plan before accepting real orders. No credentials are recorded here.
