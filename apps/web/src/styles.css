@@ -1379,7 +1379,9 @@ tr.row-revealed td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
 }
 
 /* ---------- resilience: loading / error / long names ---------- */
-.page, .welcome-page, .shopnav, .directory-card, .shop-hero { overflow-wrap: anywhere; }
+.page, .welcome-page, .directory-card, .shop-hero { overflow-wrap: anywhere; }
+/* the shop nav scrolls horizontally on phones: its labels must never wrap per-letter */
+.shopnav, .shopnav .links a, .shopnav .brand { overflow-wrap: normal; white-space: nowrap; }
 .directory-card .grow, .shop-hero > div { min-width: 0; }
 
 .resource-loading { min-height: 300px; }
