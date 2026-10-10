@@ -299,9 +299,9 @@ describe.runIf(dbReady)('shop platform-fee payments (database)', () => {
 
     it('requires the owner: staff and anonymous callers are refused', async () => {
       const { staffToken } = await makeShop('authz');
-      expect((await call('/api/shop/fees/order', staffToken, { method: 'POST', body: {} })).status).toBe(401);
+      expect((await call('/api/shop/fees/order', staffToken, { method: 'POST', body: {} })).status).toBe(403);
       expect((await call('/api/shop/fees/order', null, { method: 'POST', body: {} })).status).toBe(401);
-      expect((await call('/api/shop/fees', staffToken)).status).toBe(401);
+      expect((await call('/api/shop/fees', staffToken)).status).toBe(403);
       const status = await call('/api/shop/fees/status', staffToken);
       expect(status.status).toBe(200);
       expect(JSON.stringify(await status.json())).not.toContain('totalDuePaise');
