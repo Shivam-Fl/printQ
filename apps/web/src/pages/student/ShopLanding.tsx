@@ -21,6 +21,8 @@ interface PublicShop {
   options: { papers: Paper[]; bindings: { id: string; label: string }[]; duplexEnabled: boolean };
 }
 
+const FILE_FAILED_FALLBACK = "We couldn't prepare that file. Please try again.";
+
 /** Redirects to the specs page once `fileId` finishes converting (socket, with a polling fallback). */
 function useFileConversionRedirect(
   slug: string,
@@ -39,7 +41,7 @@ function useFileConversionRedirect(
     const onFailed = (p: { fileId: string; error: string }) => {
       if (p.fileId === fileId) {
         onDone();
-        onError(`Couldn't process that: ${p.error}`);
+        onError(p.error || FILE_FAILED_FALLBACK);
       }
     };
     socket?.on('file:ready', onReady);
@@ -52,7 +54,7 @@ function useFileConversionRedirect(
         if (file.status === 'ready') navigate(`/s/${slug}/file/${fileId}`);
         if (file.status === 'failed') {
           onDone();
-          onError(`Couldn't process that: ${file.error ?? ''}`);
+          onError(file.error || FILE_FAILED_FALLBACK);
         }
       } catch {
         /* keep polling */

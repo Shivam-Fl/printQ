@@ -12,6 +12,7 @@ import { storage } from '../../providers/storage/index.js';
 import { fileRetentionDeadline } from '../../lib/fileRetention.js';
 import { convertQueue } from '../../lib/queues.js';
 import { env } from '../../config/env.js';
+import { publicFileError } from '../../workers/conversionErrors.js';
 
 export const filesRouter = Router();
 
@@ -203,7 +204,9 @@ filesRouter.get(
       select: { id: true, status: true, pages: true, error: true, originalName: true },
     });
     if (!file) throw notFound();
-    res.json({ file });
+    // Never return the stored value verbatim: map it to a friendly, safe message.
+    const { error, ...rest } = file;
+    res.json({ file: { ...rest, ...(publicFileError(error) ?? { error: null, errorCode: null }) } });
   }),
 );
 
