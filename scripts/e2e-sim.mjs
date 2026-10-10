@@ -172,7 +172,6 @@ async function main() {
     CORS_ORIGINS: 'http://localhost:4173',
     PAYMENT_PROVIDER: 'mock',
     PLATFORM_MARKUP_BPS: '2500',
-    SHOP_COLLECTION_MODE: 'disabled',
     SMS_PROVIDER: 'console',
     EMAIL_PROVIDER: 'console',
     // Explicit test-only opt-in. Production configuration rejects this value.
