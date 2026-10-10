@@ -43,6 +43,8 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((v) => v.split(',').map((c) => c.trim()).filter(Boolean)),
+  // Public shop/campus list cache; unset = 15 s (0 in tests). 0 disables.
+  PUBLIC_LIST_CACHE_SECONDS: z.coerce.number().int().min(0).max(300).optional(),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173')
@@ -130,6 +132,8 @@ const envSchema = z.object({
   // Header injection is never valid. A display-name plus verified address is
   // allowed because Resend supports it, so do not over-constrain its format.
   EMAIL_FROM: z.string().min(3).max(320).regex(/^[^\r\n]+$/).optional(),
+  // Replies go here when EMAIL_FROM's domain has no mailbox (e.g. mail.printqs.com).
+  EMAIL_REPLY_TO: optionalSecret(z.string().trim().email().max(254)),
 
   // The first administrator is inserted idempotently at API boot. A supplied
   // argon2id hash is optional; otherwise the initial password is random and
