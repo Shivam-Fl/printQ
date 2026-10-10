@@ -1,3 +1,4 @@
+import { safeStorage } from './lib/safeStorage.js';
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   getToken as getAppCheckToken,
@@ -126,7 +127,7 @@ export function resetFirebasePhoneAuth(): void {
 }
 
 export async function requestFirebasePhoneOtp(phoneE164: string): Promise<void> {
-  const lastSentAt = Number(localStorage.getItem(OTP_SEND_KEY) ?? '0');
+  const lastSentAt = Number(safeStorage.get(OTP_SEND_KEY) ?? '0');
   const waitMs = OTP_SEND_COOLDOWN_MS - (Date.now() - lastSentAt);
   if (waitMs > 0) {
     throw new Error(`Please wait ${Math.ceil(waitMs / 1000)} seconds before requesting another code.`);
@@ -144,7 +145,7 @@ export async function requestFirebasePhoneOtp(phoneE164: string): Promise<void> 
   try {
     await verifier.render();
     confirmation = await signInWithPhoneNumber(authInstance, phoneE164, verifier);
-    localStorage.setItem(OTP_SEND_KEY, String(Date.now()));
+    safeStorage.set(OTP_SEND_KEY, String(Date.now()));
   } catch (error) {
     resetFirebasePhoneAuth();
     const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';

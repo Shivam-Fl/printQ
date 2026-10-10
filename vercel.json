@@ -4,11 +4,34 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build -w packages/shared && npm run build -w apps/agent && npm run package:agent && npm run build -w apps/web",
   "outputDirectory": "apps/web/dist",
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "www.printqs.com" }],
+      "destination": "https://printqs.com/$1",
+      "permanent": true
+    }
+  ],
   "rewrites": [
-    { "source": "/((?!assets/|icons/|downloads/|sw.js|manifest.webmanifest|favicon.ico).*)", "destination": "/index.html" }
+    { "source": "/((?!assets/|icons/|downloads/|sw.js|offline.html|manifest.webmanifest|favicon.ico).*)", "destination": "/index.html" }
   ],
   "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "geolocation=(self), camera=(), microphone=()" },
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com https://checkout.razorpay.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.razorpay.com https://www.gstatic.com https://www.google.com; font-src 'self' data:; connect-src 'self' https://api.printqs.com wss://api.printqs.com https://*.googleapis.com https://*.firebaseio.com https://www.google.com https://api.razorpay.com https://*.razorpay.com https://nominatim.openstreetmap.org; frame-src https://www.google.com https://recaptcha.google.com https://*.firebaseapp.com https://api.razorpay.com https://checkout.razorpay.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
     { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/offline.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
     { "source": "/downloads/(.*)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
   ]
 }

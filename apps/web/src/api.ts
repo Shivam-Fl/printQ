@@ -2,6 +2,8 @@
  * Same-origin by default: dev uses the Vite proxy, production serves the web
  * app from the API. Set VITE_API_URL only for a split-domain deploy.
  */
+import { safeStorage } from './lib/safeStorage.js';
+
 /**
  * Build-time environment variables can pick up a trailing newline when they
  * are injected from a dashboard or dotenv file. Keep same-origin mode as an
@@ -37,22 +39,22 @@ async function appCheckHeaders(): Promise<Record<string, string>> {
 }
 
 export function getToken(role: Role): string | null {
-  return localStorage.getItem(tokenKey(role));
+  return safeStorage.get(tokenKey(role));
 }
 export function setToken(role: Role, token: string): void {
-  localStorage.setItem(tokenKey(role), token);
+  safeStorage.set(tokenKey(role), token);
 }
 export function clearToken(role: Role): void {
-  localStorage.removeItem(tokenKey(role));
-  if (role === 'shop') localStorage.removeItem('printq:shop:role');
+  safeStorage.remove(tokenKey(role));
+  if (role === 'shop') safeStorage.remove('printq:shop:role');
 }
 
 /** 'owner' | 'staff' for the logged-in shop user — gates owner-only UI (e.g. Staff management). */
 export function setShopRole(role: 'owner' | 'staff'): void {
-  localStorage.setItem('printq:shop:role', role);
+  safeStorage.set('printq:shop:role', role);
 }
 export function getShopRole(): 'owner' | 'staff' | null {
-  return localStorage.getItem('printq:shop:role') as 'owner' | 'staff' | null;
+  return safeStorage.get('printq:shop:role') as 'owner' | 'staff' | null;
 }
 
 export class ApiError extends Error {
@@ -105,7 +107,7 @@ export async function renewStudentSession(): Promise<string | null> {
 
 async function requestJson<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData },
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal },
   allowStudentRenewal: boolean,
 ): Promise<T> {
   const headers: Record<string, string> = {};
@@ -122,7 +124,12 @@ async function requestJson<T>(
     body = JSON.stringify(options.body);
   }
 
-  const res = await fetch(`${API_URL}${path}`, { method: options.method ?? 'GET', headers, body });
+  const res = await fetch(`${API_URL}${path}`, {
+    method: options.method ?? 'GET',
+    headers,
+    body,
+    signal: options.signal,
+  });
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
     if (res.status === 401 && options.role === 'student' && allowStudentRenewal) {
@@ -137,7 +144,7 @@ async function requestJson<T>(
 
 export async function api<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData } = {},
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal } = {},
 ): Promise<T> {
   return requestJson<T>(path, options, true);
 }
@@ -174,10 +181,10 @@ export async function downloadFile(path: string, role: Role, filename: string): 
 
 /** Remember the last shop the student ordered from, so "New print" has a target. */
 export function rememberShop(slug: string): void {
-  localStorage.setItem('printq:lastShop', slug);
+  safeStorage.set('printq:lastShop', slug);
 }
 export function lastShopSlug(): string | null {
-  return localStorage.getItem('printq:lastShop');
+  return safeStorage.get('printq:lastShop');
 }
 
 /** Relative time like "2h ago", "just now". */
