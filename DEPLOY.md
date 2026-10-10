@@ -36,7 +36,9 @@ deploy.
    Keep the public/private key pair from the output — you'll paste them in step 4.
 3. **Create the Render Blueprint**: in the Render dashboard, "New" → "Blueprint" →
    connect this GitHub repo → Render reads `render.yaml` and shows you `printq-web`
-   (web service), `printq-db` (Postgres), `printq-redis` (Key Value) → click "Apply."
+   (web service) and `printq-redis` (Key Value) → click "Apply." Postgres is external
+   (Supabase): set the secret `DATABASE_URL` (session pooler, port 5432, `sslmode=require`)
+   in the dashboard; `DATABASE_NAMESPACE` is `postgres`.
    First build takes a few minutes (it's compiling TypeScript and installing
    LibreOffice). Once it's live, note the assigned URL —
    `https://printq-web-xxxx.onrender.com` (Render appends a random suffix if the
@@ -56,9 +58,8 @@ deploy.
    set in `render.yaml`. See Phase 2 step 6 for going live with real payments.)
 5. **Seed the demo shop** (optional, for your own testing): the existing
    `apps/api/prisma/seed.ts` seeds a demo shop/owner. Run it once against the deployed
-   database from your machine: set `DATABASE_URL` locally to the value shown in the
-   Render Postgres dashboard (Internal or External connection string — use the
-   *External* one from your machine), then `npm run db:seed -w apps/api`.
+   database from your machine: set `DATABASE_URL` locally to the Supabase
+   session pooler connection string (port 5432, `sslmode=require`), then `npm run db:seed -w apps/api`.
 
 ### Smoke-test checklist
 
@@ -90,7 +91,7 @@ Work through this once the service is live and secrets are set:
 | Limitation | Why | Impact this week |
 |---|---|---|
 | 30-60s cold start | Free web services sleep after 15 min idle | First request after a gap is slow — refresh once, it's normal |
-| Postgres expires in 30 days | Render free-tier policy | Fine for a week; upgrade the database before day 30 (one click, no migration) |
+| Supabase free Postgres pauses after ~1 week of inactivity, no managed backups | Supabase free-tier policy | Upgrade and set up backups before real orders |
 | Redis has no persistence | Free Key Value doesn't persist to disk | A Redis restart loses conversion/reminder work and rate-limit counters. Prepared-order expiry and refund retry are DB-swept, but the other queues still require persistent Redis for launch. **Must fix before real launch** (see below) |
 | Uploaded files can vanish | Free web services have an ephemeral filesystem (`STORAGE_DRIVER=local`); a spin-down wipes `./storage` | If a test spans an idle gap, a job's file may 404 — just re-upload. **Must fix before real launch** |
 
@@ -101,9 +102,9 @@ onboarding, staged rollout and full real-student acceptance gates.
 
 Do this before onboarding a real shop and real paying students:
 
-1. **Upgrade `printq-db` and `printq-redis` off the free plan** in the Render
-   dashboard (fixes the 30-day expiry and Redis persistence loss). No migration
-   needed — same connection strings, Render handles the resize.
+1. **Upgrade the Supabase Postgres plan (backups, no inactivity pause) and move
+   `printq-redis` off the free plan** (fixes Redis persistence loss). Redis resizes
+   in the Render dashboard with the same connection string.
 2. **Move file storage off local disk.** Create a Cloudflare R2 bucket (or any
    S3-compatible provider), set `STORAGE_DRIVER=s3` and the `S3_*` env vars
    (`apps/api/src/providers/storage/s3.ts` already implements this driver — it's a
@@ -169,7 +170,7 @@ Do this before onboarding a real shop and real paying students:
 Before giving the URL to a real student, all of these must be true:
 
 - [ ] `npm run test:launch` passes locally (including the 64-assertion pricing/arrival/queue/printer/payout simulator E2E).
-- [ ] Render Postgres, Key Value and web service use production-capable paid instances.
+- [ ] Production Postgres (Supabase) is paid with backups; Render Key Value and web service use production-capable paid instances.
 - [ ] `STORAGE_DRIVER=s3`; an upload survives a web-service restart and expires after retention.
 - [ ] `PAYMENT_PROVIDER=razorpay`; test-mode payment, webhook capture, cancellation and refund pass.
 - [ ] `SHOP_PAYOUT_PROVIDER=razorpay_route`; every live shop has a verified Linked
