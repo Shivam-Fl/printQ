@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-27 IST. This is the durable handoff for every subsequent launch turn. Read and update it before changing any account, infrastructure, PR, or deployed revision. Record evidence, not inferred success. Never add credentials, reset codes, personal documents, or key values here.
 
+## 2026-09-27 exact production status after final navigation release
+
+| Surface | Verified production revision | Evidence |
+| --- | --- | --- |
+| GitHub protected `master` | `827041462838564ec28f4f113305e1e38e9c9dc0` via [release PR #41](https://github.com/Shivam-Fl/printQ/pull/41) | Required CI and secret scan passed; no direct push. |
+| Render API and combined workers | `dep-dasl72t9fdbs73duv8ng` **live** at the exact SHA, `https://api.printqs.com` | Authenticated Render deploy list and `GET /healthz` `{ok:true}`. |
+| Vercel student/shop web | `dpl_HQcq7ECJoTu8wCQgLNGi5UthSNfJ` **Ready** at the exact SHA, aliased to `https://printqs.com` and `https://www.printqs.com` | Authenticated Vercel deployment metadata, aliases and HTTP 200. |
+| Windows shop installer | [build run 36337457492](https://github.com/Shivam-Fl/printQ/actions/runs/36337457492) succeeded at the exact SHA; `PrintQs-Shop-Windows` artifact ID `10938276115` | CI packaging only; unsigned, not a public release or physical printer acceptance. |
+
+- Post-deploy production-safe QA at this SHA: public shops count **0**, active campuses count **0**; authenticated student Home's hero **New print** and bottom **+** both reached the verified-shop directory with “No matching shops,” rather than offering or opening old QA shops. This is a deliberately closed discovery state, not shop onboarding. Browser evidence is local-only at `C:\Users\acer\AppData\Local\PrintQ\evidence\20260927\production-8270414-new-print-directory.png`. This is a limited subset, **not** a fresh 164-case matrix pass.
+- Admin recovery email to the Render-owner mailbox was shown **delivered** by Resend without opening the message/code. Database audit afterward showed one bootstrapped admin, session version 0 and zero consumed reset codes: password setup/login and shop verification are still owner-dependent. The reset flow can issue a new 15-minute code when the owner is ready; never send the code through chat.
+- Production agent-auth request headers are now redacted in live logs. Five older agent tokens were invalidated after confirming zero active jobs and zero agents at published shops; all five desktop agents need owner re-pairing. No real shop is published. `SHOP_COLLECTION_MODE` remains disabled; no live Razorpay key, mandate or debit was enabled.
+- The account's existing production Render web, PostgreSQL and Key Value are Free. PostgreSQL status is available but its free instance expires **2026-10-07 16:49 UTC** (Render response); there are no managed backups. Key Value is memory-only, web sleeps, and private GCS remains usage-billed. These are **real-order blockers**, not just future scale improvements. The isolated hosted development stack and full matrix are also missing. Do not tell shops/students to place real paid print orders yet.
+- Rollback reference for this navigation-only release: Render previous successful deploy `dep-dasl1dgjo6nc73c8q190` and Vercel previous Ready deploy `dpl_3DeBCigEjuNnanFbdfgSmVLVtwLJ` (both `de26fd6`). Use provider rollback only after checking current data/schema compatibility; database migrations are never automatically reversed. This document-only checkpoint is retained on `development` and does not require an additional production code deploy.
+
 ## 2026-09-27 current release: verified-shop chooser and bottom-action defect
 
 - [PR #38](https://github.com/Shivam-Fl/printQ/pull/38) merged to development and protected [release PR #39](https://github.com/Shivam-Fl/printQ/pull/39) merged to `master` after CI/secret scan. Exact production SHA: `de26fd6061002ed36828c8bfc0d196a4a536b4fc`. Render API deploy `dep-dasl1dgjo6nc73c8q190` is **live** and Vercel production deploy `dpl_3DeBCigEjuNnanFbdfgSmVLVtwLJ` is **Ready** at this same SHA, aliased to `https://printqs.com`. Post-deploy `/healthz` passed, web returned 200, zero published shops/active campuses were visible, and an unpublished QA shop route returned 404. Authenticated browser smoke confirmed Home's hero New print action now opens the verified-shop directory instead of showing old QA shops.
@@ -116,3 +131,9 @@ Docker Desktop now works. An isolated local PostgreSQL/Redis Compose project (`p
 The live Render revision remains `dep-daqjk73l550s73bp7u8g` until a new deploy is independently verified. If a new deploy fails, Render has been serving its prior successful revision; verify this rather than assuming. Revert bad source through a protected feature PR, not a direct `master` push. Database migrations already applied by a failed deploy are **not** automatically rolled back; inspect schema compatibility before any rollback. No production mandate or live debit has been initiated.
 
 2026-09-26 read-only recheck: `origin/master` is still `ff9f99fd2d2e28438fdc531875766c192026e359`; Render lists `dep-dar65rrncjis73c9iibg` as `update_failed` and `dep-daqjk73l550s73bp7u8g` as `live`; `https://api.printqs.com/healthz` returned HTTP 200 with `{"ok":true}`. This is service availability only, **not** proof the new candidate deployed or is launch-safe.
+
+## 2026-10-10 - Production database moved to Supabase
+
+Render's free Postgres expired on 2026-10-07. Production now uses a Supabase free-tier Postgres through the session pooler (port 5432, `sslmode=require`). `DATABASE_URL` is a Render secret set out of band (`sync: false`); `DATABASE_NAMESPACE=postgres` (Supabase's database is always named `postgres`; isolation comes from a dedicated production project). `render.yaml` no longer declares a `databases` block. The old database held only QA data; nothing was migrated.
+
+Risks: Supabase free projects pause after about one week of inactivity and have no managed backups. Upgrade and add a backup plan before accepting real orders. No credentials are recorded here.

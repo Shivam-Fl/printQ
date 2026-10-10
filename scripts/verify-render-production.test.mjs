@@ -12,12 +12,16 @@ function blueprintValue(key) {
   return match?.[1].trim();
 }
 
-test('Render production binds the dedicated Firebase project and legacy production database', () => {
+test('Render production binds the dedicated Firebase project and external production database', () => {
   assert.equal(blueprintValue('NODE_ENV'), 'production');
   assert.equal(blueprintValue('PRINTQ_ENVIRONMENT'), 'production');
   assert.equal(blueprintValue('STUDENT_AUTH_PROVIDER'), 'firebase');
   assert.equal(blueprintValue('FIREBASE_PROJECT_ID'), 'printqs-production');
-  assert.equal(blueprintValue('DATABASE_NAMESPACE'), 'printq_db_f68p');
+  assert.equal(blueprintValue('DATABASE_NAMESPACE'), 'postgres');
+  assert.doesNotMatch(blueprint, /^databases:/m, 'no Render-managed database block');
+  assert.doesNotMatch(blueprint, /fromDatabase/, 'DATABASE_URL must not be wired from a Render database');
+  assert.match(blueprint, /^\s*- key: DATABASE_URL\r?\n(?:\s*#.*\r?\n)*\s*sync: false\s*$/m);
+  assert.doesNotMatch(blueprint, /postgres(?:ql)?:\/\//i, 'no connection string committed');
   assert.match(blueprint, /^\s*- key: FIREBASE_AUTH_API_KEY\r?\n(?:\s*#.*\r?\n)*\s*sync: false\s*$/m);
 });
 

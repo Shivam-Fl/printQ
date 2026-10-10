@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import Toasts from './components/Toasts.js';
 import EnvironmentBanner from './components/EnvironmentBanner.js';
 import Welcome from './pages/student/Welcome.js';
@@ -22,6 +22,11 @@ import ShopSetup from './pages/shop/ShopSetup.js';
 import Earnings from './pages/shop/Earnings.js';
 import AdminLogin from './pages/admin/AdminLogin.js';
 import AdminConsole from './pages/admin/AdminConsole.js';
+import Privacy from './pages/legal/Privacy.js';
+import Terms from './pages/legal/Terms.js';
+import Refunds from './pages/legal/Refunds.js';
+import Support from './pages/legal/Support.js';
+import NotFound from './pages/legal/NotFound.js';
 
 export default function App() {
   return (
@@ -52,6 +57,13 @@ export default function App() {
         {/* platform administration: separately authenticated from any shop */}
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<AdminConsole />} />
+        {/* public legal + support pages */}
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/refunds" element={<Refunds />} />
+        <Route path="/support" element={<Support />} />
+        <Route path="/contact" element={<Navigate to="/support" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
       <Toasts />
     </>

@@ -7,11 +7,6 @@
 # and Render secret file are provisioned out of band; never commit the key JSON.
 # Splitting API/conversion workers is still required before unrestricted launch.
 
-databases:
-  - name: printq-db
-    plan: free
-    postgresMajorVersion: "16"
-
 services:
   - name: printq-redis
     type: keyvalue
@@ -43,13 +38,15 @@ services:
       - key: RUN_WORKERS
         value: "true"
       - key: DATABASE_URL
-        fromDatabase:
-          name: printq-db
-          property: connectionString
-      # Existing dedicated production database name, verified from Render.
-      # Do not point this deployment at development or a replacement database.
+        # External Supabase Postgres, provided out of band (never committed).
+        # Use the Supabase *session pooler* string: port 5432, sslmode=require.
+        # Never the direct connection or the 6543 transaction pooler.
+        sync: false
+      # Supabase's database is always named `postgres`; isolation from
+      # development comes from a dedicated production Supabase project.
+      # Do not point this deployment at development's project.
       - key: DATABASE_NAMESPACE
-        value: printq_db_f68p
+        value: postgres
       - key: REDIS_URL
         fromService:
           name: printq-redis

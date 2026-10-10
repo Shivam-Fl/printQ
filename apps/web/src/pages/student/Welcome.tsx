@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getToken } from '../../api.js';
 import { IconPrinter, IconStore, IconChevron, IconClock, IconBell } from '../../components/Icons.js';
 import { useEffect } from 'react';
+import { PolicyLinks } from '../../components/LegalLayout.js';
 
 export default function Welcome() {
   const navigate = useNavigate();
@@ -93,6 +94,7 @@ export default function Welcome() {
         <span>PrintQ</span>
         <span>Less waiting. Better printing.</span>
         <Link to="/shops">Find a verified shop</Link>
+        <PolicyLinks />
       </footer>
     </main>
   );

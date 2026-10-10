@@ -75,6 +75,7 @@ export default function ShopNav() {
           <span />{desktopStatus.state === 'online' ? 'Printers ready' : 'Printer setup'}
         </NavLink>
       )}
+      <NavLink to="/support" className="shopnav-help">Help &amp; policies</NavLink>
       <button className="ghost small" onClick={signOut}>Sign out</button>
     </div>
   );
