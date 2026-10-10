@@ -692,7 +692,6 @@ shopRouter.get(
       shopName: job.shop.name,
       shopAddress: job.shop.address,
       studentLabel: job.student.name ?? maskPhone(job.student.phone),
-      fileName: job.file.originalName,
       specs: job.specs as unknown as JobSpecs,
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,

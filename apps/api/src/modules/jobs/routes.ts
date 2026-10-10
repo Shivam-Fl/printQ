@@ -364,7 +364,6 @@ jobsRouter.get(
       shopName: job.shop.name,
       shopAddress: job.shop.address,
       studentLabel: job.student.name ?? job.student.phone,
-      fileName: job.file.originalName,
       specs: job.specs as unknown as JobSpecs,
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,

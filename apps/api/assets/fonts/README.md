@@ -1,0 +1,1 @@
+Noto Sans and Noto Sans Devanagari (static TTF), (c) The Noto Project Authors, licensed under the SIL Open Font License 1.1 (see the OFL-*.txt files). Used to render Unicode-safe PDF receipts (apps/api/src/lib/receipt.ts). Source: https://github.com/notofonts/notofonts.github.io (fonts/NotoSans, fonts/NotoSansDevanagari).

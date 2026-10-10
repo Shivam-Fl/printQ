@@ -55,6 +55,8 @@ COPY --from=build /app/apps/api/package.json apps/api/package.json
 COPY --from=build /app/apps/api/node_modules apps/api/node_modules
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/api/prisma apps/api/prisma
+# Noto Sans / Noto Sans Devanagari (OFL) used by the PDF receipt renderer
+COPY --from=build /app/apps/api/assets apps/api/assets
 COPY --from=build /app/apps/web/dist apps/web/dist
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
