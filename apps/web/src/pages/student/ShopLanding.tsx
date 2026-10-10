@@ -144,10 +144,18 @@ export default function ShopLanding() {
   }
 
   if (error && !shop) {
+    // Never a dead end: a bad/unpublished link offers the directory and home.
     return (
       <div className="page">
         <Topbar />
-        <p className="error">{error}</p>
+        <div className="empty-state invalid-shop" role="alert">
+          <strong>{error}</strong>
+          <p>The link may be old, mistyped, or the shop is not taking orders on PrintQs yet.</p>
+          <div className="row" style={{ justifyContent: 'center', marginTop: 8 }}>
+            <Link to="/shops" className="button-link">Find a shop</Link>
+            <Link to="/home" className="button-link secondary">Go home</Link>
+          </div>
+        </div>
       </div>
     );
   }

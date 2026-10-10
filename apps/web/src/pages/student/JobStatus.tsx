@@ -324,7 +324,10 @@ export default function JobStatus() {
           <div className="ticket">
             <div className="eyebrow">planned arrival</div>
             <div className="ticket-num" style={{ fontSize: '2rem' }}>{slotLabel(job.scheduledTime!)}</div>
-            <div className="sub">Your order is prepared. Check-in opens shortly before this time, after you reach the shop.</div>
+            <div className="sub">
+              Your order is prepared. <strong>Check-in opens at {slotLabel(job.checkInOpensAt ?? job.scheduledTime!)}</strong>
+              {' '}— tap it once you reach the shop.
+            </div>
           </div>
         )}
         {job.absent && (

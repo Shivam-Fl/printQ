@@ -30,6 +30,7 @@ vi.mock('../realtime/events.js', () => ({
   }),
 }));
 vi.mock('../lib/fileRetention.js', () => ({
+  ACTIVE_FILE_JOB_STATUSES: ['queued'],
   ensureFileDeletionJob: vi.fn(),
   scheduleFileDeletion: vi.fn(),
   scheduleVerifiedPrintFileDeletion: vi.fn(),
@@ -92,6 +93,12 @@ describe('conversion failures are mapped to friendly, safe codes', () => {
     expect(failed.errorCode).toBe('FILE_CORRUPT');
     expect(failed.error).toBe(CONVERSION_ERRORS.FILE_CORRUPT);
     expect(failed.error).not.toMatch(RAW_LEAK);
+  });
+
+  it('header-only garbage PDF (parses leniently, fails at getPageCount) -> FILE_CORRUPT', async () => {
+    setup(Buffer.from('%PDF-1.4\ngarbage that is not a pdf\n%%EOF'));
+    await convertFile('f1');
+    expect(lastFailure()?.error).toBe('FILE_CORRUPT');
   });
 
   it('password-protected PDF -> FILE_ENCRYPTED with the exact friendly message', async () => {

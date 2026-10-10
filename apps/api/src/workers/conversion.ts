@@ -35,15 +35,23 @@ const A4 = { width: 595.28, height: 841.89 } as const;
 async function pdfToNormalized(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
   // load + re-save normalizes structure and rejects corrupt/encrypted files early
   let doc: PDFDocument;
+  let pages: number;
   try {
     doc = await PDFDocument.load(buffer, { ignoreEncryption: false });
+    // a lenient parse of a damaged file only fails here (TypeError reading 'Pages')
+    pages = doc.getPageCount();
   } catch (err) {
     // pdf-lib surfaces a damaged xref/catalog as an arbitrary TypeError
     throw new ConversionError(isEncryptedPdfError(err) ? 'FILE_ENCRYPTED' : 'FILE_CORRUPT', err);
   }
-  if (doc.getPageCount() > MAX_DOCUMENT_PAGES) throw new ConversionError('TOO_MANY_PAGES');
-  const bytes = await doc.save();
-  return { pdf: Buffer.from(bytes), pages: doc.getPageCount() };
+  if (pages > MAX_DOCUMENT_PAGES) throw new ConversionError('TOO_MANY_PAGES');
+  let bytes: Uint8Array;
+  try {
+    bytes = await doc.save();
+  } catch (err) {
+    throw new ConversionError('FILE_CORRUPT', err);
+  }
+  return { pdf: Buffer.from(bytes), pages };
 }
 
 async function imageToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {

@@ -439,7 +439,7 @@ async function main() {
     body: { fileId, specs: upiSpecs, mode: 'instant', paymentMethod: 'online' },
   });
   assert(retiredPaymentSelector.status === 400, 'retired student payment selectors are rejected');
-  const upiJobId = await createPayAtShop(studentToken, fileId, upiSpecs);
+  const upiJobId = await createPayAtShop(studentToken, await upload(studentToken, shopSlug, 3, 'upi-test.pdf'), upiSpecs);
   const upiPrepared = await waitFor('prepared shop UPI order', async () => {
     const result = await request(`/api/jobs/${upiJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
@@ -524,7 +524,7 @@ async function main() {
     'support refund posts one reversing credit with zero unexplained paise',
   );
 
-  const returnJobId = await createPayAtShop(studentToken, fileId, upiSpecs);
+  const returnJobId = await createPayAtShop(studentToken, await upload(studentToken, shopSlug, 3, 'return-test.pdf'), upiSpecs);
   await waitFor('counter-return order prepared', async () => {
     const result = await request(`/api/jobs/${returnJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival';
@@ -565,7 +565,7 @@ async function main() {
   console.log('\nLate arrival, skip-safe counter lookup and refund journey');
   const queueFileId = await upload(studentToken, shopSlug, 1, 'arrival-model-test.pdf');
   const missedJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
-  const waitingJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const waitingJobId = await createPayAtShop(studentToken, await upload(studentToken, shopSlug, 1, 'waiting-test.pdf'), { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   await waitFor('first prepared arrival order', async () => {
     const result = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
@@ -638,7 +638,7 @@ async function main() {
   const afterUnpaidCancel = await request('/api/shop/earnings', { token: shopToken });
   assert(!afterUnpaidCancel.data.earnings.entries.some((entry) => entry.jobId === waitingJobId), 'unprinted cancellation creates no commission');
 
-  const remoteCancelJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const remoteCancelJobId = await createPayAtShop(studentToken, await upload(studentToken, shopSlug, 1, 'remote-cancel.pdf'), { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   await waitFor('prepared cancellation order', async () => {
     const result = await request(`/api/jobs/${remoteCancelJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival';
@@ -647,7 +647,7 @@ async function main() {
   assert(remoteCancelled.status === 200, 'remote prepared order can be cancelled before arrival');
 
   console.log('\nShop closing and existing-order protection');
-  const closingJobId = await createPayAtShop(studentToken, queueFileId, { ...specs, copies: 1, color: false, binding: null, pageRange: null });
+  const closingJobId = await createPayAtShop(studentToken, await upload(studentToken, shopSlug, 1, 'closing.pdf'), { ...specs, copies: 1, color: false, binding: null, pageRange: null });
   await waitFor('existing prepared order before pause', async () => {
     const result = await request(`/api/jobs/${closingJobId}`, { token: studentToken });
     return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;

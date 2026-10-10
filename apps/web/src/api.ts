@@ -120,7 +120,7 @@ export async function renewStudentSession(): Promise<string | null> {
 
 async function requestJson<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal },
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal; idempotencyKey?: string },
   allowStudentRenewal: boolean,
 ): Promise<T> {
   const headers: Record<string, string> = {};
@@ -129,6 +129,7 @@ async function requestJson<T>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
   Object.assign(headers, await appCheckHeaders());
+  if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
   let body: BodyInit | undefined;
   if (options.formData) {
     body = options.formData;
@@ -162,12 +163,34 @@ async function requestJson<T>(
 
 export async function api<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal } = {},
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal; idempotencyKey?: string } = {},
 ): Promise<T> {
   return requestJson<T>(path, options, true);
 }
 
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
+
+/** Authenticated binary fetch (header auth, one silent student renewal). Used by the PDF preview. */
+export async function fetchBytes(path: string, role: Role, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const appCheck = await appCheckHeaders();
+  const send = (token: string | null) =>
+    fetch(`${API_URL}${path}`, {
+      headers: { ...appCheck, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal,
+      referrerPolicy: 'no-referrer',
+    });
+  let res = await send(getToken(role));
+  if (res.status === 401 && role === 'student') {
+    const token = await renewStudentSession();
+    if (token) res = await send(token);
+  }
+  if (res.status === 401) {
+    clearToken(role);
+    if (role === 'student') expireStudentSession();
+  }
+  if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
+  return res.arrayBuffer();
+}
 
 /** Fetch an authenticated binary response (e.g. a receipt PDF) and save it. */
 export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {

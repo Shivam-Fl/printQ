@@ -29,6 +29,7 @@ import { scheduleFileDeletion, scheduleVerifiedPrintFileDeletion } from '../../l
 import { errorHandler } from '../../middleware/error.js';
 import { deleteExpiredFileById } from '../../workers/conversion.js';
 import { jobsRouter } from './routes.js';
+import { preparePayAtShopOrder } from '../queue/engine.js';
 
 const dbReady = await (async () => {
   try {
@@ -77,6 +78,17 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
   const orderOn = async (fileId: string) => {
     const res = await call('/api/jobs', { method: 'POST', body: { fileId, specs, mode: 'instant' } });
     return { res, body: (await res.json()) as { job?: { id: string }; error?: string } };
+  };
+  /** A second job on the same file, created directly (the API refuses a duplicate active order). */
+  const extraJobOn = async (fileId: string) => {
+    const job = await prisma.job.create({
+      data: {
+        shopId, studentId, fileId, specs, pagesPerCopy: 2, priceBreakdown: {}, totalPaise: 500,
+        paymentProvider: 'pay_at_shop',
+      },
+    });
+    await preparePayAtShopOrder(job.id);
+    return { res: { status: 201 }, body: { job: { id: job.id } } as { job?: { id: string }; error?: string } };
   };
   const fileRow = (id: string) => prisma.uploadedFile.findUniqueOrThrow({ where: { id } });
 
@@ -131,9 +143,9 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
   it('cancelling one of two active jobs does not start deletion; cancelling the last does (10 min)', async () => {
     const file = await newFile();
     const a = await orderOn(file.id);
-    const b = await orderOn(file.id);
+    const b = await extraJobOn(file.id);
     expect(a.res.status).toBe(201);
-    expect(b.res.status).toBe(201); // reuse of an unprinted file is allowed
+    expect(b.res.status).toBe(201);
 
     expect((await call(`/api/jobs/${a.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
     const afterFirst = await fileRow(file.id);
@@ -151,7 +163,7 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
   it('a verified print does not schedule deletion while another job on the file is active', async () => {
     const file = await newFile();
     const printed = await orderOn(file.id);
-    const other = await orderOn(file.id);
+    const other = await extraJobOn(file.id);
     // simulate the physical print of job 1 (state set directly: fixture only)
     await prisma.job.update({
       where: { id: printed.body.job!.id },
@@ -190,7 +202,7 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
   it('the hard-deadline sweep considers ALL jobs: defers while one is active, deletes once none is', async () => {
     const file = await newFile();
     const a = await orderOn(file.id);
-    const b = await orderOn(file.id);
+    const b = await extraJobOn(file.id);
     await call(`/api/jobs/${a.body.job!.id}/cancel`, { method: 'POST' });
     await prisma.uploadedFile.update({ where: { id: file.id }, data: { deleteAfter: new Date(Date.now() - 1_000) } });
 
@@ -211,6 +223,43 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     await orderOn(file.id);
     await scheduleFileDeletion(file.id);
     expect((await fileRow(file.id)).deletionScheduledAt).toBeNull();
+  });
+
+  describe('double submit (D4)', () => {
+    it('a second active order for the same student+file+shop is refused with a friendly 409', async () => {
+      const file = await newFile();
+      const first = await orderOn(file.id);
+      expect(first.res.status).toBe(201);
+      const second = await orderOn(file.id);
+      expect(second.res.status).toBe(409);
+      expect(second.body.error).toMatch(/already have an active order/i);
+      expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(1);
+    });
+
+    it('parallel double submit creates exactly one job', async () => {
+      const file = await newFile();
+      const results = await Promise.all([orderOn(file.id), orderOn(file.id), orderOn(file.id)]);
+      expect(results.filter((r) => r.res.status === 201)).toHaveLength(1);
+      expect(results.filter((r) => r.res.status === 409)).toHaveLength(2);
+      expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(1);
+    });
+
+    it('an Idempotency-Key replays the first result instead of creating another job', async () => {
+      const file = await newFile();
+      const key = randomUUID();
+      const post = () =>
+        fetch(`${base}/api/jobs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'idempotency-key': key },
+          body: JSON.stringify({ fileId: file.id, specs, mode: 'instant' }),
+        });
+      const a = await post();
+      const b = await post();
+      expect(a.status).toBe(201);
+      expect(b.status).toBe(200);
+      expect(((await b.json()) as { job: { id: string } }).job.id).toBe(((await a.json()) as { job: { id: string } }).job.id);
+      expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(1);
+    });
   });
 
   describe('receipts', () => {

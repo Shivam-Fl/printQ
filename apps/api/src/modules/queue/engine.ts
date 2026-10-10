@@ -26,6 +26,8 @@ import { runInBackground } from '../../lib/background.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
 const MAX_LOCATION_AGE_MS = 90_000;
+export const FUTURE_LOCATION_MESSAGE =
+  'Your phone’s clock or location time looks wrong (it is in the future). Fix the date and time in your phone settings, then check in again.';
 const MAX_LOCATION_ACCURACY_M = 100;
 
 export interface ArrivalProof extends Coordinates {
@@ -55,6 +57,8 @@ export interface JobLiveMetrics {
 }
 
 const NOT_IN_LINE: JobLiveMetrics = { position: null, etaMinutes: null, band: null, revealDeadlineAt: null };
+/** Fallback when the post-commit queue read failed: the client refetches position/band. */
+const NOT_IN_LINE_QUEUED = NOT_IN_LINE;
 
 /** Current student-facing queue position/ETA/band, also used as a socket fallback. */
 export async function getJobLiveMetrics(jobId: string): Promise<JobLiveMetrics> {
@@ -117,7 +121,7 @@ export async function recommendPrinter(
  */
 export async function emitQueueUpdate(shopId: string): Promise<void> {
   const reconciled = await reconcileShopQueue(shopId);
-  await reconciled.dispatchNotifications();
+  await reconciled.dispatched;
   publishQueueSnapshots(shopId, reconciled.queue);
 }
 
@@ -278,7 +282,10 @@ export async function checkInJob(
   if (!paymentReady) throw conflict('This order is not prepared for counter payment yet');
 
   const locationAge = Date.now() - arrival.measuredAt.getTime();
-  if (locationAge < -10_000 || locationAge > MAX_LOCATION_AGE_MS) {
+  if (locationAge < -10_000) {
+    throw conflict(FUTURE_LOCATION_MESSAGE);
+  }
+  if (locationAge > MAX_LOCATION_AGE_MS) {
     throw conflict('Your location reading is stale. Check your location again at the shop entrance.');
   }
   if (shop?.latitude == null || shop.longitude == null) {
@@ -287,7 +294,7 @@ export async function checkInJob(
   const requiredAccuracyM = Math.min(MAX_LOCATION_ACCURACY_M, shop.checkInRadiusM);
   if (arrival.accuracyM > requiredAccuracyM) {
     throw conflict(
-      `Your phone location is accurate to about ${Math.round(arrival.accuracyM)} m, but this shop uses a ${shop.checkInRadiusM} m check-in zone. Enable precise location near the entrance and retry.`,
+      `Your phone location is accurate to about ${Math.round(arrival.accuracyM)} m, but check-in needs ${requiredAccuracyM} m or better (this shop’s check-in zone is ${shop.checkInRadiusM} m). Enable precise location near the entrance and retry.`,
     );
   }
   const arrivalDistanceM = distanceMeters(arrival, {
@@ -353,7 +360,7 @@ export async function checkInJob(
   // after the response: FCM / Web Push delivery is network I/O that used to
   // hold the request for seconds. The transition above (won by exactly one
   // caller) is the single trigger, and eventKeys keep delivery idempotent.
-  const checkedInNotified = runInBackground('check-in-notify', async () => {
+  runInBackground('check-in-notify', async () => {
     publishEvent(`shop:${job.shopId}`, 'queue:arrival', { jobId: job.id });
     await notifyStudent(job.studentId, {
       title: 'Checked in at the shop ✓',
@@ -363,15 +370,21 @@ export async function checkInJob(
     });
   });
 
-  // The only queue work on the request path: win any reveal (short advisory
-  // lock) and read the queue so the response carries the new place directly.
-  const reconciled = await reconcileShopQueue(job.shopId);
-  runInBackground('check-in-queue-fanout', async () => {
-    await checkedInNotified; // "checked in" always precedes "your turn"
-    await reconciled.dispatchNotifications();
-    publishQueueSnapshots(job.shopId, reconciled.queue);
-  });
-  return { ...updated, live: liveMetricsFromQueue(reconciled.queue, job.id) };
+  // The check-in is COMMITTED. From here nothing may turn it into an error:
+  // the reveal pass is best-effort (coalesced per shop, long tx timeouts) and
+  // the 10 s sweeper is the backstop if it fails.
+  try {
+    // Wins any reveal (short advisory lock) and reads the queue so the
+    // response carries the new place; notifications are dispatched by the pass
+    // itself, in the background, exactly once.
+    const reconciled = await reconcileShopQueue(job.shopId);
+    runInBackground('check-in-queue-fanout', async () => publishQueueSnapshots(job.shopId, reconciled.queue));
+    return { ...updated, live: liveMetricsFromQueue(reconciled.queue, job.id) };
+  } catch (err) {
+    logger.error({ err, jobId: job.id, shopId: job.shopId }, 'check_in_post_commit_sync_failed');
+    runInBackground('check-in-queue-retry', () => emitQueueUpdate(job.shopId));
+    return { ...updated, live: NOT_IN_LINE_QUEUED };
+  }
 }
 
 export type AbsentReason = 'staff' | 'grace_expired';

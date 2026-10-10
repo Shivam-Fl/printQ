@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { parsePageRange } from '@printq/shared';
-import { API_URL, api, getToken, rupees } from '../../api.js';
+import { ApiError, api, rupees } from '../../api.js';
+import { createLatestRequest, isAbortError } from '../../lib/latestRequest.js';
 import { enablePush, pushPermission } from '../../push.js';
 import Topbar from '../../components/Topbar.js';
 
@@ -32,6 +33,9 @@ interface Quote {
   totalPaise: number;
 }
 
+// pdf.js is ~400 KB: load it only when this screen is opened.
+const PdfPreview = lazy(() => import('../../components/PdfPreview.js'));
+
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -45,7 +49,8 @@ export default function NewJob() {
   const [mode, setMode] = useState<'instant' | 'scheduled'>('instant');
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
   const [pages, setPages] = useState<number | null>(null);
-  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoted, setQuoted] = useState<{ key: string; quote: Quote } | null>(null);
+  const [quoteErrorKey, setQuoteErrorKey] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -60,8 +65,14 @@ export default function NewJob() {
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [couponError, setCouponError] = useState('');
 
-  const token = getToken('student');
-  const previewUrl = `${API_URL}/api/files/${fileId}/preview?token=${encodeURIComponent(token ?? '')}`;
+  const quoteKey = specs ? JSON.stringify([specs, appliedCoupon]) : '';
+  // The quote is only trusted while it answers EXACTLY the options on screen.
+  const quoteCurrent = quoted !== null && quoted.key === quoteKey;
+  const quoteFailed = quoteErrorKey !== null && quoteErrorKey === quoteKey;
+  const quote = quoteCurrent ? quoted.quote : null;
+  const latestQuote = useRef(createLatestRequest());
+  const submitting = useRef(false);
+  const idemKey = useRef(crypto.randomUUID());
 
   // load the shop's offered options and seed defaults
   useEffect(() => {
@@ -81,30 +92,39 @@ export default function NewJob() {
       .catch(() => setError('Could not load this shop.'));
   }, [slug]);
 
-  const refreshQuote = useCallback(
-    async (s: Specs, couponCode: string | null) => {
-      try {
-        const res = await api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
-          method: 'POST',
-          role: 'student',
-          body: couponCode ? { fileId, specs: s, couponCode } : { fileId, specs: s },
-        });
-        setQuote(res.quote);
-        setPages(res.pages);
-        setError('');
-      } catch (err) {
-        setQuote(null);
-        setError(err instanceof Error ? err.message : 'Could not price this job');
-      }
-    },
-    [fileId],
-  );
-
+  // Debounced (250 ms) quote refresh with abort + sequencing: the total shown
+  // always belongs to the options on screen, never to an older request.
   useEffect(() => {
     if (!specs) return;
-    const t = setTimeout(() => void refreshQuote(specs, appliedCoupon), 300);
-    return () => clearTimeout(t);
-  }, [specs, appliedCoupon, refreshQuote]);
+    const key = JSON.stringify([specs, appliedCoupon]);
+    const guard = latestQuote.current;
+    const t = setTimeout(() => {
+      const ticket = guard.begin();
+      api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
+        method: 'POST',
+        role: 'student',
+        signal: ticket.signal,
+        body: appliedCoupon ? { fileId, specs, couponCode: appliedCoupon } : { fileId, specs },
+      })
+        .then((res) => {
+          if (!ticket.isCurrent()) return;
+          setQuoted({ key, quote: res.quote });
+          setQuoteErrorKey(null);
+          setPages(res.pages);
+          setError('');
+        })
+        .catch((err) => {
+          if (isAbortError(err) || !ticket.isCurrent()) return;
+          setQuoted(null);
+          setQuoteErrorKey(key);
+          setError(err instanceof Error ? err.message : 'Could not price this job');
+        });
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      guard.cancel();
+    };
+  }, [specs, appliedCoupon, fileId]);
 
   async function applyCoupon() {
     if (!specs || !couponInput.trim()) return;
@@ -115,8 +135,9 @@ export default function NewJob() {
         role: 'student',
         body: { fileId, specs, couponCode: couponInput.trim() },
       });
-      setQuote(res.quote);
-      setAppliedCoupon(couponInput.trim());
+      const code = couponInput.trim();
+      setQuoted({ key: JSON.stringify([specs, code]), quote: res.quote });
+      setAppliedCoupon(code);
     } catch (err) {
       setCouponError(err instanceof Error ? err.message : 'Invalid coupon');
     }
@@ -162,7 +183,8 @@ export default function NewJob() {
   }, [pageMode, rangeAdvanced, rangeFrom, rangeTo, rawRange, pages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function payAndQueue() {
-    if (!specs) return;
+    if (!specs || busy || submitting.current) return; // double-tap guard (state is async)
+    submitting.current = true;
     setBusy(true);
     setError('');
     try {
@@ -172,14 +194,18 @@ export default function NewJob() {
       const res = await api<{
         job: { id: string };
         checkout: { mode: 'pay_at_shop'; amountPaise: number };
-      }>('/api/jobs', { method: 'POST', role: 'student', body });
+      }>('/api/jobs', { method: 'POST', role: 'student', body, idempotencyKey: idemKey.current });
 
       if (pushPermission() === 'default') void enablePush();
 
       navigate(`/jobs/${res.job.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Payment failed');
+      // A real answer ends this attempt; a network failure keeps the key so a
+      // retry cannot create a second order if the first one actually landed.
+      if (err instanceof ApiError) idemKey.current = crypto.randomUUID();
+      setError(err instanceof Error ? err.message : 'Could not prepare the order');
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -310,15 +336,25 @@ export default function NewJob() {
         <aside className="checkout-sidebar">
           <div className="preview-card">
             <div className="preview-card-head"><strong>Print preview</strong><span>{pages ? `${pages} pages` : 'Preparing…'}</span></div>
-            <iframe className="preview-frame" src={previewUrl} title="Print preview" />
+            <Suspense fallback={<div className="pdf-status" role="status">Preparing preview…</div>}>
+              <PdfPreview fileId={fileId} totalPages={pages} pageRange={specs.pageRange} />
+            </Suspense>
           </div>
           <div className="checkout-total">
-            {quote ? (
-              <div className="receipt">
-                <div className="line"><span>Selected print</span><span>{quote.pagesPerCopy * specs.copies} pages</span></div>
-                <div className="line total"><span>Total to pay</span><span>{rupees(quote.totalPaise)}</span></div>
+            <div className="receipt" aria-busy={!quote && !quoteFailed}>
+              <div className="line">
+                <span>Selected print</span>
+                <span>{quote ? `${quote.pagesPerCopy * specs.copies} pages` : <span className="total-loading" aria-hidden>···</span>}</span>
               </div>
-            ) : <p style={{ margin: 0 }}>Updating total…</p>}
+              <div className="line total">
+                <span>Total to pay</span>
+                <span aria-live="polite">
+                  {quote ? rupees(quote.totalPaise)
+                    : quoteFailed ? <span>Unavailable</span>
+                    : <span className="total-loading" role="status">Updating…</span>}
+                </span>
+              </div>
+            </div>
 
             {appliedCoupon ? (
               <p style={{ margin: '12px 0 0', color: '#b9c2d2', fontSize: '.82rem' }}>Coupon <strong className="mono">{appliedCoupon}</strong> applied. <button className="text-button" onClick={() => { setAppliedCoupon(null); setCouponInput(''); }}>Remove</button></p>
@@ -332,6 +368,7 @@ export default function NewJob() {
             <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
               {busy
                 ? 'Preparing order…'
+                : !quote && !quoteFailed ? 'Updating total…'
                 : mode === 'scheduled' ? 'Prepare order & save arrival time' : 'Prepare order'}
             </button>
             <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>

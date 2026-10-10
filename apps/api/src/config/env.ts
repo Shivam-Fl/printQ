@@ -141,6 +141,10 @@ const envSchema = z.object({
   FILE_UNPRINTED_RETENTION_MINUTES: z.coerce.number().int().min(1).max(1_440).default(1_440),
   /// Paid orders that never arrive are refunded and closed after this window.
   PREPARED_ORDER_TTL_HOURS: z.coerce.number().int().min(24).max(720).default(168),
+  /// Interactive-transaction limits for the per-shop queue reconcile (advisory-locked).
+  /// Generous because production DB round trips can be 200+ ms.
+  QUEUE_SYNC_TX_MAX_WAIT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
+  QUEUE_SYNC_TX_TIMEOUT_MS: z.coerce.number().int().min(2_000).max(120_000).default(20_000),
   /// scheduled jobs become eligible this many minutes before their slot
   SCHEDULE_LEAD_MINUTES: z.coerce.number().int().min(0).max(60).default(10),
 

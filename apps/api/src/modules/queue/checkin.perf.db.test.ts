@@ -47,7 +47,7 @@ import { drainBackground } from '../../lib/background.js';
 import { signStudentToken } from '../../lib/tokens.js';
 import { errorHandler } from '../../middleware/error.js';
 import { jobsRouter } from '../jobs/routes.js';
-import { preparePayAtShopOrder } from './engine.js';
+import { getJobLiveMetrics, preparePayAtShopOrder } from './engine.js';
 
 const LAT = 28.6139;
 const LNG = 77.209;
@@ -191,6 +191,98 @@ describe.runIf(dbReady)('check-in request budget (database)', () => {
     expect(job.revealedAt).not.toBeNull();
     const outbox = await prisma.realtimeOutbox.count({ where: { jobId: order.jobId } });
     expect(outbox).toBeGreaterThanOrEqual(2);
+  });
+
+  it('6 parallel check-ins from different students: all 200, unique positions, reveals == capacity, no duplicate notifications (D1)', async () => {
+    const shop = await prisma.shop.create({
+      data: {
+        slug: `par-${randomUUID().slice(0, 8)}`, name: 'Parallel shop', address: 'Test lane',
+        latitude: LAT, longitude: LNG, rateCard: {}, counterCapacity: 3,
+      },
+    });
+    const printer = await prisma.printer.create({
+      data: { shopId: shop.id, label: 'P', paperSizesLoaded: ['A4'], colorSupport: false, status: 'online' },
+    });
+    await prisma.agent.create({
+      data: {
+        shopId: shop.id, machineLabel: 'PC', tokenHash: randomUUID(), status: 'online',
+        connectedPrinterIds: [printer.id], lastHeartbeatAt: new Date(),
+      },
+    });
+    try {
+      const orders = [];
+      for (let i = 0; i < 6; i += 1) orders.push(await prepared(shop.id));
+      probe.notes.length = 0;
+      timerAdd.mockClear();
+
+      const t0 = performance.now();
+      const timed: number[] = [];
+      const results = await Promise.all(
+        orders.map(async (o) => {
+          const r = await checkIn(o.jobId, o.token);
+          timed.push(Math.round(performance.now() - t0));
+          return r;
+        }),
+      );
+      if (process.env.PRINTQ_PERF_OUT) {
+        appendFileSync(process.env.PRINTQ_PERF_OUT, `6 parallel check-ins: response times ms ${timed.sort((a, b) => a - b).join(',')}\n`);
+      }
+      const bodies = (await Promise.all(results.map((r) => r.json()))) as {
+        job: { position: number | null; band: string | null };
+      }[];
+      expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 200]);
+      // The response itself carries the committed place (never a bare 500).
+      expect(bodies.every((b) => b.job.position !== null)).toBe(true);
+
+      await drainBackground();
+      const rows = await prisma.job.findMany({ where: { shopId: shop.id }, orderBy: { queuedAt: 'asc' } });
+      expect(rows.every((r) => r.status === 'queued')).toBe(true);
+      const finalPositions = await Promise.all(orders.map((o) => getJobLiveMetrics(o.jobId)));
+      expect(new Set(finalPositions.map((m) => m.position)).size).toBe(6);
+      expect(finalPositions.map((m) => m.position).sort()).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(rows.filter((r) => r.revealedAt !== null)).toHaveLength(3);
+      // exactly one "your turn" per revealed student, one "coming up" per arriving one, one "checked in" each
+      expect(probe.notes.filter((n) => n.title === 'It’s your turn')).toHaveLength(3);
+      expect(probe.notes.filter((n) => n.title === 'Your turn is coming up')).toHaveLength(3);
+      expect(probe.notes.filter((n) => n.title.startsWith('Checked in'))).toHaveLength(6);
+      const keys = probe.notes.map((n) => n.eventKey);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(timerAdd).toHaveBeenCalledTimes(3);
+    } finally {
+      const jobs = await prisma.job.findMany({ where: { shopId: shop.id }, select: { id: true } });
+      const ids = jobs.map((j) => j.id);
+      await prisma.realtimeOutbox.deleteMany({ where: { jobId: { in: ids } } });
+      await prisma.jobEvent.deleteMany({ where: { jobId: { in: ids } } });
+      await prisma.job.deleteMany({ where: { id: { in: ids } } });
+      await prisma.agent.deleteMany({ where: { shopId: shop.id } });
+      await prisma.printer.deleteMany({ where: { shopId: shop.id } });
+      await prisma.uploadedFile.deleteMany({ where: { shopId: shop.id } });
+      await prisma.shop.delete({ where: { id: shop.id } });
+    }
+  });
+
+  it('a failing post-commit queue sync never turns a committed check-in into a 500 (D1)', async () => {
+    const order = await prepared(shopId);
+    // Simulate the production failure: the advisory-locked reconcile transaction
+    // (the 2nd interactive transaction of a check-in) times out.
+    const original = prisma.$transaction.bind(prisma) as (...a: unknown[]) => Promise<unknown>;
+    let calls = 0;
+    const spy = vi.spyOn(prisma, '$transaction').mockImplementation(((...args: unknown[]) => {
+      calls += 1;
+      if (calls === 2) return Promise.reject(new Error('Transaction API error: timeout'));
+      return original(...args);
+    }) as never);
+    let res: Response;
+    try {
+      res = await checkIn(order.jobId, order.token);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(res.status).toBe(200);
+    const row = await prisma.job.findUniqueOrThrow({ where: { id: order.jobId } });
+    expect(row.status).toBe('queued');
+    await drainBackground();
   });
 
   it('concurrent repeated check-ins reveal and notify exactly once', async () => {
