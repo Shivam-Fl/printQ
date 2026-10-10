@@ -55,8 +55,9 @@ This file records the decisions so future sessions (human or AI) don't undo them
 ## Platform hygiene
 
 - helmet, strict CORS allowlist from env (wildcard rejected in production),
-  Redis-backed tiered rate limits (OTP request 5/min, verify 10/min, login 5/min,
-  upload 10/min, general 300/min), 1 MB JSON body cap.
+  Redis-backed tiered rate limits (OTP request 5/min, verify 10/min, login 5/min per IP;
+  signed-in traffic per user: general 300/min, upload 10/min; per-IP flood ceilings 3000/min and
+  120/min uploads - see 'Rate limits' below), 1 MB JSON body cap.
 - Bearer tokens (no cookies) → classic CSRF doesn't apply; CORS still enforced.
 - Errors: `HttpError` messages pass through; everything else returns a generic 500 and
   logs full detail server-side (pino, structured JSON, secrets redacted).
@@ -134,3 +135,19 @@ This is a pilot-stage project. Report issues to the repo owner directly.
 - Settlement requires a verified Razorpay webhook signature (HMAC-SHA256 over the raw body; an empty secret is refused) with matching order, amount, currency and notes, or a server-side provider fetch. The Checkout callback alone settles nothing.
 - `FEE_PAYMENT_PROVIDER=mock` and Razorpay TEST keys are refused at boot in production; live keys are refused outside production unless explicitly allowed.
 - All fee queries are scoped by `shopId` in the WHERE clause; fee routes use `requireShopOwner`; the admin lift-block action is audited and requires a reason.
+
+## Rate limits
+
+- Authenticated traffic is limited per **principal**: the signed student / shop user / admin id from a
+  *verified* session token, or the hash of an agent token. A forged or missing token is not a principal and
+  falls back to the client IP bucket, so it can neither dodge nor spend someone else's budget.
+- Defaults (env, per minute): `RATE_LIMIT_GENERAL_PER_USER=300`, `RATE_LIMIT_UPLOAD_PER_USER=10`.
+- A per-IP **ceiling** applies to every request as flood protection and is deliberately far higher because a campus
+  can sit behind one NAT address: `RATE_LIMIT_GENERAL_PER_IP=3000`, `RATE_LIMIT_UPLOAD_PER_IP=120`.
+  One user hopping across addresses is still limited by the per-user budget.
+- Unauthenticated, login, OTP-request/verify, Firebase-session and fee-action limiters stay strictly **per IP**
+  (brute-force protection); OTP requests also keep the database-backed per-phone limits (1/min, 10/day). The
+  counter-code failure limiter stays per (shop, IP) and per shop.
+- Every 429 carries `Retry-After` (seconds).
+- Shop coordinates are validated against a India bounding box only (accepted limitation: neighbouring countries
+  inside the box are not rejected; a polygon check was judged not worth the complexity).

@@ -6,6 +6,8 @@ export class HttpError extends Error {
     public readonly status: number,
     message: string,
     public readonly code?: string,
+    /** Extra response headers (e.g. Retry-After on a 429). */
+    public readonly headers?: Record<string, string>,
   ) {
     super(message);
     this.name = 'HttpError';
@@ -18,7 +20,9 @@ export const forbidden = (msg = 'Forbidden') => new HttpError(403, msg);
 // 404 for missing AND not-owned resources — never confirm existence (IDOR hygiene)
 export const notFound = (msg = 'Not found') => new HttpError(404, msg);
 export const conflict = (msg: string) => new HttpError(409, msg);
-export const tooMany = (msg = 'Too many requests') => new HttpError(429, msg);
+/** 429 — always carries Retry-After (seconds) so clients and proxies back off correctly. */
+export const tooMany = (msg = 'Too many requests', retryAfterSeconds = 60) =>
+  new HttpError(429, msg, undefined, { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterSeconds))) });
 
 /** Wrap async route handlers so rejections reach the global error handler. */
 export function asyncHandler(

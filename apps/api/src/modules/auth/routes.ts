@@ -58,7 +58,7 @@ authRouter.post(
       where: { phone, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
     });
     if (sentToday >= MAX_LOGIN_OTP_SENDS_PER_PHONE_PER_DAY) {
-      throw tooMany('Too many codes requested for this number today');
+      throw tooMany('Too many codes requested for this number today', 3_600);
     }
 
     const otp = generateOtp();
