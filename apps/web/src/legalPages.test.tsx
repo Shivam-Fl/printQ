@@ -78,10 +78,12 @@ describe('supplied contact details', () => {
     const support = at('/support');
     expect(support).toContain('mailto:admin@printqs.com');
     expect(support).toContain('href="tel:+917822875508"');
-    expect(support).toContain('Shivam Mishra');
+    expect(support).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
     expect(support).toContain('Bhiwandi, Maharashtra, India');
     const privacy = at('/privacy');
-    expect(privacy).toContain('Shivam Mishra');
+    expect(privacy).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
+    expect(at('/terms')).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
+    expect(at('/refunds')).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
     expect(privacy).toContain('Bhiwandi, Maharashtra');
     expect(legal.GOVERNING_LAW_CITY).toBeNull();
     expect(at('/terms')).not.toContain('courts at');

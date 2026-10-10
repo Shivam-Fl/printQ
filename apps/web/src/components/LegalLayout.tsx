@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { getToken } from '../api.js';
-import { LEGAL_LAST_UPDATED, LEGAL_LINKS, LEGAL_PRODUCT_NAME } from '../lib/legal.js';
+import { LEGAL_ENTITY_DESCRIPTION, LEGAL_LAST_UPDATED,LEGAL_LINKS, LEGAL_PRODUCT_NAME } from '../lib/legal.js';
 import Topbar from './Topbar.js';
 
 /** Where "back" should go for whoever is reading: never a dead end. */
@@ -51,7 +51,7 @@ export default function LegalLayout({
       <article className="legal-body">{children}</article>
       <footer className="legal-foot">
         <PolicyLinks current={path} />
-        <span>{LEGAL_PRODUCT_NAME}</span>
+        <span>{LEGAL_ENTITY_DESCRIPTION ?? LEGAL_PRODUCT_NAME}</span>
       </footer>
     </main>
   );
