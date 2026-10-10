@@ -19,9 +19,20 @@ import { applyTransition, type ActorType } from '../jobs/transitions.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { distanceMeters, isWithinRadius, type Coordinates } from '../../lib/geo.js';
-import { reachablePrinterIds } from '../shops/availability.js';
 import { isCounterCodeAvailable } from './visibility.js';
-import { loadShopQueue, reconcileShopQueue, syncShopQueue, type ShopQueue } from './bands.js';
+import {
+  ACTIVE_QUEUE_JOBS,
+  applyPassToQueue,
+  buildShopQueue,
+  loadShopQueue,
+  needsReconcile,
+  rebuildQueue,
+  reconcileShopQueue,
+  revealPass,
+  sortQueueJobs,
+  syncShopQueue,
+  type ShopQueue,
+} from './bands.js';
 import { runInBackground } from '../../lib/background.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
@@ -62,9 +73,17 @@ const NOT_IN_LINE_QUEUED = NOT_IN_LINE;
 
 /** Current student-facing queue position/ETA/band, also used as a socket fallback. */
 export async function getJobLiveMetrics(jobId: string): Promise<JobLiveMetrics> {
-  const target = await prisma.job.findUnique({ where: { id: jobId }, select: { shopId: true, status: true } });
+  // One JOIN statement: the job's status plus its shop's settings, printers and line.
+  const target = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: {
+      status: true,
+      shop: { select: { counterCapacity: true, revealGraceSeconds: true, printers: true, jobs: ACTIVE_QUEUE_JOBS } },
+    },
+    relationLoadStrategy: 'join',
+  });
   if (!target || !ACTIVE_QUEUE_STATUSES.includes(target.status as JobStatus)) return NOT_IN_LINE;
-  return liveMetricsFromQueue(await loadShopQueue(prisma, target.shopId), jobId);
+  return liveMetricsFromQueue(buildShopQueue(target.shop, target.shop.printers, target.shop.jobs), jobId);
 }
 
 /** A job's position/ETA/band from an already-loaded shop queue (no extra queries). */
@@ -88,28 +107,43 @@ export async function recommendPrinter(
   pagesPerCopy: number,
   excludeJobId?: string,
 ) {
-  const [printers, active, reachable] = await Promise.all([
-    prisma.printer.findMany({ where: { shopId } }),
-    prisma.job.findMany({
-      where: {
-        shopId,
-        status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] },
-        ...(excludeJobId ? { id: { not: excludeJobId } } : {}),
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: {
+      printers: true,
+      agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
+      jobs: {
+        where: { status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] } },
+        select: { id: true, assignedPrinterId: true, pagesPerCopy: true, specs: true },
       },
-      select: { id: true, assignedPrinterId: true, pagesPerCopy: true, specs: true },
-    }),
-    reachablePrinterIds(shopId),
-  ]);
+    },
+    relationLoadStrategy: 'join',
+  });
+  return rankFromSnapshot(shop?.printers ?? [], shop?.agents ?? [], shop?.jobs ?? [], specs, pagesPerCopy, excludeJobId);
+}
+
+/** Pure ranking over rows a caller already loaded (no I/O). Online agents define which printers are reachable. */
+export function rankFromSnapshot(
+  printers: Printer[],
+  onlineAgents: { connectedPrinterIds: string[] }[],
+  activeJobs: { id: string; assignedPrinterId: string | null; pagesPerCopy: number; specs: unknown }[],
+  specs: JobSpecs,
+  pagesPerCopy: number,
+  excludeJobId?: string,
+) {
+  const reachable = new Set(onlineAgents.flatMap((agent) => agent.connectedPrinterIds));
   return rankPrinters(
     printers.filter((printer) => reachable.has(printer.id)).map(toProfile),
     specs,
     pagesPerCopy,
-    active.map((j) => ({
-      id: j.id,
-      assignedPrinterId: j.assignedPrinterId,
-      pages: j.pagesPerCopy,
-      copies: (j.specs as unknown as JobSpecs).copies,
-    })),
+    activeJobs
+      .filter((j) => j.id !== excludeJobId)
+      .map((j) => ({
+        id: j.id,
+        assignedPrinterId: j.assignedPrinterId,
+        pages: j.pagesPerCopy,
+        copies: (j.specs as unknown as JobSpecs).copies,
+      })),
   );
 }
 
@@ -262,16 +296,33 @@ export async function checkInJob(
   studentId: string,
   arrival: ArrivalProof,
 ): Promise<Job & { live: JobLiveMetrics }> {
-  // One round trip: the job (ownership in the WHERE clause) and the shop's
-  // check-in geometry come back together via a JOIN.
+  // ONE round trip: the job (ownership in the WHERE clause), the shop's
+  // check-in geometry, its printers, online agents and the current line all
+  // come back together via a JOIN. Everything below decides from this snapshot.
   const job = await prisma.job.findFirst({
     where: { id: jobId, studentId },
-    include: { shop: { select: { latitude: true, longitude: true, checkInRadiusM: true } } },
+    include: {
+      student: { select: { id: true, name: true } },
+      shop: {
+        select: {
+          latitude: true,
+          longitude: true,
+          checkInRadiusM: true,
+          counterCapacity: true,
+          revealGraceSeconds: true,
+          printers: true,
+          agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
+          jobs: ACTIVE_QUEUE_JOBS,
+        },
+      },
+    },
     relationLoadStrategy: 'join',
   });
   if (!job) throw notFound();
-  const { shop, ...jobRow } = job;
-  if (job.status === 'queued') return { ...jobRow, live: await getJobLiveMetrics(job.id) };
+  const { shop, student, ...jobRow } = job;
+  if (job.status === 'queued') {
+    return { ...jobRow, live: liveMetricsFromQueue(buildShopQueue(shop, shop.printers, shop.jobs), job.id) };
+  }
   if (job.status !== 'awaiting_arrival' && job.status !== 'no_show' && job.status !== 'requeued') {
     throw conflict('This order cannot join the live line in its current state');
   }
@@ -288,7 +339,7 @@ export async function checkInJob(
   if (locationAge > MAX_LOCATION_AGE_MS) {
     throw conflict('Your location reading is stale. Check your location again at the shop entrance.');
   }
-  if (shop?.latitude == null || shop.longitude == null) {
+  if (shop.latitude == null || shop.longitude == null) {
     throw conflict('This shop has not enabled secure arrival check-in. Show your counter code to staff.');
   }
   const requiredAccuracyM = Math.min(MAX_LOCATION_ACCURACY_M, shop.checkInRadiusM);
@@ -319,7 +370,7 @@ export async function checkInJob(
   }
 
   const specs = job.specs as unknown as JobSpecs;
-  const { recommended } = await recommendPrinter(job.shopId, specs, job.pagesPerCopy);
+  const { recommended } = rankFromSnapshot(shop.printers, shop.agents, shop.jobs, specs, job.pagesPerCopy, job.id);
   if (!recommended) {
     throw conflict('No compatible connected printer is available right now. Ask the shop before joining the line.');
   }
@@ -374,12 +425,30 @@ export async function checkInJob(
   // the reveal pass is best-effort (coalesced per shop, long tx timeouts) and
   // the 10 s sweeper is the backstop if it fails.
   try {
-    // Wins any reveal (short advisory lock) and reads the queue so the
-    // response carries the new place; notifications are dispatched by the pass
-    // itself, in the background, exactly once.
-    const reconciled = await reconcileShopQueue(job.shopId);
-    runInBackground('check-in-queue-fanout', async () => publishQueueSnapshots(job.shopId, reconciled.queue));
-    return { ...updated, live: liveMetricsFromQueue(reconciled.queue, job.id) };
+    // The student's place comes from the snapshot read above plus this
+    // check-in (always the back of the line) - no second read. Only if that
+    // line implies a reveal / "coming up" do we run the locked pass (which
+    // wins each reveal exactly once; notifications are dispatched by the pass
+    // itself, in the background).
+    let queue = buildShopQueue(
+      shop,
+      shop.printers,
+      sortQueueJobs([...shop.jobs.filter((j) => j.id !== job.id), { ...updated, student }]),
+    );
+    if (needsReconcile(queue)) {
+      const pass = await revealPass(job.shopId);
+      queue = applyPassToQueue(queue, pass) ? rebuildQueue(queue) : await loadShopQueue(prisma, job.shopId);
+      const own = queue.entries.find((e) => e.job.id === job.id);
+      // Our own reveal was won by a concurrent pass: reload so the response carries its deadline.
+      if (own?.band === 'revealed' && own.job.revealedAt === null) queue = await loadShopQueue(prisma, job.shopId);
+    }
+    // Authoritative fan-out (fresh read) for the dashboard and every queued
+    // student; also repairs the snapshot if a concurrent writer raced us.
+    runInBackground('check-in-queue-fanout', async () => {
+      const reconciled = await reconcileShopQueue(job.shopId);
+      publishQueueSnapshots(job.shopId, reconciled.queue);
+    });
+    return { ...updated, live: liveMetricsFromQueue(queue, job.id) };
   } catch (err) {
     logger.error({ err, jobId: job.id, shopId: job.shopId }, 'check_in_post_commit_sync_failed');
     runInBackground('check-in-queue-retry', () => emitQueueUpdate(job.shopId));
@@ -430,24 +499,35 @@ async function markAbsent(
   );
   if (!updated) return null;
 
-  await notifyStudent(job.studentId, {
-    title: 'You missed your turn',
-    body: 'Check in again to get a new place. Your paid order is still safe.',
-    url: `/jobs/${job.id}`,
-    eventKey: `absent-${job.id}-${job.checkInCount}`,
-  });
-  publishEvent(`student:${job.studentId}`, 'job:update', {
-    jobId: job.id,
-    status: updated.status,
-    position: null,
-    etaMinutes: null,
-    band: null,
-    revealDeadlineAt: null,
-    counterCodeAvailable: false,
-    absent: true,
-  });
-  // Closes the gap: recomputes bands, reveals + notifies the next student.
-  await emitQueueUpdate(job.shopId);
+  // The state change is committed (with its audit event + outbox row), so the
+  // notification, the student's socket update and the queue re-sync are pure
+  // follow-ups. They run in parallel and - for the staff button - after the
+  // response, so the counter does not wait on FCM/Web Push or extra round trips.
+  // eventKeys keep delivery idempotent; the 10 s sweeper repairs a missed sync.
+  const followUp = async () => {
+    publishEvent(`student:${job.studentId}`, 'job:update', {
+      jobId: job.id,
+      status: updated.status,
+      position: null,
+      etaMinutes: null,
+      band: null,
+      revealDeadlineAt: null,
+      counterCodeAvailable: false,
+      absent: true,
+    });
+    await Promise.all([
+      notifyStudent(job.studentId, {
+        title: 'You missed your turn',
+        body: 'Check in again to get a new place. Your paid order is still safe.',
+        url: `/jobs/${job.id}`,
+        eventKey: `absent-${job.id}-${job.checkInCount}`,
+      }),
+      // Closes the gap: recomputes bands, reveals + notifies the next student.
+      emitQueueUpdate(job.shopId),
+    ]);
+  };
+  if (actor.type === 'shop') runInBackground('mark-absent-followup', followUp);
+  else await followUp();
   return updated;
 }
 
@@ -631,15 +711,21 @@ export async function expireStalePreparedOrders(): Promise<void> {
 }
 
 /** After OTP verification: dispatch the print command to agents that can reach the printer. */
-export async function dispatchJob(job: Job, actor: { type: ActorType; id?: string }): Promise<void> {
+export async function dispatchJob(
+  job: Job,
+  actor: { type: ActorType; id?: string },
+  /** Online agents the caller already loaded (saves a round trip); omitted = look them up. */
+  preloadedOnlineAgents?: { id: string; connectedPrinterIds: string[] }[],
+): Promise<void> {
   if (!job.assignedPrinterId) {
     logger.error({ jobId: job.id }, 'dispatch_without_printer');
     return;
   }
-  const agents = await prisma.agent.findMany({
-    where: { shopId: job.shopId, connectedPrinterIds: { has: job.assignedPrinterId } },
-  });
-  const onlineAgents = agents.filter((agent) => agent.status === 'online');
+  const printerId = job.assignedPrinterId;
+  const registered: { id: string; connectedPrinterIds: string[]; status?: string }[] = preloadedOnlineAgents
+    ? preloadedOnlineAgents.filter((agent) => agent.connectedPrinterIds.includes(printerId))
+    : await prisma.agent.findMany({ where: { shopId: job.shopId, connectedPrinterIds: { has: printerId } } });
+  const onlineAgents = preloadedOnlineAgents ? registered : registered.filter((agent) => agent.status === 'online');
   if (onlineAgents.length === 0) {
     await prisma.job.updateMany({
       where: { id: job.id, status: 'otp_verified' },
@@ -650,7 +736,7 @@ export async function dispatchJob(job: Job, actor: { type: ActorType; id?: strin
       printerId: job.assignedPrinterId,
     });
     logger.warn(
-      { jobId: job.id, printerId: job.assignedPrinterId, registeredAgents: agents.length },
+      { jobId: job.id, printerId: job.assignedPrinterId, registeredAgents: registered.length },
       'no_online_agent_for_printer',
     );
     return;

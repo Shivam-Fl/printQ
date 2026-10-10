@@ -467,7 +467,7 @@ export default function Dashboard() {
       </div>
 
       <div className="section-heading"><div><h2>Physically checked in</h2><p>One shop-wide walk-in line, ordered by arrival. The first {capacity ?? 'few'} are called to the counter; if they do not arrive in time they are marked absent automatically.</p></div><span className="summary-pill">{waiting.length}</span></div>
-      <div className="table-shell">
+      <div className="table-shell" tabIndex={0} role="region" aria-label="Checked-in students">
         <table>
           <thead>
             <tr>
@@ -514,7 +514,7 @@ export default function Dashboard() {
       {prepared.length > 0 && (
         <>
           <div className="section-heading"><div><h2>Prepared, not checked in</h2><p>Remote orders are ready to find by code but do not occupy the physical line.</p></div><span className="summary-pill">{prepared.length}</span></div>
-          <div className="table-shell">
+          <div className="table-shell" tabIndex={0} role="region" aria-label="Prepared orders not checked in">
             <table>
               <thead>
                 <tr><th>Arrival plan</th><th>Student</th><th>File</th><th>Specs</th><th>Status</th></tr>
@@ -546,7 +546,7 @@ export default function Dashboard() {
       )}
 
       <div className="section-heading"><div><h2>Printing and pickup</h2><p>Jobs released at the counter. A Windows spool acknowledgement still needs staff to check the paper before it is marked printed.</p></div><span className="summary-pill">{inFlight.length}</span></div>
-      <div className="table-shell">
+      <div className="table-shell" tabIndex={0} role="region" aria-label="Printing and pickup">
         <table>
           <thead>
             <tr><th>Student</th><th>File</th><th>Printer</th><th>Status</th><th></th></tr>

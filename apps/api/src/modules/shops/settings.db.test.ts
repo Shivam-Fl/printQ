@@ -264,9 +264,35 @@ describe.runIf(dbReady)('shop settings + session revocation (database)', () => {
       });
       expect(res.status).toBe(400);
     });
-    it('does not reject a plausible non-India location (no India-only rule in the product docs)', async () => {
-      const { token } = await makeShop('coords-world');
-      expect((await patch(token, { latitude: 51.5, longitude: -0.12 })).status).toBe(200);
+    it('rejects swapped lat/lng (77.5, 28.6) and other non-India pins without touching the shop', async () => {
+      const { shop, token } = await makeShop('coords-swapped');
+      for (const body of [{ latitude: 77.5, longitude: 28.6 }, { latitude: 51.5, longitude: -0.12 }]) {
+        const res = await patch(token, body);
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(await res.json())).toContain('outside India');
+      }
+      const after = await reload(shop.id);
+      expect(after.verificationStatus).toBe('verified');
+      expect(after.latitude).toBeCloseTo(28.613939, 5);
+    });
+    it('accepts island extremes of India', async () => {
+      const { token } = await makeShop('coords-islands');
+      expect((await patch(token, { latitude: 6.75, longitude: 93.85 })).status).toBe(200);
+    });
+    it('a re-capture under 150 m is saved but keeps the shop published', async () => {
+      const { shop, token } = await makeShop('coords-jitter');
+      const res = await patch(token, { latitude: 28.613939 + 0.0009, longitude: 77.209021 }); // ~100 m
+      expect(res.status).toBe(200);
+      const after = await reload(shop.id);
+      expect(after.verificationStatus).toBe('verified');
+      expect(after.publishedAt).not.toBeNull();
+      expect(after.latitude).toBeCloseTo(28.614839, 5);
+    });
+    it('a move over 150 m (~200 m) sends the shop back to draft', async () => {
+      const { shop, token } = await makeShop('coords-move');
+      const res = await patch(token, { latitude: 28.613939 + 0.0018, longitude: 77.209021 });
+      expect(res.status).toBe(200);
+      expect((await reload(shop.id)).verificationStatus).toBe('draft');
     });
   });
 

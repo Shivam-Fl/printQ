@@ -15,7 +15,8 @@ import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.j
 import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
-import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
+import { checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
+import { runInBackground } from '../../lib/background.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
@@ -389,11 +390,18 @@ jobsRouter.post(
         : {},
     );
     if (!updated) throw conflict('Job state changed, try again');
-    await refundIfPaid(job);
-    await scheduleFileDeletion(job.fileId);
-    // a cancelled front job must not block the printer's queue
-    if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-    await emitQueueUpdate(job.shopId);
+    // The cancellation is committed. Refund, file-retention clock and the line
+    // re-sync (a cancelled front job must not block the counter) are follow-ups
+    // that would otherwise add several network round trips to the response:
+    // they run in parallel after it. Each is idempotent and has a durable
+    // backstop (the refund sweeper, the file-retention sweeper, the 10 s queue sync).
+    runInBackground('cancel-followup', () =>
+      Promise.all([
+        refundIfPaid(job),
+        scheduleFileDeletion(job.fileId),
+        emitQueueUpdate(job.shopId),
+      ]),
+    );
     res.json({ job: { id: job.id, status: updated.status } });
   }),
 );
