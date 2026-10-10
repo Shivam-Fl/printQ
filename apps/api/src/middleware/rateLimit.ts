@@ -1,21 +1,31 @@
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { env } from '../config/env.js';
-import type { NextFunction, Request, Response } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { redis } from '../lib/redis.js';
 import { tooMany } from '../lib/errors.js';
+import { hashAgentToken } from '../lib/otp.js';
+import { verifyToken } from '../lib/tokens.js';
 
 /**
  * Redis-backed tiered rate limits. Auth/OTP endpoints get tight per-IP limits
  * (brute-force protection); general API gets a generous ceiling.
  */
-function makeLimiter(prefix: string, windowMs: number, max: number, skipSuccessfulRequests = false) {
+function makeLimiter(
+  prefix: string,
+  windowMs: number,
+  max: number,
+  skipSuccessfulRequests = false,
+  keyGenerator?: (req: Request) => string,
+) {
   return rateLimit({
     windowMs,
     limit: max,
     skipSuccessfulRequests,
+    // standardHeaders also makes express-rate-limit send Retry-After on every 429
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    ...(keyGenerator ? { keyGenerator: (req: Request) => keyGenerator(req) } : {}),
     // Unit suites exercise route behavior without a networked limiter. CI's
     // simulator and every non-test process still use the shared Redis store.
     ...(env.NODE_ENV === 'test'
@@ -30,7 +40,46 @@ function makeLimiter(prefix: string, windowMs: number, max: number, skipSuccessf
   });
 }
 
-export const generalLimiter = makeLimiter('gen', 60_000, 300);
+/**
+ * Who is making this request, for rate limiting only (never for authorization):
+ * a validly SIGNED student/shop/admin session token, or an agent token hash.
+ * A forged or missing credential yields null and is limited per IP instead, so
+ * it cannot be used to dodge the limit or to spend someone else's budget.
+ */
+export function principalOf(req: Request): string | null {
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    const claims = verifyToken(auth.slice('Bearer '.length));
+    if (claims) return `${claims.typ}:${claims.sub}`;
+  }
+  const agentToken = req.headers['x-agent-token'];
+  if (typeof agentToken === 'string' && agentToken.length >= 32) return `agent:${hashAgentToken(agentToken).slice(0, 24)}`;
+  return null;
+}
+
+const ipOf = (req: Request) => `ip:${req.ip ?? 'unknown'}`;
+const chain = (...handlers: RequestHandler[]): RequestHandler => (req, res, next) => {
+  const run = (index: number): void => {
+    const handler = handlers[index];
+    if (!handler) return next();
+    handler(req, res, (err?: unknown) => (err ? next(err) : run(index + 1)));
+  };
+  run(0);
+};
+
+/**
+ * General API limits: a generous per-IP flood ceiling (a whole campus can sit
+ * behind one NAT address) AND a per-principal budget for signed-in traffic.
+ * Unauthenticated requests only have the IP, so they get the per-user number
+ * keyed by IP (strict).
+ */
+export function makeGeneralLimiter(prefix: string, perPrincipal: number, perIp: number, windowMs = 60_000): RequestHandler {
+  const ceiling = makeLimiter(`${prefix}-ip`, windowMs, perIp, false, ipOf);
+  const principal = makeLimiter(`${prefix}-user`, windowMs, perPrincipal, false, (req) => principalOf(req) ?? ipOf(req));
+  return chain(ceiling, principal);
+}
+
+export const generalLimiter = makeGeneralLimiter('gen', env.RATE_LIMIT_GENERAL_PER_USER, env.RATE_LIMIT_GENERAL_PER_IP);
 export const otpRequestLimiter = makeLimiter('otpreq', 60_000, 5);
 export const otpVerifyLimiter = makeLimiter('otpver', 60_000, 10);
 // Firebase has already verified the phone credential before this exchange.
@@ -38,7 +87,12 @@ export const otpVerifyLimiter = makeLimiter('otpver', 60_000, 10);
 // silent trusted-device renewal; the global limiter still provides a ceiling.
 export const firebaseSessionLimiter = makeLimiter('firebase-session', 60_000, 120);
 export const loginLimiter = makeLimiter('login', 60_000, 5);
-export const uploadLimiter = makeLimiter('upload', 60_000, 10);
+/** Uploads: per signed-in student (route runs requireStudent first) plus a higher per-IP ceiling. */
+export const uploadLimiter: RequestHandler = chain(
+  makeLimiter('upload-ip', 60_000, env.RATE_LIMIT_UPLOAD_PER_IP, false, ipOf),
+  makeLimiter('upload-user', 60_000, env.RATE_LIMIT_UPLOAD_PER_USER, false, (req) =>
+    req.student ? `student:${req.student.id}` : ipOf(req)),
+);
 
 /**
  * Failure-only throttle for the counter-code release (guessing protection).
@@ -85,7 +139,8 @@ export function makeFailureLimiter(prefix: string, windowMs: number, perShopIp: 
       ];
       const counts = await Promise.all(keys.map((k) => takeSlot(k.key, windowMs)));
       const blocked = counts.some((count, i) => count > keys[i]!.max);
-      if (blocked) return next(tooMany('Too many requests, slow down'));
+      // the window is fixed from its first hit; retrying after one full window is always safe
+      if (blocked) return next(tooMany('Too many requests, slow down', windowMs / 1000));
       _res.once('finish', () => {
         if (_res.statusCode < 400) void Promise.all(keys.map((k) => giveBackSlot(k.key))).catch(() => undefined);
       });

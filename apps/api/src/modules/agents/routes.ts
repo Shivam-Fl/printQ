@@ -14,20 +14,55 @@ import { notifyShopReopened } from '../shops/availability.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
 import { env } from '../../config/env.js';
-import { PRINT_ERROR_AGENT_OFFLINE, describePrintProblem } from '../../lib/printProblem.js';
+import { STAFF_DECISION_PRINT_ERRORS, describePrintProblem } from '../../lib/printProblem.js';
 import { confirmSuccessfulPrint, recordSpoolAccepted } from '../jobs/printCompletion.js';
+import { reconcileAgentSession } from '../jobs/printLease.js';
 
 export const agentRouter = Router();
 agentRouter.use(requireAgent);
 
+/**
+ * A STAFF-DECISION failure (lost lease / restart / timeout) is never re-printed
+ * automatically: dispatch and claim skip these jobs until staff retry or cancel.
+ */
+const NOT_STAFF_HELD = {
+  OR: [{ printError: null }, { printError: { notIn: [...STAFF_DECISION_PRINT_ERRORS] } }],
+};
+
+/**
+ * The claiming PROCESS (x-agent-session) must match the one that claimed the job.
+ * Legacy agents send no session id and are never blocked by this.
+ */
+function otherSessionHolds(job: { claimedBySessionId: string | null }, sessionId: string | null): boolean {
+  return Boolean(job.claimedBySessionId && sessionId && job.claimedBySessionId !== sessionId);
+}
+
+const heartbeatSchema = z
+  .object({
+    // Ids of the jobs this process is working on right now (claimed, not yet
+    // handed to the spooler). Omitted by older agents.
+    inFlightJobIds: z.array(z.string().uuid()).max(100).optional(),
+  })
+  .passthrough()
+  .default({});
+
 /** Liveness ping — the dashboard shows agents red after missed heartbeats. */
 agentRouter.post(
   '/heartbeat',
+  validateBody(heartbeatSchema),
   asyncHandler(async (req, res) => {
+    const agent = req.agent!;
+    const { inFlightJobIds } = req.body as z.infer<typeof heartbeatSchema>;
     await prisma.agent.update({
-      where: { id: req.agent!.id },
-      data: { lastHeartbeatAt: new Date(), status: 'online' },
+      where: { id: agent.id },
+      data: {
+        lastHeartbeatAt: new Date(),
+        status: 'online',
+        ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+      },
     });
+    // A restarted process keeps the agent id: recover the jobs its predecessor held.
+    if (agent.sessionId) await reconcileAgentSession(agent, agent.sessionId, inFlightJobIds);
     res.json({ ok: true });
   }),
 );
@@ -65,8 +100,14 @@ agentRouter.post(
 
     await prisma.agent.update({
       where: { id: agent.id },
-      data: { detectedPrinters: printers, detectedAt: new Date(), connectedPrinterIds },
+      data: {
+        detectedPrinters: printers,
+        detectedAt: new Date(),
+        connectedPrinterIds,
+        ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
+      },
     });
+    if (agent.sessionId) await reconcileAgentSession(agent, agent.sessionId);
     await advanceShopQueues(agent.shopId);
     await emitQueueUpdate(agent.shopId);
     await notifyShopReopened(agent.shopId);
@@ -88,7 +129,7 @@ agentRouter.get(
         shopId: agent.shopId,
         status: 'otp_verified',
         // a lease-expired print waits for a staff decision (retry / cancel), never an automatic re-print
-        AND: [{ OR: [{ printError: null }, { printError: { not: PRINT_ERROR_AGENT_OFFLINE } }] }],
+        AND: [NOT_STAFF_HELD],
         assignedPrinterId: { in: agent.connectedPrinterIds },
         OR: [{ claimedByAgentId: null }, { claimedByAgentId: agent.id }],
       },
@@ -123,11 +164,11 @@ agentRouter.post(
         id: param(req, 'id'),
         shopId: agent.shopId,
         status: 'otp_verified',
-        AND: [{ OR: [{ printError: null }, { printError: { not: PRINT_ERROR_AGENT_OFFLINE } }] }],
+        AND: [NOT_STAFF_HELD],
         assignedPrinterId: { in: agent.connectedPrinterIds },
         OR: [{ claimedByAgentId: null }, { claimedByAgentId: agent.id }],
       },
-      data: { claimedByAgentId: agent.id },
+      data: { claimedByAgentId: agent.id, claimedBySessionId: agent.sessionId },
     });
     if (claimed.count === 0) throw conflict('Job already claimed or not printable');
 
@@ -172,7 +213,7 @@ agentRouter.get(
       },
       include: { file: true },
     });
-    if (!job || !job.file.convertedKey) throw notFound();
+    if (!job || !job.file.convertedKey || otherSessionHolds(job, agent.sessionId)) throw notFound();
 
     const source = await storage.get(job.file.convertedKey);
     const specs = job.specs as unknown as JobSpecs;
@@ -235,7 +276,7 @@ agentRouter.post(
       where: { id: param(req, 'id'), shopId: agent.shopId },
     });
     if (!job) throw notFound();
-    if (job.claimedByAgentId !== agent.id) {
+    if (job.claimedByAgentId !== agent.id || otherSessionHolds(job, agent.sessionId)) {
       // The lease moved on (print failed after this computer went silent, or the
       // job was re-dispatched). A late report must not be applied: 409 tells the
       // agent to drop the job and re-sync via /jobs/pending.
@@ -278,7 +319,7 @@ agentRouter.post(
     const job = await prisma.job.findFirst({
       where: { id: param(req, 'id'), shopId: agent.shopId, claimedByAgentId: agent.id },
     });
-    if (!job) throw notFound();
+    if (!job || otherSessionHolds(job, agent.sessionId)) throw notFound();
     if (job.status !== 'printing') throw conflict('Job is not printing');
 
     // The raw reason is kept for the audit log only; it never reaches an API response.
@@ -289,7 +330,7 @@ agentRouter.post(
       'printing',
       'PRINT_FAILED',
       { type: 'agent', id: agent.id },
-      { claimedByAgentId: null, printError: reason },
+      { claimedByAgentId: null, claimedBySessionId: null, printError: reason },
     );
     if (!updated) throw conflict('Job state changed');
 

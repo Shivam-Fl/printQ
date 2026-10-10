@@ -515,6 +515,9 @@ model Agent {
   /// last getPrinters() report from this PC: [{ name, paperSizes }]
   detectedPrinters    Json?
   detectedAt          DateTime?
+  /// Random id of the agent PROCESS currently running (regenerated on every
+  /// start). Null = a legacy agent that does not send one.
+  sessionId           String?
   createdAt           DateTime    @default(now())
 
   @@index([shopId])
@@ -655,6 +658,8 @@ model Job {
   queueLeftAt           DateTime?
   checkInCount          Int                    @default(0)
   claimedByAgentId      String?
+  /// Agent process (sessionId) that claimed this job; null = legacy agent.
+  claimedBySessionId    String?
   /// Persisted spooler failure state so a dashboard refresh never loses the recovery action.
   printError            String?
   printAttempts         Int                    @default(0)

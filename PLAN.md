@@ -88,7 +88,7 @@ branches `notified → no_show → requeued|expired`, `queued|notified → cance
 | CSRF | Bearer tokens (Authorization header), not cookies → classic CSRF not applicable; CORS allowlist enforced anyway |
 | CORS | Explicit origin allowlist from env; no wildcard |
 | Webhooks | Razorpay HMAC-SHA256 signature verified on raw body; event id idempotency table |
-| Rate limiting | Redis-backed: login/OTP-request 5/min per phone+IP, OTP verify 10/min, uploads 10/min, general API 100/min |
+| Rate limiting | Redis-backed: login/OTP-request 5/min per phone+IP, OTP verify 10/min, uploads 10/min per student (120/min per IP ceiling), general API 300/min per signed-in user (3000/min per IP ceiling), every 429 sends Retry-After |
 | File uploads | Magic-byte validation (`file-type`), 25 MB cap enforced during stream, random storage keys, object storage / non-web-root, signed download URLs, auto-delete 24h after completion |
 | Password hashing | argon2id for shop staff; login + release OTPs also hashed |
 | Release OTP | 6-digit, single-use, job-bound, hashed at rest, 10-min expiry, 5 attempts then locked |
@@ -237,3 +237,10 @@ the amount due through a one-time Razorpay Checkout order.
 - **Notices**: `ShopFeeNotice` (unique `dedupeKey`) for statement ready, reminder, final warning, blocked, unblocked and payment received; channels: dashboard banner (live state), Resend email, owner Web Push.
 - **Data**: migration `20261011120000_shop_fee_payments` (new tables `ShopFeePayment`, `ShopFeeAllocation`, `ShopFeeNotice`, `ShopFeeEvent`, `ShopPushSubscription`; new columns on `Shop`, `ShopCommissionEntry`, `ShopCommissionStatement`). AutoPay tables are left dormant.
 - See DEPLOY.md "Shop fee payments" for configuration, webhook and go-live steps.
+
+## Print lease, agent sessions and request budgets (wave 6)
+
+- **Agent sessions**: every agent process generates a random `sessionId` and sends it as `x-agent-session` (all HTTP calls) and in the socket handshake. A claim stores it in `Job.claimedBySessionId`; `Agent.sessionId` holds the current one (migration `20261011150000_agent_session_lease`). A heartbeat / registration from a different session, or a heartbeat `inFlightJobIds` list that omits a claimed, never-spooled job, fails the job immediately (`PRINT_FAILED`, reason `agent_restarted`). Agents without a sessionId (legacy) are unaffected except for the backstops.
+- **Backstops** (sweep every 30 s): `PRINT_CLAIM_TIMEOUT_SECONDS` (120) fails a `printing` job never spooled even if its agent is online; `PRINT_SPOOL_TIMEOUT_SECONDS` (900) fails a spooled-but-unconfirmed job with the 'check the printer' message. All failures wait for a staff decision (retry / cancel & return payment).
+- **Request budgets** (statements before the response; each is ~230 ms in production): POST /api/jobs 6, quote 1, GET /api/jobs/:id 2, confirm-print-completion 3, pinned by `jobs.perf.db.test.ts`. Deletion scheduling, commission posting and pushes run after the response (the reconcilers keep them durable).
+- **Receipts** embed Noto Sans + Noto Sans Devanagari (`apps/api/assets/fonts`, OFL) and never print the file name.
