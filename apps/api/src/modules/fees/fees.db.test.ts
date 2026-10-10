@@ -371,6 +371,29 @@ describe.runIf(dbReady)('shop platform-fee payments (database)', () => {
       expect((await prisma.shopFeePayment.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('created');
     });
 
+    it('acknowledges signed foreign-business events with no side effects', async () => {
+      const ledgerBefore = await prisma.shopCommissionEntry.count();
+      const eventsBefore = await prisma.paymentEvent.count();
+      const feeBefore = await prisma.shopFeePayment.count();
+      const foreign = {
+        id: 'pay_FOREIGN0000001', order_id: 'order_FOREIGN000001', amount: 49900, currency: 'INR',
+        status: 'captured', email: 'someone@example.com', contact: '+919999999999',
+        notes: { kind: 'packkar_order', ref: 'x' },
+      };
+      for (const event of ['payment.captured', 'payment.failed', 'order.paid']) {
+        const order = event === 'order.paid' ? { id: foreign.order_id, amount: 49900, currency: 'INR', notes: [] } : undefined;
+        const res = await webhook(event, foreign, order);
+        expect(res.status).toBe(200);
+      }
+      // payment without an order id (e.g. a direct payment link) is also a no-op
+      expect((await webhook('payment.captured', { id: 'pay_NOORDER0000001', amount: 100, currency: 'INR' })).status).toBe(200);
+      expect(await prisma.shopCommissionEntry.count()).toBe(ledgerBefore);
+      expect(await prisma.paymentEvent.count()).toBe(eventsBefore);
+      expect(await prisma.shopFeePayment.count()).toBe(feeBefore);
+      // a forged signature on the same foreign payload is still rejected
+      expect((await webhook('payment.captured', foreign, undefined, { signature: 'b'.repeat(64) })).status).toBe(400);
+    });
+
     it('settles on payment.captured: one ledger entry, statements settled, receipt notice', async () => {
       const { shop, owner, row } = await openOrder('capture', [1000]);
       const payment = capturedPayment(row.providerOrderId, 1000, { notes: { kind: 'shop_fee', feePaymentId: row.id } });

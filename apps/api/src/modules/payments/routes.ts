@@ -48,16 +48,24 @@ webhookRouter.post(
       ? receivedEventId
       : `razorpay_sha256_${createHash('sha256').update(req.body as Buffer).digest('hex')}`;
 
-    // Delivery evidence only (no customer data). Settlement is itself
-    // idempotent per order, so a retried or replayed event is always safe to
-    // re-run and an event whose first attempt crashed is never lost.
+    // Settlement is idempotent per order, so a retried or replayed event is
+    // always safe to re-run and an event whose first attempt crashed is never lost.
+    const result = await handleFeeWebhook(payload);
+    if (!result.handled) {
+      // Razorpay webhooks are account-wide: events for other businesses sharing
+      // the account land here. Acknowledge with no side effects and log only
+      // ids/type (never the foreign payload: it carries email/contact/card data).
+      logger.info({ event, providerEventId }, 'razorpay_webhook_ignored:unknown_order');
+      res.json({ ok: true });
+      return;
+    }
+    // Delivery evidence for our own events only (no customer data).
     await prisma.paymentEvent.upsert({
       where: { providerEventId },
       create: { provider: 'razorpay', providerEventId, jobId: null, payload: { event } },
       update: {},
     });
-    const result = await handleFeeWebhook(payload);
-    logger.info({ event, providerEventId, ...result }, 'razorpay_webhook_processed');
+    logger.info({ event, providerEventId, outcome: result.outcome }, 'razorpay_webhook_processed');
     res.json({ ok: true });
   }),
 );
