@@ -127,7 +127,15 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="auth-card">
-      <div className="auth-progress" aria-label="Sign-in progress">
+      <div
+        className="auth-progress"
+        role="progressbar"
+        aria-label="Sign-in progress"
+        aria-valuemin={1}
+        aria-valuemax={3}
+        aria-valuenow={stage === 'phone' ? 1 : stage === 'otp' ? 2 : 3}
+        aria-valuetext={`Step ${stage === 'phone' ? 1 : stage === 'otp' ? 2 : 3} of 3`}
+      >
         <span className="done" />
         <span className={stage !== 'phone' ? 'done' : ''} />
         <span className={stage === 'name' ? 'done' : ''} />

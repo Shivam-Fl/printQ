@@ -1,6 +1,7 @@
 /* PrintQ service worker: push notifications + app-shell/asset caching. */
-const SHELL_CACHE = 'printq-shell-v2';
-const ASSET_CACHE = 'printq-assets-v2';
+const SHELL_CACHE = 'printq-shell-v3';
+const ASSET_CACHE = 'printq-assets-v3';
+const OFFLINE_URL = '/offline.html';
 
 // Firebase web configuration identifies this public web application; it is
 // intentionally passed only when FCM is enabled for the current environment.
@@ -34,7 +35,23 @@ if (fcmEnabled) {
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(['/'])));
+  event.waitUntil(
+    (async () => {
+      const shell = await caches.open(SHELL_CACHE);
+      await shell.addAll(['/', OFFLINE_URL]);
+      // Precache the hashed JS/CSS/font files the cached shell references, so an
+      // offline reload after the first visit can boot (those requests happened
+      // before this worker controlled the page, so they were never intercepted).
+      try {
+        const html = await (await shell.match('/')).text();
+        const urls = [...new Set([...html.matchAll(/["'(](\/assets\/[^"')\s]+)/g)].map((m) => m[1]))];
+        const assets = await caches.open(ASSET_CACHE);
+        await Promise.all(urls.map((u) => assets.add(u).catch(() => undefined)));
+      } catch {
+        /* best effort: runtime caching below still fills the cache */
+      }
+    })(),
+  );
   self.skipWaiting();
 });
 
@@ -53,7 +70,19 @@ self.addEventListener('fetch', (event) => {
 
   // navigations: network-first, cached shell as the offline fallback
   if (req.mode === 'navigate') {
-    event.respondWith(fetch(req).catch(() => caches.match('/')));
+    event.respondWith(
+      fetch(req).then(
+        (res) => {
+          // keep the offline shell current (the SPA serves the same index.html for every route)
+          if (res.ok && res.headers.get('content-type')?.includes('text/html')) {
+            const copy = res.clone();
+            caches.open(SHELL_CACHE).then((c) => c.put('/', copy)).catch(() => undefined);
+          }
+          return res;
+        },
+        async () => (await caches.match('/')) || (await caches.match(OFFLINE_URL)) || Response.error(),
+      ),
+    );
     return;
   }
 
@@ -65,7 +94,12 @@ self.addEventListener('fetch', (event) => {
         (cached) =>
           cached ??
           fetch(req).then((res) => {
-            if (res.ok) caches.open(ASSET_CACHE).then((c) => c.put(req, res.clone()));
+            if (res.ok) {
+              // Clone synchronously: once the page reads the body, cloning throws
+              // and the cache write is silently lost (the original defect).
+              const copy = res.clone();
+              caches.open(ASSET_CACHE).then((c) => c.put(req, copy)).catch(() => undefined);
+            }
             return res;
           }),
       ),

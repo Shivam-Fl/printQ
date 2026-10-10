@@ -10,6 +10,8 @@ export interface ShopClaims {
   sub: string;
   shopId: string;
   role: 'owner' | 'staff';
+  /** ShopUser.sessionVersion at issue time; tokens minted before it existed read as 0. */
+  sv: number;
 }
 export interface AdminClaims {
   typ: 'admin';
@@ -23,8 +25,13 @@ export function signStudentToken(studentId: string): string {
   return jwt.sign({ typ: 'student' }, env.JWT_SECRET, { subject: studentId, expiresIn: '30d' });
 }
 
-export function signShopToken(shopUserId: string, shopId: string, role: 'owner' | 'staff'): string {
-  return jwt.sign({ typ: 'shop', shopId, role }, env.JWT_SECRET, {
+export function signShopToken(
+  shopUserId: string,
+  shopId: string,
+  role: 'owner' | 'staff',
+  sessionVersion = 0,
+): string {
+  return jwt.sign({ typ: 'shop', shopId, role, sv: sessionVersion }, env.JWT_SECRET, {
     subject: shopUserId,
     expiresIn: '12h',
   });
@@ -36,6 +43,34 @@ export function signAdminToken(adminId: string, sessionVersion: number): string 
     subject: adminId,
     expiresIn: '4h',
   });
+}
+
+/** Lifetime of a link-able file preview token. Short on purpose: it may land in a URL. */
+export const PREVIEW_TOKEN_TTL_SECONDS = 120;
+
+/**
+ * Single-purpose token for opening one student's one file in a new tab (a plain
+ * link cannot carry an Authorization header). It is NOT a session token: it
+ * only works on the preview route and only for `fileId`.
+ */
+export function signPreviewToken(studentId: string, fileId: string): string {
+  return jwt.sign({ typ: 'file-preview', fid: fileId }, env.JWT_SECRET, {
+    subject: studentId,
+    expiresIn: PREVIEW_TOKEN_TTL_SECONDS,
+  });
+}
+
+/** The student id when `token` is a valid, unexpired preview token for exactly `fileId`. */
+export function verifyPreviewToken(token: string, fileId: string): string | null {
+  try {
+    const payload = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload;
+    if (payload.typ === 'file-preview' && payload.fid === fileId && typeof payload.sub === 'string') {
+      return payload.sub;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Returns null instead of throwing — callers decide the 401. */
@@ -51,7 +86,8 @@ export function verifyToken(token: string): AuthClaims | null {
       typeof payload.shopId === 'string' &&
       (payload.role === 'owner' || payload.role === 'staff')
     ) {
-      return { typ: 'shop', sub: payload.sub, shopId: payload.shopId, role: payload.role };
+      const sv = Number.isSafeInteger(payload.sv) && payload.sv >= 0 ? (payload.sv as number) : 0;
+      return { typ: 'shop', sub: payload.sub, shopId: payload.shopId, role: payload.role, sv };
     }
     if (payload.typ === 'admin' && typeof payload.sub === 'string' && payload.role === 'platform_admin'
       && Number.isSafeInteger(payload.sv) && payload.sv >= 0) {

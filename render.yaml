@@ -104,6 +104,11 @@ services:
         value: resend
       - key: EMAIL_FROM
         value: PrintQs <support@mail.printqs.com>
+      - key: EMAIL_REPLY_TO
+        value: admin@printqs.com
+      # Client -> Cloudflare -> Render -> app: resolve the real client IP by trusted address.
+      - key: TRUST_PROXY
+        value: cloudflare
       - key: RESEND_API_KEY
         sync: false
       - key: ADMIN_BOOTSTRAP_EMAIL

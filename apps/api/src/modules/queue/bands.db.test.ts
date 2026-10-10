@@ -45,6 +45,16 @@ import {
   sweepExpiredReveals,
 } from './engine.js';
 import { releaseByOtp } from './release.js';
+import { drainBackground } from '../../lib/background.js';
+
+/** Check-in sends its notifications after responding; wait for them before asserting. */
+async function checkInAndSettle(...args: Parameters<typeof checkInJob>) {
+  try {
+    return await checkInJob(...args);
+  } finally {
+    await drainBackground();
+  }
+}
 
 const LAT = 28.6139;
 const LNG = 77.209;
@@ -137,7 +147,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
   async function joined(forShop = shopId) {
     const order = await prepared(forShop);
     await sleep(3);
-    await checkInJob(order.jobId, order.studentId, arrival());
+    await checkInAndSettle(order.jobId, order.studentId, arrival());
     return order;
   }
 
@@ -156,10 +166,20 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
   beforeAll(async () => {
     shopId = await makeShop('a');
     otherShopId = await makeShop('b');
-    ownerId = randomUUID();
-    ownerToken = signShopToken(ownerId, shopId, 'owner');
-    staffToken = signShopToken(randomUUID(), shopId, 'staff');
-    otherOwnerToken = signShopToken(randomUUID(), otherShopId, 'owner');
+    // Shop tokens are checked against real accounts (revocation), so create them.
+    const account = async (forShop: string, role: 'owner' | 'staff') => {
+      const user = await prisma.shopUser.create({
+        data: { shopId: forShop, email: `qb-${randomUUID()}@example.test`, name: role, role, passwordHash: 'x' },
+      });
+      return user;
+    };
+    const owner = await account(shopId, 'owner');
+    const staff = await account(shopId, 'staff');
+    const otherOwner = await account(otherShopId, 'owner');
+    ownerId = owner.id;
+    ownerToken = signShopToken(owner.id, shopId, 'owner');
+    staffToken = signShopToken(staff.id, shopId, 'staff');
+    otherOwnerToken = signShopToken(otherOwner.id, otherShopId, 'owner');
     const printer = await prisma.printer.create({
       data: { shopId, label: 'P1', paperSizesLoaded: ['A4'], colorSupport: false, status: 'online' },
     });
@@ -206,6 +226,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
     await prisma.agent.deleteMany({ where: { shopId: { in: shopIds } } });
     await prisma.printer.deleteMany({ where: { shopId: { in: shopIds } } });
     await prisma.student.deleteMany({ where: { id: { in: studentIds } } });
+    await prisma.shopUser.deleteMany({ where: { shopId: { in: shopIds } } });
     await prisma.shop.deleteMany({ where: { id: { in: shopIds } } });
   });
 
@@ -220,9 +241,9 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
   describe('check-in radius (200 m)', () => {
     it('accepts 199.5 m and rejects 200.5 m', async () => {
       const near = await prepared();
-      await expect(checkInJob(near.jobId, near.studentId, arrival(199.5))).resolves.toMatchObject({ status: 'queued' });
+      await expect(checkInAndSettle(near.jobId, near.studentId, arrival(199.5))).resolves.toMatchObject({ status: 'queued' });
       const far = await prepared();
-      await expect(checkInJob(far.jobId, far.studentId, arrival(200.5))).rejects.toMatchObject({ status: 409 });
+      await expect(checkInAndSettle(far.jobId, far.studentId, arrival(200.5))).rejects.toMatchObject({ status: 409 });
       expect((await row(far.jobId)).status).toBe('awaiting_arrival');
     });
   });
@@ -332,7 +353,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       await expect(requeueJob(a.jobId, a.studentId)).rejects.toMatchObject({ status: 409 });
       expect((await row(a.jobId)).status).toBe('awaiting_arrival');
       await sleep(3);
-      await checkInJob(a.jobId, a.studentId, arrival());
+      await checkInAndSettle(a.jobId, a.studentId, arrival());
       const metrics = await Promise.all([b, c, a].map((j) => getJobLiveMetrics(j.jobId)));
       expect(metrics.map((m) => m.position)).toEqual([1, 2, 3]);
       expect(metrics[2]!.band).toBe('arriving'); // behind two revealed students

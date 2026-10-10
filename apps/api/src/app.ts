@@ -6,7 +6,8 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
-import { logger } from './lib/logger.js';
+import { logger, redactUrl } from './lib/logger.js';
+import { trustProxySetting } from './lib/clientIpConfig.js';
 import { generalLimiter } from './middleware/rateLimit.js';
 import { createAppCheckMiddleware } from './middleware/appCheck.js';
 import { errorHandler } from './middleware/error.js';
@@ -20,12 +21,14 @@ import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
+import { mountWebApp } from './webApp.js';
 
 export function createApp(): express.Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', 1); // real client IPs behind the TLS-terminating proxy
+  // Real client IPs behind Cloudflare/Render: trust by address, never by client-supplied headers.
+  app.set('trust proxy', trustProxySetting);
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -56,7 +59,21 @@ export function createApp(): express.Express {
       },
     }),
   );
-  app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/healthz' } }));
+  app.use(
+    pinoHttp({
+      logger,
+      customProps: (req) => ({ clientIp: req.ip }),
+      autoLogging: { ignore: (req) => req.url === '/healthz' },
+      serializers: {
+        // never log query-string credentials (e.g. the file-preview token)
+        req: (req: { id?: unknown; method?: string; url?: string }) => ({
+          id: req.id,
+          method: req.method,
+          url: redactUrl(req.url),
+        }),
+      },
+    }),
+  );
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
@@ -81,8 +98,7 @@ export function createApp(): express.Express {
   // the PWA, push notifications and API share one origin. Dev uses Vite.
   const webDist = path.resolve(fileURLToPath(import.meta.url), '../../../web/dist');
   if (env.NODE_ENV === 'production' && existsSync(webDist)) {
-    app.use(express.static(webDist));
-    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+    mountWebApp(app, webDist);
     logger.info({ webDist }, 'serving_web_app');
   }
 

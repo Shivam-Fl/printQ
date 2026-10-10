@@ -8,6 +8,7 @@ import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
 import { nearbyShops, publishedShopWhere } from './discovery.js';
+import { publicCampusesCache, publicShopsCache, setPublicListCacheHeaders } from './cache.js';
 
 export const publicRouter = Router();
 
@@ -15,13 +16,16 @@ export const publicRouter = Router();
 publicRouter.get(
   '/campuses',
   asyncHandler(async (_req, res) => {
-    const campuses = await prisma.campus.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-      select: { id: true, slug: true, name: true, address: true },
-      take: 200,
-    });
-    res.json({ campuses });
+    const body = await publicCampusesCache.get('all', async () => ({
+      campuses: await prisma.campus.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, slug: true, name: true, address: true },
+        take: 200,
+      }),
+    }));
+    setPublicListCacheHeaders(res);
+    res.json(body);
   }),
 );
 
@@ -30,7 +34,10 @@ publicRouter.get(
   '/shops',
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80) : '';
+    const body = await publicShopsCache.get(`q:${q.toLowerCase()}`, async () => {
     const shops = await prisma.shop.findMany({
+      // One round trip (JOIN) instead of one query per relation: DB latency dominates in production.
+      relationLoadStrategy: 'join',
       where: {
         AND: [
           publishedShopWhere,
@@ -60,7 +67,7 @@ publicRouter.get(
         agents: { select: { status: true, connectedPrinterIds: true } },
       },
     });
-    res.json({
+    return {
       shops: shops.map((shop) => {
         const reachable = new Set(
           shop.agents.filter((agent) => agent.status === 'online').flatMap((agent) => agent.connectedPrinterIds),
@@ -76,7 +83,10 @@ publicRouter.get(
             && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
         };
       }),
+    };
     });
+    setPublicListCacheHeaders(res);
+    res.json(body);
   }),
 );
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import LegalLayout from '../../components/LegalLayout.js';
-import { GOVERNING_LAW_CITY, LEGAL_ENTITY_NAME, LEGAL_PRODUCT_NAME } from '../../lib/legal.js';
+import { GOVERNING_LAW_CITY, LEGAL_ENTITY_DESCRIPTION, LEGAL_PRODUCT_NAME } from '../../lib/legal.js';
 
 export default function Terms() {
   return (
@@ -13,7 +13,7 @@ export default function Terms() {
         <h2>The service</h2>
         <p>
           {LEGAL_PRODUCT_NAME}
-          {LEGAL_ENTITY_NAME ? ` (operated by ${LEGAL_ENTITY_NAME})` : ''} lets you prepare a print order online and collect it from a
+          {LEGAL_ENTITY_DESCRIPTION ? ` (operated by ${LEGAL_ENTITY_DESCRIPTION})` : ''} lets you prepare a print order online and collect it from a
           participating campus print shop. The printing is done by the shop, which is an independent business. By using the app you
           accept these terms.
         </p>

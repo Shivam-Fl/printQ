@@ -20,7 +20,18 @@ import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
-import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { ACTIVE_FILE_JOB_STATUSES, assertFileCanBackNewJob, scheduleFileDeletion } from '../../lib/fileRetention.js';
+import {
+  claimIdempotency,
+  completeIdempotency,
+  parseIdempotencyKey,
+  releaseIdempotency,
+  tryLock,
+  unlock,
+} from '../../lib/idempotency.js';
+
+const DUPLICATE_ORDER_MESSAGE =
+  'You already have an active order for this file. Open it from My jobs, or upload the file again for a new order.';
 import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
@@ -80,11 +91,66 @@ jobsRouter.post(
       scheduledTime?: Date;
       couponCode?: string;
     };
+    const studentId = req.student!.id;
+    // Double-submit protection, two independent layers:
+    //  1. optional Idempotency-Key (one UUID per "Prepare order" attempt): a
+    //     repeat replays the first result instead of creating another job;
+    //  2. a per student+file+shop guard: one ACTIVE order per file, enforced
+    //     under a short lock (and re-checked in the DB) even without a key.
+    const idemKey = parseIdempotencyKey(req.headers['idempotency-key']);
+    if (idemKey) {
+      const claim = await claimIdempotency(studentId, idemKey);
+      if (claim.state === 'replay') {
+        const existing = await prisma.job.findFirst({
+          where: { id: claim.resultId, studentId },
+          select: { id: true, totalPaise: true },
+        });
+        if (existing) {
+          res.status(200).json({
+            job: { id: existing.id, status: 'awaiting_arrival', totalPaise: existing.totalPaise },
+            checkout: { mode: 'pay_at_shop', amountPaise: existing.totalPaise },
+          });
+          return;
+        }
+      } else if (claim.state === 'in_flight') {
+        throw conflict(DUPLICATE_ORDER_MESSAGE);
+      }
+    }
+    const lockName = `job-create:${studentId}:${fileId}`;
+    if (!(await tryLock(lockName))) {
+      if (idemKey) await releaseIdempotency(studentId, idemKey);
+      throw conflict(DUPLICATE_ORDER_MESSAGE);
+    }
+    try {
+      const created = await createPreparedJob();
+      if (idemKey) await completeIdempotency(studentId, idemKey, created.job.id);
+      res.status(201).json(created);
+    } catch (err) {
+      if (idemKey) await releaseIdempotency(studentId, idemKey);
+      throw err;
+    } finally {
+      await unlock(lockName);
+    }
+
+    async function createPreparedJob() {
     const file = await prisma.uploadedFile.findFirst({
-      where: { id: fileId, studentId: req.student!.id, status: 'ready' },
+      where: { id: fileId, studentId, status: 'ready' },
       include: { shop: true },
     });
     if (!file || file.pages == null) throw notFound('File not ready');
+    // one active order per student+file+shop
+    const active = await prisma.job.findFirst({
+      where: {
+        studentId,
+        fileId: file.id,
+        shopId: file.shopId,
+        status: { in: [...ACTIVE_FILE_JOB_STATUSES] },
+      },
+      select: { id: true },
+    });
+    if (active) throw conflict(DUPLICATE_ORDER_MESSAGE);
+    // reference-counted file semantics: see fileRetention.ts
+    await assertFileCanBackNewJob(file);
 
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
@@ -121,10 +187,11 @@ jobsRouter.post(
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
     await preparePayAtShopOrder(job.id);
-    res.status(201).json({
-      job: { id: job.id, status: 'awaiting_arrival', totalPaise: job.totalPaise },
-      checkout: { mode: 'pay_at_shop', amountPaise: job.totalPaise },
-    });
+    return {
+      job: { id: job.id, status: 'awaiting_arrival' as const, totalPaise: job.totalPaise },
+      checkout: { mode: 'pay_at_shop' as const, amountPaise: job.totalPaise },
+    };
+    }
   }),
 );
 
@@ -225,8 +292,11 @@ jobsRouter.get(
         counterCodeAvailable: codeVisible,
         // Missed turn: back in awaiting_arrival, must check in again to get a new place.
         absent: absentAt !== null && job.status === 'awaiting_arrival',
+        // A scheduled order cannot check in before its window opens (the
+        // server refuses it), so don't advertise the action until then.
         canCheckIn: ['paid', 'counter_due', 'cash_due'].includes(job.paymentStatus)
-          && ['awaiting_arrival', 'no_show', 'requeued'].includes(job.status),
+          && ['awaiting_arrival', 'no_show', 'requeued'].includes(job.status)
+          && (checkInOpensAt === null || Date.parse(checkInOpensAt) <= Date.now()),
         checkInOpensAt,
       },
     });
@@ -243,6 +313,11 @@ jobsRouter.get(
       include: { shop: true, student: true, file: true },
     });
     if (!job) throw notFound();
+    // A receipt is proof of payment: never issue one while the order is merely
+    // prepared (counter_due) or unpaid. Staff confirming payment flips this.
+    if (job.paymentStatus !== 'paid') {
+      throw conflict('Your receipt is available once the shop confirms your payment.');
+    }
 
     const pdf = await renderReceipt({
       jobId: job.id,
@@ -269,8 +344,7 @@ jobsRouter.post(
   requireStudent,
   validateBody(checkInSchema),
   asyncHandler(async (req, res) => {
-    const job = await checkInJob(param(req, 'id'), req.student!.id, req.body as z.infer<typeof checkInSchema>);
-    const live = await getJobLiveMetrics(job.id);
+    const { live, ...job } = await checkInJob(param(req, 'id'), req.student!.id, req.body as z.infer<typeof checkInSchema>);
     res.json({ job: { id: job.id, status: job.status, ...live } });
   }),
 );

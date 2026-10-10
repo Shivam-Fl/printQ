@@ -5,6 +5,26 @@ import { InvalidTransitionError, PageRangeError, PricingError } from '@printq/sh
 import { HttpError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 
+const BODY_PARSER_TYPES = new Set([
+  'entity.too.large',
+  'entity.parse.failed',
+  'entity.verify.failed',
+  'encoding.unsupported',
+  'charset.unsupported',
+  'request.aborted',
+  'request.size.invalid',
+  'stream.encoding.set',
+  'parameters.too.many',
+]);
+
+function asBodyParserError(err: unknown): { type: string; status: number } | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const { type, status } = err as { type?: unknown; status?: unknown };
+  if (typeof type !== 'string' || !BODY_PARSER_TYPES.has(type)) return null;
+  const code = typeof status === 'number' && status >= 400 && status < 500 ? status : 400;
+  return { type, status: code };
+}
+
 /**
  * Global error handler: intentional errors pass their message through;
  * everything else logs full detail server-side and returns a generic message
@@ -19,6 +39,20 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     };
     const mapped = uploadErrors[err.code] ?? { status: 400, error: 'Invalid file upload', code: 'INVALID_UPLOAD' };
     res.status(mapped.status).json({ error: mapped.error, code: mapped.code });
+    return;
+  }
+  // body-parser / raw-body errors (malformed JSON, over-size body, bad encoding).
+  // They carry a 4xx status and a `type`; never echo their message (it can quote
+  // the offending input and parser internals).
+  const bodyError = asBodyParserError(err);
+  if (bodyError) {
+    if (bodyError.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Request body is too large', code: 'BODY_TOO_LARGE' });
+    } else if (bodyError.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Request body is not valid JSON', code: 'INVALID_JSON' });
+    } else {
+      res.status(bodyError.status).json({ error: 'Invalid request body', code: 'INVALID_BODY' });
+    }
     return;
   }
   if (err instanceof ZodError) {

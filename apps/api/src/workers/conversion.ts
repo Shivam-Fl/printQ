@@ -13,10 +13,19 @@ import { env } from '../config/env.js';
 import { storage } from '../providers/storage/index.js';
 import { publishEvent } from '../realtime/events.js';
 import {
+  ACTIVE_FILE_JOB_STATUSES,
   ensureFileDeletionJob,
   scheduleFileDeletion,
   scheduleVerifiedPrintFileDeletion,
 } from '../lib/fileRetention.js';
+import {
+  ConversionError,
+  MAX_DOCUMENT_PAGES,
+  classifyConversionError,
+  isEncryptedPdfError,
+  isPermanent,
+  publicFileError,
+} from './conversionErrors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -25,14 +34,34 @@ const A4 = { width: 595.28, height: 841.89 } as const;
 
 async function pdfToNormalized(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
   // load + re-save normalizes structure and rejects corrupt/encrypted files early
-  const doc = await PDFDocument.load(buffer, { ignoreEncryption: false });
-  const bytes = await doc.save();
-  return { pdf: Buffer.from(bytes), pages: doc.getPageCount() };
+  let doc: PDFDocument;
+  let pages: number;
+  try {
+    doc = await PDFDocument.load(buffer, { ignoreEncryption: false });
+    // a lenient parse of a damaged file only fails here (TypeError reading 'Pages')
+    pages = doc.getPageCount();
+  } catch (err) {
+    // pdf-lib surfaces a damaged xref/catalog as an arbitrary TypeError
+    throw new ConversionError(isEncryptedPdfError(err) ? 'FILE_ENCRYPTED' : 'FILE_CORRUPT', err);
+  }
+  if (pages > MAX_DOCUMENT_PAGES) throw new ConversionError('TOO_MANY_PAGES');
+  let bytes: Uint8Array;
+  try {
+    bytes = await doc.save();
+  } catch (err) {
+    throw new ConversionError('FILE_CORRUPT', err);
+  }
+  return { pdf: Buffer.from(bytes), pages };
 }
 
 async function imageToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
   // respect EXIF orientation, flatten to JPEG for predictable embedding
-  const jpeg = await sharp(buffer).rotate().jpeg({ quality: 90 }).toBuffer();
+  let jpeg: Buffer;
+  try {
+    jpeg = await sharp(buffer).rotate().jpeg({ quality: 90 }).toBuffer();
+  } catch (err) {
+    throw new ConversionError('FILE_CORRUPT', err);
+  }
   const doc = await PDFDocument.create();
   const image = await doc.embedJpg(jpeg);
 
@@ -55,9 +84,7 @@ async function imageToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number 
 
 async function docxToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }> {
   if (!env.SOFFICE_PATH) {
-    throw new Error(
-      'DOCX conversion is not available on this server (SOFFICE_PATH not configured)',
-    );
+    throw new ConversionError('FILE_UNSUPPORTED');
   }
   const dir = await mkdtemp(path.join(tmpdir(), 'printq-conv-'));
   try {
@@ -67,22 +94,32 @@ async function docxToPdf(buffer: Buffer): Promise<{ pdf: Buffer; pages: number }
     // LibreOffice profile — soffice takes a lock on it, so two jobs converting
     // at once can collide and fail with a generic "source file could not be
     // loaded" error. A per-job profile directory keeps each invocation isolated.
-    await execFileAsync(
-      env.SOFFICE_PATH,
-      [
-        '--headless',
-        '--norestore',
-        `-env:UserInstallation=file://${path.join(dir, 'loprofile')}`,
-        '--convert-to',
-        'pdf',
-        '--outdir',
-        dir,
-        inputPath,
-      ],
-      { timeout: 120_000 },
-    );
+    try {
+      await execFileAsync(
+        env.SOFFICE_PATH,
+        [
+          '--headless',
+          '--norestore',
+          `-env:UserInstallation=file://${path.join(dir, 'loprofile')}`,
+          '--convert-to',
+          'pdf',
+          '--outdir',
+          dir,
+          inputPath,
+        ],
+        { timeout: 120_000 },
+      );
+    } catch (err) {
+      const timedOut = (err as { killed?: boolean }).killed === true;
+      throw new ConversionError(timedOut ? 'CONVERSION_TIMEOUT' : 'FILE_CORRUPT', err);
+    }
     const outPath = inputPath.replace(/\.docx$/, '.pdf');
-    const pdfBuffer = await readFile(outPath);
+    let pdfBuffer: Buffer;
+    try {
+      pdfBuffer = await readFile(outPath);
+    } catch (err) {
+      throw new ConversionError('FILE_CORRUPT', err);
+    }
     return pdfToNormalized(pdfBuffer);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -125,7 +162,8 @@ export async function convertFile(fileId: string): Promise<void> {
       const bytes = await merged.save();
       result = { pdf: Buffer.from(bytes), pages: merged.getPageCount() };
     }
-    if (result.pages < 1) throw new Error('Converted document has no pages');
+    if (result.pages < 1) throw new ConversionError('FILE_CORRUPT');
+    if (result.pages > MAX_DOCUMENT_PAGES) throw new ConversionError('TOO_MANY_PAGES');
 
     const convertedKey = `conv/${randomUUID()}.pdf`;
     await storage.put(convertedKey, result.pdf, 'application/pdf');
@@ -137,26 +175,22 @@ export async function convertFile(fileId: string): Promise<void> {
     publishEvent(`student:${file.studentId}`, 'file:ready', { fileId, pages: result.pages });
     logger.info({ fileId, pages: result.pages }, 'file_converted');
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Conversion failed';
+    const code = classifyConversionError(err);
+    // The raw error (library internals/paths) goes to the redacted server log
+    // only; the DB stores a closed-set code and the student sees its message.
+    logger.error({ err, fileId, code }, 'file_conversion_failed');
     await prisma.uploadedFile.update({
       where: { id: fileId },
-      // sanitized, human-readable reason only — no stack traces to the client
-      data: { status: 'failed', error: message.slice(0, 300) },
+      data: { status: 'failed', error: code },
     });
-    publishEvent(`student:${file.studentId}`, 'file:failed', { fileId, error: message.slice(0, 300) });
-    logger.error({ err, fileId }, 'file_conversion_failed');
-    throw err; // let BullMQ retry transient failures
+    publishEvent(`student:${file.studentId}`, 'file:failed', { fileId, ...publicFileError(code)! });
+    // Permanent classes are not retried; transient ones are re-run by BullMQ.
+    if (!isPermanent(code)) throw err;
   }
 }
 
-const RECOVERABLE_CONTENT_STATUSES = new Set([
-  'pending_payment',
-  'awaiting_arrival',
-  'queued',
-  'notified',
-  'otp_verified',
-  'printing',
-]);
+/** Same set the scheduling side uses: see the reference-count notes in fileRetention.ts. */
+const RECOVERABLE_CONTENT_STATUSES = new Set<string>(ACTIVE_FILE_JOB_STATUSES);
 
 export function keysForDeletion(file: {
   id: string;

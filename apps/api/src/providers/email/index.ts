@@ -24,7 +24,13 @@ class ResendEmailProvider implements EmailProvider {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: env.EMAIL_FROM, to, subject, text }),
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to,
+        subject,
+        text,
+        ...(env.EMAIL_REPLY_TO ? { reply_to: env.EMAIL_REPLY_TO } : {}),
+      }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {

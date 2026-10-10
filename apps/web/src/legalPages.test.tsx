@@ -7,12 +7,25 @@ import App from './App.js';
 // Leaflet touches `window` on import; the map picker is irrelevant to these static pages.
 vi.mock('./components/ShopLocationPicker.js', () => ({ default: () => null }));
 import Welcome from './pages/student/Welcome.js';
+import Privacy from './pages/legal/Privacy.js';
+import Terms from './pages/legal/Terms.js';
+import Refunds from './pages/legal/Refunds.js';
+import Support from './pages/legal/Support.js';
 import * as legal from './lib/legal.js';
 
+// Route pages are code-split (React.lazy), which static rendering cannot resolve; render them directly.
+const pages: Record<string, () => JSX.Element> = {
+  '/privacy': Privacy,
+  '/terms': Terms,
+  '/refunds': Refunds,
+  '/support': Support,
+};
+
 function at(path: string): string {
+  const Page = pages[path];
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={[path]}>
-      <App />
+      {Page ? <Page /> : <App />}
     </MemoryRouter>,
   );
 }
@@ -78,10 +91,12 @@ describe('supplied contact details', () => {
     const support = at('/support');
     expect(support).toContain('mailto:admin@printqs.com');
     expect(support).toContain('href="tel:+917822875508"');
-    expect(support).toContain('Shivam Mishra');
+    expect(support).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
     expect(support).toContain('Bhiwandi, Maharashtra, India');
     const privacy = at('/privacy');
-    expect(privacy).toContain('Shivam Mishra');
+    expect(privacy).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
+    expect(at('/terms')).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
+    expect(at('/refunds')).toContain('Shivam Ramkumar Mishra (individual proprietor), trading as PrintQs');
     expect(privacy).toContain('Bhiwandi, Maharashtra');
     expect(legal.GOVERNING_LAW_CITY).toBeNull();
     expect(at('/terms')).not.toContain('courts at');
