@@ -41,3 +41,5 @@ export const counterReleaseLimiter = makeLimiter('counter-release', 60_000, 10, 
 export const firebaseSessionLimiter = makeLimiter('firebase-session', 60_000, 120);
 export const loginLimiter = makeLimiter('login', 60_000, 5);
 export const uploadLimiter = makeLimiter('upload', 60_000, 10);
+// Fee Checkout order creation / verification calls the payment provider.
+export const feeActionLimiter = makeLimiter('fee-action', 60_000, 20);

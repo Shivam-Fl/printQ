@@ -62,6 +62,7 @@ publicRouter.get(
         latitude: true,
         longitude: true,
         acceptingOrders: true,
+        feeBlockedAt: true,
         campus: { select: { name: true } },
         printers: { select: { id: true, status: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
@@ -77,7 +78,7 @@ publicRouter.get(
           name: shop.name,
           campusName: shop.campus!.name,
           address: shop.address,
-          open: shop.acceptingOrders
+          open: shop.acceptingOrders && !shop.feeBlockedAt
             && shop.latitude != null
             && shop.longitude != null
             && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
@@ -121,6 +122,7 @@ publicRouter.post(
         latitude: true,
         longitude: true,
         acceptingOrders: true,
+        feeBlockedAt: true,
         campus: { select: { name: true } },
         printers: { select: { id: true, status: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
@@ -137,7 +139,7 @@ publicRouter.post(
         campusName: shop.campus!.name,
         latitude: shop.latitude,
         longitude: shop.longitude,
-        open: shop.acceptingOrders
+        open: shop.acceptingOrders && !shop.feeBlockedAt
           && shop.latitude != null
           && shop.longitude != null
           && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
@@ -166,6 +168,7 @@ publicRouter.get(
         latitude: true,
         longitude: true,
         acceptingOrders: true,
+        feeBlockedAt: true,
         printOptions: true,
         printers: {
           select: {
@@ -200,7 +203,8 @@ publicRouter.get(
         name: shop.name,
         address: shop.address,
         campusName: shop.campus!.name,
-        open: shop.acceptingOrders && shop.latitude != null && shop.longitude != null && online.length > 0,
+        open: shop.acceptingOrders && !shop.feeBlockedAt && shop.latitude != null && shop.longitude != null && online.length > 0,
+        temporarilyUnavailable: Boolean(shop.feeBlockedAt),
         colorAvailable,
         rating: {
           average: ratingAgg._avg.rating != null ? Math.round(ratingAgg._avg.rating * 10) / 10 : null,

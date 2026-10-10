@@ -12,6 +12,10 @@ import { validateBody } from '../../middleware/validate.js';
 import { emailProvider } from '../../providers/email/index.js';
 import { logger } from '../../lib/logger.js';
 import { invalidatePublicCaches } from '../public/cache.js';
+import { computeFeeAccount } from '../fees/account.js';
+import { UNPAID_STATEMENT_STATUSES } from '../fees/feeConfig.js';
+import { afterBlockChange } from '../fees/enforcement.js';
+import { emitFeeNotice } from '../fees/notices.js';
 
 export const adminRouter = Router();
 
@@ -58,6 +62,11 @@ const campusPatchSchema = z.object({
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
+const liftBlockSchema = z.object({
+  reason: z.string().trim().min(10).max(500),
+  // The evaluator will not re-block before the override ends.
+  days: z.number().int().min(1).max(14).default(3),
+}).strict();
 const counterRefundSchema = z.object({
   studentConfirmed: z.literal(true),
   method: z.enum(['cash', 'shop_upi']),
@@ -275,9 +284,96 @@ adminRouter.get(
         campus: { select: { name: true, isActive: true } },
         printers: { select: { id: true, status: true, osPrinterName: true } },
         agents: { select: { id: true, status: true } },
+        feeBlockedAt: true, feeBlockReason: true, feeBlockOverrideUntil: true,
       },
     });
-    res.json({ shops });
+    // One query for every listed shop's unpaid statements (no per-shop fan-out).
+    const unpaid = await prisma.shopCommissionStatement.findMany({
+      where: { shopId: { in: shops.map((s) => s.id) }, status: { in: UNPAID_STATEMENT_STATUSES }, amountDuePaise: { gt: 0 } },
+      select: { shopId: true, amountDuePaise: true, paidPaise: true, dueAt: true },
+    });
+    const now = new Date();
+    res.json({
+      shops: shops.map((shop) => {
+        const mine = unpaid.filter((s) => s.shopId === shop.id && s.amountDuePaise > s.paidPaise);
+        const overdue = mine.filter((s) => s.dueAt && s.dueAt <= now);
+        return {
+          ...shop,
+          fees: {
+            statementsDuePaise: mine.reduce((sum, s) => sum + s.amountDuePaise - s.paidPaise, 0),
+            overdueStatements: overdue.length,
+            overduePaise: overdue.reduce((sum, s) => sum + s.amountDuePaise - s.paidPaise, 0),
+            state: shop.feeBlockedAt ? 'blocked' : overdue.length ? 'overdue' : mine.length ? 'due' : 'paid_up',
+          },
+        };
+      }),
+    });
+  }),
+);
+
+/** Fee detail for one shop: statements, payments and the support block history. */
+adminRouter.get(
+  '/shops/:id/fees',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const id = param(req, 'id');
+    const shop = await prisma.shop.findUnique({
+      where: { id },
+      select: { id: true, name: true, feeBlockedAt: true, feeBlockReason: true, feeBlockOverrideUntil: true },
+    });
+    if (!shop) throw notFound();
+    const [account, payments, events] = await Promise.all([
+      computeFeeAccount(prisma, id),
+      prisma.shopFeePayment.findMany({
+        where: { shopId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { id: true, amountPaise: true, status: true, providerPaymentId: true, paidAt: true, createdAt: true },
+      }),
+      prisma.shopFeeEvent.findMany({ where: { shopId: id }, orderBy: { createdAt: 'desc' }, take: 30 }),
+    ]);
+    res.json({ shop, fees: { ...account, payments, events } });
+  }),
+);
+
+/**
+ * Support override for a fee block (e.g. payment made outside the app). The
+ * reason is mandatory and audited; the evaluator will not re-block until the
+ * override window ends. It does not forgive the statements.
+ */
+adminRouter.post(
+  '/shops/:id/fees/lift-block',
+  requireAdmin,
+  validateBody(liftBlockSchema),
+  asyncHandler(async (req, res) => {
+    const id = param(req, 'id');
+    const { reason, days } = req.body as z.infer<typeof liftBlockSchema>;
+    const now = new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Shop" WHERE "id" = ${id} FOR UPDATE`;
+      const shop = await tx.shop.findUnique({ where: { id }, select: { feeBlockedAt: true } });
+      if (!shop) throw notFound();
+      if (!shop.feeBlockedAt) throw conflict('This shop is not blocked');
+      const until = new Date(now.getTime() + days * 86_400_000);
+      await tx.shop.update({
+        where: { id },
+        data: { feeBlockedAt: null, feeBlockReason: null, feeBlockOverrideUntil: until },
+      });
+      await tx.shopFeeEvent.create({ data: { shopId: id, kind: 'block_lifted_by_admin', metadata: { days, adminId: req.admin!.id } } });
+      const event = await tx.adminAuditEvent.create({
+        data: audit(req.admin!.id, 'shop.fee_block_lifted', 'shop', id, { reason, days }),
+      });
+      return { until, auditId: event.id };
+    });
+    await afterBlockChange(id, { change: 'unblocked' });
+    await emitFeeNotice({
+      shopId: id,
+      kind: 'unblocked',
+      dedupeKey: `lift-${result.auditId}`,
+      title: 'Your PrintQs shop is open again',
+      body: 'Our support team has reopened your shop for new orders. Please clear any pending PrintQs fee from the Earnings page.',
+    }).catch((error) => logger.error({ error }, 'fee_lift_notice_failed'));
+    res.json({ ok: true, overrideUntil: result.until });
   }),
 );
 
