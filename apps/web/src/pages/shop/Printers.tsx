@@ -374,7 +374,7 @@ export default function Printers() {
         </div>
       )}
 
-      <div className="table-shell printer-table">
+      <div className="table-shell printer-table" tabIndex={0} role="region" aria-label="Printers">
         <table>
           <thead>
             <tr><th>Label</th><th>Paper</th><th>Colour</th><th>Finishing</th><th>Speed</th><th>Linked printer</th><th>Driver media</th><th>Test page</th><th>Status</th></tr>
@@ -396,6 +396,7 @@ export default function Printers() {
                       <span className="mono">{p.osPrinterName}</span>
                     ) : linking === p.id ? (
                       <select
+                        aria-label={`Choose the detected printer for ${p.label}`}
                         autoFocus
                         value=""
                         onChange={(e) => e.target.value && void linkPrinter(p.id, e.target.value)}
@@ -438,7 +439,7 @@ export default function Printers() {
                     {p.lastTestStatus === 'failed' && <p className="dim" style={{ margin: '6px 0 0' }}>Test failed: {p.lastTestError || 'retry after checking the printer'}</p>}
                   </td>
                   <td>
-                    <select value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
+                    <select aria-label={`Status of ${p.label}`} value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
                       <option value="online">online</option>
                       <option value="offline">offline</option>
                       <option value="jammed">jammed</option>
