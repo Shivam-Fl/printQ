@@ -100,3 +100,6 @@ export function makeFailureLimiter(prefix: string, windowMs: number, perShopIp: 
 // requests before printing: those succeed (2xx) and return their own slot.
 // Only failures stay counted: 10/min per (shop, IP), 40/min per shop.
 export const counterReleaseLimiter = makeFailureLimiter('counter-release', 60_000, 10, 40);
+
+// Fee Checkout order creation / verification calls the payment provider.
+export const feeActionLimiter = makeLimiter('fee-action', 60_000, 20);

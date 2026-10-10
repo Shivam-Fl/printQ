@@ -104,7 +104,7 @@ export async function getOpenCommissionBalance(shopId: string): Promise<number> 
 
 /** Private owner view; it never exposes the shop-base/markup split to students. */
 export async function getCommissionOverview(shopId: string) {
-  const [balance, entries, statements] = await Promise.all([
+  const [balance, entries] = await Promise.all([
     getOpenCommissionBalance(shopId),
     prisma.shopCommissionEntry.findMany({
       where: { shopId },
@@ -120,31 +120,12 @@ export async function getCommissionOverview(shopId: string) {
         jobId: true,
       },
     }),
-    prisma.shopCommissionStatement.findMany({
-      where: { shopId },
-      orderBy: { periodEnd: 'desc' },
-      take: 12,
-      select: {
-        id: true,
-        periodStart: true,
-        periodEnd: true,
-        grossCommissionPaise: true,
-        creditPaise: true,
-        amountDuePaise: true,
-        status: true,
-        frozenAt: true,
-        preDebitNoticeSentAt: true,
-        debitNotBefore: true,
-      },
-    }),
   ]);
   return {
     amountDuePaise: Math.max(0, balance),
     accountCreditPaise: Math.max(0, -balance),
     collectionCadence: 'weekly' as const,
-    collectionStatus: 'not_configured' as const,
     entries,
-    statements,
   };
 }
 

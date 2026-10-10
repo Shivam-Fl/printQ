@@ -4,7 +4,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { fileTypeFromBuffer } from 'file-type';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, notFound } from '../../lib/errors.js';
+import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { requireStudent, requireStudentOrPreviewToken } from '../../middleware/auth.js';
 import { PREVIEW_TOKEN_TTL_SECONDS, signPreviewToken } from '../../lib/tokens.js';
@@ -155,6 +155,7 @@ filesRouter.post(
     const shopSlug = typeof req.body?.shopSlug === 'string' ? req.body.shopSlug : '';
     const shop = await prisma.shop.findUnique({ where: { slug: shopSlug } });
     if (!shop) throw badRequest('Unknown shop');
+    if (shop.feeBlockedAt) throw conflict('This shop is temporarily unavailable. Please try again later.');
 
     // validate + store each source; keep order for the merge
     const sources: { key: string; mime: string; name: string }[] = [];

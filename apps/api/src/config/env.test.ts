@@ -67,48 +67,63 @@ describe('environment isolation contract', () => {
     expect(result.stderr).toContain('Production cannot use a Razorpay TEST key');
   });
 
-  it('permits recurring collection test mode only outside production', () => {
-    expect(loadConfig({ SHOP_COLLECTION_MODE: 'test' }).status).toBe(0);
-    const result = loadConfig({
-      NODE_ENV: 'production',
-      PRINTQ_ENVIRONMENT: 'production',
-      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
-      DATABASE_NAMESPACE: 'production',
-      QUEUE_NAMESPACE: 'printq-production',
-      STORAGE_NAMESPACE: 'printq-production',
-      CORS_ORIGINS: 'https://api.example.test',
-      STORAGE_DRIVER: 's3',
-      S3_BUCKET: 'printq-production-test-fixture',
-      S3_ACCESS_KEY_ID: 'test-access-key',
-      S3_SECRET_ACCESS_KEY: 'test-secret-key',
-      SHOP_COLLECTION_MODE: 'test',
-    });
+  const PROD = {
+    NODE_ENV: 'production',
+    PRINTQ_ENVIRONMENT: 'production',
+    DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
+    DATABASE_NAMESPACE: 'production',
+    QUEUE_NAMESPACE: 'printq-production',
+    STORAGE_NAMESPACE: 'printq-production',
+    CORS_ORIGINS: 'https://api.example.test',
+    STORAGE_DRIVER: 's3',
+    S3_BUCKET: 'printq-production-test-fixture',
+    S3_ACCESS_KEY_ID: 'test-access-key',
+    S3_SECRET_ACCESS_KEY: 'test-secret-key',
+  };
+  const FEE_RAZORPAY = {
+    FEE_PAYMENT_PROVIDER: 'razorpay',
+    RAZORPAY_KEY_SECRET: 'secret-placeholder',
+    RAZORPAY_WEBHOOK_SECRET: 'whsec-placeholder',
+  };
+
+  it('defaults shop fee payments to disabled and allows mock only outside production', () => {
+    expect(loadConfig({}).status).toBe(0);
+    expect(loadConfig({ FEE_PAYMENT_PROVIDER: 'mock' }).status).toBe(0);
+    const result = loadConfig({ ...PROD, FEE_PAYMENT_PROVIDER: 'mock' });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
+    expect(result.stderr).toContain('FEE_PAYMENT_PROVIDER=mock is prohibited in the production environment');
   });
 
-  it('rejects live recurring credentials in development and TEST credentials in production', () => {
-    const liveInDev = loadConfig({ RAZORPAY_RECURRING_TEST_KEY_ID: 'rzp_live_forbidden' });
-    expect(liveInDev.status).toBe(1);
-    expect(liveInDev.stderr).toContain('recurring TEST key');
-
-    const testInProd = loadConfig({
-      NODE_ENV: 'production', PRINTQ_ENVIRONMENT: 'production',
-      DATABASE_URL: 'postgresql://printq:printq@127.0.0.1:5432/printq_production',
-      DATABASE_NAMESPACE: 'production', QUEUE_NAMESPACE: 'printq-production',
-      STORAGE_NAMESPACE: 'printq-production', CORS_ORIGINS: 'https://api.example.test',
-      STORAGE_DRIVER: 's3', S3_BUCKET: 'printq-production-test-fixture',
-      S3_ACCESS_KEY_ID: 'test-access-key', S3_SECRET_ACCESS_KEY: 'test-secret-key',
-      RAZORPAY_RECURRING_TEST_KEY_ID: 'rzp_test_forbidden',
-    });
-    expect(testInProd.status).toBe(1);
-    expect(testInProd.stderr).toContain('production cannot hold recurring TEST credentials');
+  it('requires Razorpay credentials for the razorpay fee provider', () => {
+    const result = loadConfig({ FEE_PAYMENT_PROVIDER: 'razorpay' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('FEE_PAYMENT_PROVIDER=razorpay requires');
+    expect(loadConfig({ ...FEE_RAZORPAY, RAZORPAY_KEY_ID: 'rzp_test_placeholder' }).status).toBe(0);
   });
 
-  it('fails closed for live recurring collection before explicit cutover code exists', () => {
-    const result = loadConfig({ SHOP_COLLECTION_MODE: 'live' });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('SHOP_COLLECTION_MODE=live is not enabled by this release');
+  it('accepts only live keys for production fee payments and refuses TEST keys', () => {
+    expect(loadConfig({ ...PROD, ...FEE_RAZORPAY, RAZORPAY_KEY_ID: 'rzp_live_placeholder' }).status).toBe(0);
+    const testKey = loadConfig({ ...PROD, ...FEE_RAZORPAY, RAZORPAY_KEY_ID: 'rzp_test_placeholder' });
+    expect(testKey.status).toBe(1);
+    expect(testKey.stderr).toContain('Production fee payments require a Razorpay live key');
+    expect(loadConfig({ ...PROD, ...FEE_RAZORPAY, RAZORPAY_KEY_ID: 'rzp_test_placeholder' }).stderr)
+      .toContain('live key');
+  });
+
+  it('refuses live keys outside production unless explicitly allowed', () => {
+    const refused = loadConfig({ ...FEE_RAZORPAY, RAZORPAY_KEY_ID: 'rzp_live_placeholder' });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain('cannot use a live Razorpay key');
+    expect(loadConfig({
+      ...FEE_RAZORPAY,
+      RAZORPAY_KEY_ID: 'rzp_live_placeholder',
+      ALLOW_LIVE_RAZORPAY_KEYS_OUTSIDE_PRODUCTION: 'true',
+    }).status).toBe(0);
+  });
+
+  it('bounds the fee payment terms configuration', () => {
+    expect(loadConfig({ FEE_PAYMENT_TERMS_DAYS: '0' }).status).toBe(1);
+    expect(loadConfig({ FEE_PAYMENT_TERMS_DAYS: '14', FEE_OVERDUE_BLOCK_AFTER_DAYS: '2' }).status).toBe(0);
   });
 
   it('parses a literal false simulator flag as false in production', () => {

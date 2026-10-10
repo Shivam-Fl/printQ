@@ -20,6 +20,8 @@ import { expireReveal, expireStalePreparedOrders, handleGraceExpiry, sweepExpire
 import { failOrphanedPrints } from '../modules/jobs/printLease.js';
 import { reconcileVerifiedPrintCommissions } from '../modules/commission/service.js';
 import { freezeCompletedWeeklyStatements } from '../modules/commission/statementService.js';
+import { runFeeMaintenance } from '../modules/fees/enforcement.js';
+import { reconcileStuckFeeOrders } from '../modules/fees/payments.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
 import { publishPendingRealtimeProjections } from '../realtime/projections.js';
 import { publishPendingFirebaseNotifications } from '../providers/fcm/outbox.js';
@@ -112,6 +114,12 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
         }
         else if (job.name === 'revealExpirySweep') await sweepExpiredReveals();
         else if (job.name === 'weeklyStatements') await freezeCompletedWeeklyStatements();
+        else if (job.name === 'feeMaintenance') {
+          // Freeze first so a just-ended week is billable and notified in this pass.
+          await freezeCompletedWeeklyStatements();
+          await runFeeMaintenance();
+        }
+        else if (job.name === 'feeReconcile') await reconcileStuckFeeOrders();
         else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
         else if (job.name === 'firebaseNotifications') await publishPendingFirebaseNotifications();
       },
@@ -129,8 +137,14 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     // The unique shop/week constraint makes the hourly trigger safe; it only
     // freezes the prior completed IST week and cannot debit or notify anyone.
     await maintenanceQueue.upsertJobScheduler('weekly-statements', { every: 3_600_000 }, { name: 'weeklyStatements' });
-    // Remove the retired daily Route-payout scheduler. Weekly commission
-    // collection gets its own TEST-only statement worker after mandate QA.
+    // Platform-fee cycle: hourly and entirely PostgreSQL-driven (like the
+    // sweepers above), so a Redis loss only delays it until the scheduler is
+    // re-registered at boot. Notices are deduped by a unique key per
+    // statement/threshold; blocks/unblocks are idempotent. The reconcile job
+    // settles orders whose webhook was missed.
+    await maintenanceQueue.upsertJobScheduler('fee-maintenance-hourly', { every: 3_600_000 }, { name: 'feeMaintenance' });
+    await maintenanceQueue.upsertJobScheduler('fee-reconcile', { every: 300_000 }, { name: 'feeReconcile' });
+    // Remove the retired daily Route-payout scheduler.
     await maintenanceQueue.removeJobScheduler('payout-sweep').catch(() => undefined);
     // The worker is a no-op until the explicitly isolated Firebase projection
     // target is enabled. Once enabled, it repairs temporary Firebase outages

@@ -222,3 +222,18 @@ Supersedes the old `NEAR_FRONT_THRESHOLD` code reveal.
   waiting, absent or not-checked-in jobs still need the explicit override.
 - **Check-in zone** is 200 m by default (migration moved every shop to 200; owners may still pick
   20/50/100/200).
+
+
+## 13. Shop platform-fee payments (October 2026)
+
+Decision: no UPI AutoPay/mandates. Students pay at the shop; PrintQs earns a
+commission per confirmed print (ledger `print_commission`). The shop owner pays
+the amount due through a one-time Razorpay Checkout order.
+
+- **Amount due** (`modules/fees/account.ts`): unpaid weekly statements (outstanding = amount - paid) plus current-week accrual (net of credits and earlier overpayment). Computed server-side under the shop row lock; `POST /api/shop/fees/order` takes an empty body (a client amount is a 400). One open order per shop; reused when unexpired and unchanged, else replaced.
+- **Settlement** (`modules/fees/payments.ts`): only from the verified webhook, the 5-minute reconcile job, or the server-side re-check after the signed Checkout callback. One `statement_settlement` ledger entry per payment, allocated oldest statement first; overpayment is applied to the next frozen statement. Idempotent per order.
+- **Cadence**: IST Monday-Sunday statement freeze (existing), `dueAt = frozenAt + FEE_PAYMENT_TERMS_DAYS`; overdue when unpaid past `dueAt`; blocked at `dueAt + FEE_OVERDUE_BLOCK_AFTER_DAYS`.
+- **Enforcement**: `Shop.feeBlockedAt` stops new quotes, orders, uploads and the storefront; existing jobs continue; the owner toggle cannot bypass it; settlement or an audited admin lift clears it.
+- **Notices**: `ShopFeeNotice` (unique `dedupeKey`) for statement ready, reminder, final warning, blocked, unblocked and payment received; channels: dashboard banner (live state), Resend email, owner Web Push.
+- **Data**: migration `20261011120000_shop_fee_payments` (new tables `ShopFeePayment`, `ShopFeeAllocation`, `ShopFeeNotice`, `ShopFeeEvent`, `ShopPushSubscription`; new columns on `Shop`, `ShopCommissionEntry`, `ShopCommissionStatement`). AutoPay tables are left dormant.
+- See DEPLOY.md "Shop fee payments" for configuration, webhook and go-live steps.

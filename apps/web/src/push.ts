@@ -75,3 +75,21 @@ async function enableFirebaseMessaging(): Promise<boolean> {
   });
   return true;
 }
+
+/** Shop-owner device registration for fee reminders (VAPID Web Push only). */
+export async function enableShopPush(): Promise<boolean> {
+  if (!pushSupported()) return false;
+  try {
+    const { enabled, key } = await api<{ enabled: boolean; key: string | null }>('/api/push/vapid-public-key');
+    if (!enabled || !key) return false;
+    if ((await Notification.requestPermission()) !== 'granted') return false;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription =
+      (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToUint8(key) }));
+    await api('/api/shop/fees/push/subscribe', { method: 'POST', role: 'shop', body: subscription.toJSON() });
+    return true;
+  } catch {
+    return false;
+  }
+}

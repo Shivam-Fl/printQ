@@ -108,15 +108,16 @@ const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
-  // Shop commission collection is isolated from the retired student-payment
-  // configuration. `test` can only be used outside production; `live` stays
-  // disabled until the final explicit cutover confirmation and use-case approval.
-  SHOP_COLLECTION_MODE: z.enum(['disabled', 'test', 'live']).default('disabled'),
-  SHOP_COLLECTION_PILOT_CAP_PAISE: z.coerce.number().int().min(100).max(1_500_000).default(1_500_000),
-  RAZORPAY_RECURRING_WEBHOOK_SECRET: z.string().optional(),
-  // Distinct from retired student checkout keys and never accepted in production.
-  RAZORPAY_RECURRING_TEST_KEY_ID: z.string().optional(),
-  RAZORPAY_RECURRING_TEST_KEY_SECRET: z.string().optional(),
+  // Shop platform-fee payments (shops pay PrintQs the commission it is owed via
+  // a one-time Razorpay Checkout order). `mock` is a local/dev instant-settle
+  // button and is refused in production. Independent of PAYMENT_PROVIDER.
+  FEE_PAYMENT_PROVIDER: z.enum(['disabled', 'mock', 'razorpay']).default('disabled'),
+  // Days a shop has to pay a weekly statement after it is frozen.
+  FEE_PAYMENT_TERMS_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  // Extra days after dueAt before an unpaid statement blocks new orders.
+  FEE_OVERDUE_BLOCK_AFTER_DAYS: z.coerce.number().int().min(0).max(30).default(0),
+  // Live keys are refused outside production unless explicitly allowed.
+  ALLOW_LIVE_RAZORPAY_KEYS_OUTSIDE_PRODUCTION: envBoolean.default(false),
 
   // Student login OTPs happen pre-session, so they can't be in-app — an SMS
   // provider is required for a real launch (console just logs to the API).
@@ -211,28 +212,28 @@ if (env.SHOP_PAYOUT_PROVIDER === 'razorpay_route') {
     process.exit(1);
   }
 }
-if (env.SHOP_COLLECTION_MODE === 'test' && env.PRINTQ_ENVIRONMENT === 'production') {
+if (env.FEE_PAYMENT_PROVIDER === 'razorpay') {
+  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET || !env.RAZORPAY_WEBHOOK_SECRET) {
+    // eslint-disable-next-line no-console
+    console.error('FEE_PAYMENT_PROVIDER=razorpay requires RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET');
+    process.exit(1);
+  }
+  if (!/^rzp_(?:test|live)_/.test(env.RAZORPAY_KEY_ID)) {
+    // eslint-disable-next-line no-console
+    console.error('RAZORPAY_KEY_ID must start with rzp_test_ or rzp_live_');
+    process.exit(1);
+  }
+}
+if (env.FEE_PAYMENT_PROVIDER === 'mock' && env.PRINTQ_ENVIRONMENT === 'production') {
   // eslint-disable-next-line no-console
-  console.error('SHOP_COLLECTION_MODE=test is prohibited in the production environment');
+  console.error('FEE_PAYMENT_PROVIDER=mock is prohibited in the production environment');
   process.exit(1);
 }
-if (env.RAZORPAY_RECURRING_TEST_KEY_ID && !env.RAZORPAY_RECURRING_TEST_KEY_ID.startsWith('rzp_test_')) {
+if (env.PRINTQ_ENVIRONMENT === 'production' && env.FEE_PAYMENT_PROVIDER === 'razorpay'
+  && !env.RAZORPAY_KEY_ID!.startsWith('rzp_live_')) {
+  // The TEST-key refusal below shares this requirement; keep the message explicit.
   // eslint-disable-next-line no-console
-  console.error('Dedicated recurring TEST key must use Razorpay TEST mode');
-  process.exit(1);
-}
-if (env.PRINTQ_ENVIRONMENT === 'production'
-  && (env.RAZORPAY_RECURRING_TEST_KEY_ID || env.RAZORPAY_RECURRING_TEST_KEY_SECRET)) {
-  // eslint-disable-next-line no-console
-  console.error('PrintQs production cannot hold recurring TEST credentials');
-  process.exit(1);
-}
-if (env.SHOP_COLLECTION_MODE === 'live') {
-  // There is intentionally no source-controlled switch for live recurring
-  // money movement. This fail-closed guard remains until a separately audited
-  // cutover deployment implements the user-confirmed provider adapter.
-  // eslint-disable-next-line no-console
-  console.error('SHOP_COLLECTION_MODE=live is not enabled by this release');
+  console.error('Production fee payments require a Razorpay live key (rzp_live_)');
   process.exit(1);
 }
 if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
@@ -332,9 +333,10 @@ if (env.PRINTQ_ENVIRONMENT !== expectedEnvironment) {
 }
 const isLiveRazorpayKey = env.RAZORPAY_KEY_ID?.startsWith('rzp_live_') ?? false;
 const isTestRazorpayKey = env.RAZORPAY_KEY_ID?.startsWith('rzp_test_') ?? false;
-if (env.PRINTQ_ENVIRONMENT === 'development' && isLiveRazorpayKey) {
+if (env.PRINTQ_ENVIRONMENT !== 'production' && isLiveRazorpayKey && !env.ALLOW_LIVE_RAZORPAY_KEYS_OUTSIDE_PRODUCTION) {
+  const label = env.PRINTQ_ENVIRONMENT.charAt(0).toUpperCase() + env.PRINTQ_ENVIRONMENT.slice(1);
   // eslint-disable-next-line no-console
-  console.error('Development cannot use a live Razorpay key');
+  console.error(`${label} cannot use a live Razorpay key`);
   process.exit(1);
 }
 if (env.PRINTQ_ENVIRONMENT === 'production' && isTestRazorpayKey) {

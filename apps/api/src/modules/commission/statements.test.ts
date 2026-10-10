@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PRE_DEBIT_NOTICE_MS, debitGateReason, deriveStatementAmounts, hasUnappliedCredit } from './statements.js';
+import { deriveStatementAmounts, hasUnappliedCredit } from './statements.js';
 import { lastCompletedWeeklyPeriodInIndia } from './statementService.js';
 
 describe('weekly commission statement arithmetic', () => {
@@ -23,35 +23,6 @@ describe('weekly commission statement arithmetic', () => {
       { id: 'credit', amountPaise: -500 },
       { id: 'later-commission', amountPaise: 800 },
     ]))).toBe(false);
-  });
-});
-
-describe('variable recurring-debit gate', () => {
-  const now = new Date('2026-09-21T12:00:00.000Z');
-  const valid = {
-    statementStatus: 'notice_sent' as const,
-    amountDuePaise: 15_000,
-    noticeSentAt: new Date(now.getTime() - PRE_DEBIT_NOTICE_MS),
-    debitNotBefore: now,
-    mandateStatus: 'active' as const,
-    mandateMaxAmountPaise: 20_000,
-    mandateValidFrom: new Date('2026-09-01T00:00:00.000Z'),
-    mandateValidUntil: new Date('2026-10-01T00:00:00.000Z'),
-    mandateTermsAcceptedAt: new Date('2026-08-31T00:00:00.000Z'),
-    pilotCapPaise: 1_500_000,
-    now,
-  };
-
-  it('allows an exact test debit only after the 24-hour notice window', () => {
-    expect(debitGateReason(valid)).toBeNull();
-  });
-
-  it('blocks early, oversized and inactive-mandate attempts', () => {
-    expect(debitGateReason({ ...valid, debitNotBefore: new Date(now.getTime() + 1) })).toMatch(/still open/);
-    expect(debitGateReason({ ...valid, amountDuePaise: 1_500_001 })).toMatch(/pilot debit cap/);
-    expect(debitGateReason({ ...valid, mandateStatus: 'revoked' })).toMatch(/not active/);
-    expect(debitGateReason({ ...valid, mandateValidUntil: now })).toMatch(/validity period/);
-    expect(debitGateReason({ ...valid, mandateTermsAcceptedAt: null })).toMatch(/terms/);
   });
 });
 
