@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import LegalLayout from '../../components/LegalLayout.js';
-import { GRIEVANCE_OFFICER_NAME, LEGAL_ENTITY_NAME, LEGAL_PRODUCT_NAME, grievanceEmail } from '../../lib/legal.js';
+import { GRIEVANCE_OFFICE_LOCATION, GRIEVANCE_OFFICER_NAME, LEGAL_ENTITY_NAME, LEGAL_PRODUCT_NAME, grievanceEmail } from '../../lib/legal.js';
 
 export default function Privacy() {
   const gEmail = grievanceEmail();
@@ -103,6 +103,7 @@ export default function Privacy() {
         {GRIEVANCE_OFFICER_NAME || gEmail ? (
           <p>
             {GRIEVANCE_OFFICER_NAME && <>Name: {GRIEVANCE_OFFICER_NAME}<br /></>}
+            {GRIEVANCE_OFFICE_LOCATION && <>Office: {GRIEVANCE_OFFICE_LOCATION}<br /></>}
             {gEmail && <>Email: <a href={`mailto:${gEmail}`}>{gEmail}</a></>}
           </p>
         ) : (
