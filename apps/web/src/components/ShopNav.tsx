@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { api, clearToken, getShopRole, getToken, setShopRole } from '../api.js';
+import { api, getShopRole, getToken, setShopRole, signOutShop } from '../api.js';
 import { resetSockets } from '../socket.js';
 
 const LINKS = [
@@ -51,8 +51,8 @@ export default function ShopNav() {
     };
   }, []);
 
-  function signOut() {
-    clearToken('shop');
+  async function signOut() {
+    await signOutShop(); // revokes the session server-side, then clears the token
     resetSockets();
     navigate('/dashboard/login');
   }
