@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary.js';
+import SessionGuard from './components/SessionGuard.js';
 import { titleForPath } from './lib/routeTitles.js';
 import Toasts from './components/Toasts.js';
 import EnvironmentBanner from './components/EnvironmentBanner.js';
@@ -96,6 +97,7 @@ export default function App() {
       </Routes>
       </Suspense>
       </ErrorBoundary>
+      <SessionGuard />
       <Toasts />
     </>
   );

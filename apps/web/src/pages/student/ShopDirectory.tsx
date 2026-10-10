@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api.js';
+import { createLatestRequest, isAbortError } from '../../lib/latestRequest.js';
 import Topbar from '../../components/Topbar.js';
 import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
 import { useResource } from '../../lib/useResource.js';
@@ -27,6 +28,10 @@ export default function ShopDirectory() {
   const [nearby, setNearby] = useState(false);
   const [locationMessage, setLocationMessage] = useState('');
 
+  // One guard for text search and "near me": whichever started last wins, and
+  // an older response (or an aborted one) never overwrites it.
+  const latest = useRef(createLatestRequest());
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), q === '' ? 0 : 250);
     return () => clearTimeout(t);
@@ -41,7 +46,14 @@ export default function ShopDirectory() {
   const loading = locating || (!nearby && (searching || (list.status !== 'ready' && list.status !== 'error')));
   const shops = nearby ? nearbyShops : (list.data?.shops ?? []);
 
+  useEffect(() => {
+    const guard = latest.current;
+    return () => guard.cancel();
+  }, []);
+
   function searchAgain(value: string) {
+    latest.current.cancel(); // drop any in-flight "near me" lookup
+    setLocating(false);
     setNearby(false);
     setLocationMessage('');
     setQ(value);
@@ -56,24 +68,28 @@ export default function ShopDirectory() {
     setLocationMessage('Checking nearby counters…');
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        const ticket = latest.current.begin();
         try {
           const result = await api<{ shops: ShopRow[] }>('/api/public/shops/nearby', {
             method: 'POST',
+            signal: ticket.signal,
             body: {
               latitude: position.coords.latitude,
               longitude: position.coords.longitude,
               maxDistanceM: 5_000,
             },
           });
+          if (!ticket.isCurrent()) return; // the student typed a search meanwhile
           if (!isShopList(result)) throw new Error('bad response');
           setNearby(true);
           setQ('');
           setNearbyShops(result.shops);
           setLocationMessage('Nearby results use this one-time location only. PrintQs does not save it.');
-        } catch {
+        } catch (err) {
+          if (isAbortError(err) || !ticket.isCurrent()) return;
           setLocationMessage('Could not find nearby counters. Search by shop or campus instead.');
         } finally {
-          setLocating(false);
+          if (ticket.isCurrent()) setLocating(false);
         }
       },
       () => {

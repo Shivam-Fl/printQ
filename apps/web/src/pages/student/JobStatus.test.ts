@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { counterUpiIntentUri, paymentSummary } from './JobStatus.js';
+import { applyCheckInResult, counterUpiIntentUri, paymentSummary, type JobDetail } from './JobStatus.js';
+
+describe('optimistic check-in', () => {
+  it('shows the position and band from the check-in response immediately', () => {
+    const before = {
+      status: 'awaiting_arrival', position: null, etaMinutes: null, band: null, revealDeadlineAt: null,
+      absent: true, canCheckIn: true, arrivedAt: null, checkInCount: 1,
+    } as unknown as JobDetail;
+    const after = applyCheckInResult(before, {
+      id: 'j', status: 'queued', position: 3, etaMinutes: 4, band: 'arriving', revealDeadlineAt: null,
+    });
+    expect(after).toMatchObject({
+      status: 'queued', position: 3, etaMinutes: 4, band: 'arriving', absent: false, canCheckIn: false, checkInCount: 2,
+    });
+    expect(after.arrivedAt).not.toBeNull();
+  });
+});
 
 describe('payment summary', () => {
   it('shows a staff-confirmed pay-at-shop order as paid and exposes its receipt', () => {

@@ -1,6 +1,14 @@
 import { pino, type DestinationStream } from 'pino';
 import { env } from '../config/env.js';
 
+/**
+ * Query-string credentials (short-lived preview tokens, legacy ?token=) must
+ * never reach the logs, even though they expire in minutes.
+ */
+export function redactUrl(url: string | undefined): string | undefined {
+  return url?.replace(/([?&](?:pt|token|idToken|access_token)=)[^&#]*/gi, '$1[redacted]');
+}
+
 /** Structured JSON logs — searchable/aggregatable, per scalability pillar 4. */
 export function createLogger(destination?: DestinationStream) {
   const options = {

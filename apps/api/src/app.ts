@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
-import { logger } from './lib/logger.js';
+import { logger, redactUrl } from './lib/logger.js';
 import { trustProxySetting } from './lib/clientIpConfig.js';
 import { generalLimiter } from './middleware/rateLimit.js';
 import { createAppCheckMiddleware } from './middleware/appCheck.js';
@@ -59,7 +59,21 @@ export function createApp(): express.Express {
       },
     }),
   );
-  app.use(pinoHttp({ logger, customProps: (req) => ({ clientIp: req.ip }), autoLogging: { ignore: (req) => req.url === '/healthz' } }));
+  app.use(
+    pinoHttp({
+      logger,
+      customProps: (req) => ({ clientIp: req.ip }),
+      autoLogging: { ignore: (req) => req.url === '/healthz' },
+      serializers: {
+        // never log query-string credentials (e.g. the file-preview token)
+        req: (req: { id?: unknown; method?: string; url?: string }) => ({
+          id: req.id,
+          method: req.method,
+          url: redactUrl(req.url),
+        }),
+      },
+    }),
+  );
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 

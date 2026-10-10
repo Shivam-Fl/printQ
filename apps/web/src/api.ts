@@ -57,6 +57,21 @@ export function getShopRole(): 'owner' | 'staff' | null {
   return safeStorage.get('printq:shop:role') as 'owner' | 'staff' | null;
 }
 
+export const STUDENT_SESSION_EXPIRED_EVENT = 'printq:student-session-expired';
+export const STUDENT_SESSION_EXPIRED_MESSAGE = 'Please sign in again.';
+
+/**
+ * Central 401 handling for every student route: after one silent renewal
+ * attempt has failed, tell the app shell (SessionGuard) to go to /login.
+ */
+function expireStudentSession(): void {
+  try {
+    window.dispatchEvent(new Event(STUDENT_SESSION_EXPIRED_EVENT));
+  } catch {
+    /* non-browser environment */
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -132,7 +147,7 @@ export async function signOutShop(): Promise<void> {
 
 async function requestJson<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal },
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal; idempotencyKey?: string },
   allowStudentRenewal: boolean,
 ): Promise<T> {
   const headers: Record<string, string> = {};
@@ -141,6 +156,7 @@ async function requestJson<T>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
   Object.assign(headers, await appCheckHeaders());
+  if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
   let body: BodyInit | undefined;
   if (options.formData) {
     body = options.formData;
@@ -163,6 +179,11 @@ async function requestJson<T>(
       if (token) return requestJson<T>(path, options, false);
     }
     if (res.status === 401 && options.role) clearToken(options.role);
+    if (res.status === 401 && options.role === 'student') {
+      // Renewal already failed (or was not possible): the student must sign in again.
+      expireStudentSession();
+      throw new ApiError(401, STUDENT_SESSION_EXPIRED_MESSAGE, data);
+    }
     throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`, data);
   }
   return data as T;
@@ -170,12 +191,34 @@ async function requestJson<T>(
 
 export async function api<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal } = {},
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal; idempotencyKey?: string } = {},
 ): Promise<T> {
   return requestJson<T>(path, options, true);
 }
 
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
+
+/** Authenticated binary fetch (header auth, one silent student renewal). Used by the PDF preview. */
+export async function fetchBytes(path: string, role: Role, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const appCheck = await appCheckHeaders();
+  const send = (token: string | null) =>
+    fetch(`${API_URL}${path}`, {
+      headers: { ...appCheck, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal,
+      referrerPolicy: 'no-referrer',
+    });
+  let res = await send(getToken(role));
+  if (res.status === 401 && role === 'student') {
+    const token = await renewStudentSession();
+    if (token) res = await send(token);
+  }
+  if (res.status === 401) {
+    clearToken(role);
+    if (role === 'student') expireStudentSession();
+  }
+  if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
+  return res.arrayBuffer();
+}
 
 /** Fetch an authenticated binary response (e.g. a receipt PDF) and save it. */
 export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {
@@ -192,7 +235,10 @@ export async function downloadFile(path: string, role: Role, filename: string): 
       });
     }
   }
-  if (res.status === 401) clearToken(role);
+  if (res.status === 401) {
+    clearToken(role);
+    if (role === 'student') expireStudentSession();
+  }
   if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

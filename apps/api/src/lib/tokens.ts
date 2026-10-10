@@ -45,6 +45,34 @@ export function signAdminToken(adminId: string, sessionVersion: number): string 
   });
 }
 
+/** Lifetime of a link-able file preview token. Short on purpose: it may land in a URL. */
+export const PREVIEW_TOKEN_TTL_SECONDS = 120;
+
+/**
+ * Single-purpose token for opening one student's one file in a new tab (a plain
+ * link cannot carry an Authorization header). It is NOT a session token: it
+ * only works on the preview route and only for `fileId`.
+ */
+export function signPreviewToken(studentId: string, fileId: string): string {
+  return jwt.sign({ typ: 'file-preview', fid: fileId }, env.JWT_SECRET, {
+    subject: studentId,
+    expiresIn: PREVIEW_TOKEN_TTL_SECONDS,
+  });
+}
+
+/** The student id when `token` is a valid, unexpired preview token for exactly `fileId`. */
+export function verifyPreviewToken(token: string, fileId: string): string | null {
+  try {
+    const payload = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload;
+    if (payload.typ === 'file-preview' && payload.fid === fileId && typeof payload.sub === 'string') {
+      return payload.sub;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Returns null instead of throwing — callers decide the 401. */
 export function verifyToken(token: string): AuthClaims | null {
   try {
