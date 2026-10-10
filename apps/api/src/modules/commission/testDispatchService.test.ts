@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const now = new Date('2026-09-28T12:00:00.000Z');
 const state = vi.hoisted(() => ({
@@ -55,6 +55,10 @@ const client = {
 };
 
 beforeEach(() => {
+  // The service re-checks the mandate window against the real clock inside the
+  // transaction, so pin Date to the fixture's `now` (fixture is relative to it).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(now);
   state.env.SHOP_COLLECTION_MODE = 'test';
   state.env.PRINTQ_ENVIRONMENT = 'development';
   state.orderCalls = 0;
@@ -81,6 +85,8 @@ beforeEach(() => {
     },
   };
 });
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe('Razorpay TEST weekly debit dispatch', () => {
   it('binds the order before one charge and refuses a second dispatch', async () => {
