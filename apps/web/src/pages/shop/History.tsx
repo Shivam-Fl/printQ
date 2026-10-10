@@ -57,7 +57,7 @@ export default function History() {
               const m = statusMeta(j.status);
               return (
                 <tr key={j.id}>
-                  <td className="dim mono">{new Date(j.at).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                  <td className="dim mono">{new Date(j.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}</td>
                   <td>{j.student.name ?? j.student.phoneMasked}</td>
                   <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.file}</td>
                   <td>{specsText(j.specs, j.pagesPerCopy)}</td>

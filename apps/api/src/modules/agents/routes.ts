@@ -14,6 +14,7 @@ import { notifyShopReopened } from '../shops/availability.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
 import { env } from '../../config/env.js';
+import { PRINT_ERROR_AGENT_OFFLINE, describePrintProblem } from '../../lib/printProblem.js';
 import { confirmSuccessfulPrint, recordSpoolAccepted } from '../jobs/printCompletion.js';
 
 export const agentRouter = Router();
@@ -86,6 +87,8 @@ agentRouter.get(
       where: {
         shopId: agent.shopId,
         status: 'otp_verified',
+        // a lease-expired print waits for a staff decision (retry / cancel), never an automatic re-print
+        AND: [{ OR: [{ printError: null }, { printError: { not: PRINT_ERROR_AGENT_OFFLINE } }] }],
         assignedPrinterId: { in: agent.connectedPrinterIds },
         OR: [{ claimedByAgentId: null }, { claimedByAgentId: agent.id }],
       },
@@ -120,6 +123,7 @@ agentRouter.post(
         id: param(req, 'id'),
         shopId: agent.shopId,
         status: 'otp_verified',
+        AND: [{ OR: [{ printError: null }, { printError: { not: PRINT_ERROR_AGENT_OFFLINE } }] }],
         assignedPrinterId: { in: agent.connectedPrinterIds },
         OR: [{ claimedByAgentId: null }, { claimedByAgentId: agent.id }],
       },
@@ -228,9 +232,15 @@ agentRouter.post(
   asyncHandler(async (req, res) => {
     const agent = req.agent!;
     const job = await prisma.job.findFirst({
-      where: { id: param(req, 'id'), shopId: agent.shopId, claimedByAgentId: agent.id },
+      where: { id: param(req, 'id'), shopId: agent.shopId },
     });
     if (!job) throw notFound();
+    if (job.claimedByAgentId !== agent.id) {
+      // The lease moved on (print failed after this computer went silent, or the
+      // job was re-dispatched). A late report must not be applied: 409 tells the
+      // agent to drop the job and re-sync via /jobs/pending.
+      throw conflict('This job is no longer assigned to this computer');
+    }
     if (job.status !== 'printing') {
       // Network retries after a confirmed simulator result are harmless.
       if (job.printConfirmedAt) {
@@ -271,7 +281,9 @@ agentRouter.post(
     if (!job) throw notFound();
     if (job.status !== 'printing') throw conflict('Job is not printing');
 
+    // The raw reason is kept for the audit log only; it never reaches an API response.
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : 'unknown';
+    const problem = describePrintProblem(reason)!;
     const updated = await applyTransition(
       job.id,
       'printing',
@@ -286,7 +298,7 @@ agentRouter.post(
       jobId: job.id,
       status: 'otp_verified',
     });
-    publishEvent(`shop:${job.shopId}`, 'queue:print_failed', { jobId: job.id, reason });
+    publishEvent(`shop:${job.shopId}`, 'queue:print_failed', { jobId: job.id, code: problem.code, message: problem.message });
     res.json({ ok: true });
   }),
 );

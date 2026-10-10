@@ -330,7 +330,7 @@ describe.runIf(dbReady)('shop settings + session revocation (database)', () => {
       const { shop } = await makeShop('role');
       const { staff } = await makeStaff(shop.id);
       const claimedOwner = signShopToken(staff.id, shop.id, 'owner');
-      expect((await patch(claimedOwner, { counterCapacity: 3 })).status).toBe(401);
+      expect((await patch(claimedOwner, { counterCapacity: 3 })).status).toBe(403);
     });
 
     it('sign-out revokes every token issued before it', async () => {

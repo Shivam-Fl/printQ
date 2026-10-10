@@ -17,6 +17,7 @@ import {
   reconcileFileDeletionSchedules,
 } from './conversion.js';
 import { expireReveal, expireStalePreparedOrders, handleGraceExpiry, sweepExpiredReveals, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
+import { failOrphanedPrints } from '../modules/jobs/printLease.js';
 import { reconcileVerifiedPrintCommissions } from '../modules/commission/service.js';
 import { freezeCompletedWeeklyStatements } from '../modules/commission/statementService.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
@@ -105,7 +106,10 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
           await reconcileFileDeletionSchedules();
           await cleanupExpiredFiles();
         }
-        else if (job.name === 'staleAgents') await detectStaleAgents();
+        else if (job.name === 'staleAgents') {
+          await detectStaleAgents();
+          await failOrphanedPrints();
+        }
         else if (job.name === 'revealExpirySweep') await sweepExpiredReveals();
         else if (job.name === 'weeklyStatements') await freezeCompletedWeeklyStatements();
         else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
@@ -121,7 +125,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     // Durable backstop for the per-reveal delayed absent timers (Redis may be
     // memory-only): overdue reveals are expired from PostgreSQL every 10 s.
     await maintenanceQueue.upsertJobScheduler('reveal-expiry-sweep', { every: 10_000 }, { name: 'revealExpirySweep' });
-    await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 60_000 }, { name: 'staleAgents' });
+    await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 30_000 }, { name: 'staleAgents' });
     // The unique shop/week constraint makes the hourly trigger safe; it only
     // freezes the prior completed IST week and cannot debit or notify anyone.
     await maintenanceQueue.upsertJobScheduler('weekly-statements', { every: 3_600_000 }, { name: 'weeklyStatements' });

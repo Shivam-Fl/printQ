@@ -6,6 +6,7 @@ import { flashTitle, playChime } from '../../newOrderAlert.js';
 import ShopNav from '../../components/ShopNav.js';
 import { BandPill, useNow } from '../../components/QueueBand.js';
 import type { QueueBand } from '@printq/shared';
+import { jobActions } from './queueActions.js';
 
 interface QueueJob {
   id: string;
@@ -30,6 +31,9 @@ interface QueueJob {
   assignedPrinterId: string | null;
   otpExpiresAt: string | null;
   printError: string | null;
+  printErrorCode?: string | null;
+  /** Server-computed: the computer that was printing this job is offline or gone. */
+  printAgentOffline?: boolean;
   printAttempts: number;
   spoolAcceptedAt: string | null;
   printConfirmedAt: string | null;
@@ -142,8 +146,8 @@ export default function Dashboard() {
     const socket = getShopSocket();
     if (!socket) return;
     const onAny = () => void refresh();
-    const onPrintFailed = (p: { jobId: string; reason: string }) => {
-      setError(`Print failed: ${p.reason}. Check the printer, then use Retry print below.`);
+    const onPrintFailed = (p: { jobId: string; message?: string }) => {
+      setError(p.message ?? 'A print hit a problem. Check the printer, then use Retry print below.');
       void refresh();
     };
     const onNoAgent = () => {
@@ -286,7 +290,7 @@ export default function Dashboard() {
   }
 
   async function confirmPrinted(id: string) {
-    if (!confirm('Only continue after checking that the full requested print came out correctly. This starts the ten-minute document-deletion clock.')) return;
+    if (!confirm('This records the print as DONE: the student is told it is ready, your commission is posted and the document is deleted after ten minutes. Only continue if you checked that the full requested print actually came out correctly.')) return;
     setError('');
     setMessage('');
     try {
@@ -564,9 +568,12 @@ export default function Dashboard() {
                 <td>{printerLabel(j.assignedPrinterId)}</td>
                 <td>
                   <span className={`stamp ${j.status === 'ready_for_pickup' ? 'green' : j.status === 'finishing' ? 'yellow' : 'blue'}`}>
-                    {j.printError ? 'Needs attention' : j.status === 'finishing' ? 'manual finishing' : j.status.replace(/_/g, ' ')}
+                    {jobActions(j).needsAttention ? 'Needs attention' : j.status === 'finishing' ? 'manual finishing' : j.status.replace(/_/g, ' ')}
                   </span>
                   {j.printError && <div className="print-error-detail">{j.printError}</div>}
+                  {j.status === 'printing' && j.printAgentOffline && (
+                    <div className="print-error-detail">The print computer went offline while printing this job. Check whether it printed, then pick an option.</div>
+                  )}
                 </td>
                 <td>
                   {j.status === 'otp_verified' && j.printError && (
@@ -574,7 +581,7 @@ export default function Dashboard() {
                       <button className="small" onClick={() => retryPrint(j.id)}>
                         Retry print
                       </button>
-                      {j.paymentProvider === 'pay_at_shop' && j.counterPaymentConfirmedAt && (
+                      {jobActions(j).paymentReturned && (
                         <button className="ghost small" onClick={() => returnCounterPaymentAndClose(j.id, j.totalPaise)}>
                           Payment returned
                         </button>
@@ -582,9 +589,23 @@ export default function Dashboard() {
                     </span>
                   )}
                   {j.status === 'printing' && (
-                    <button className="small" onClick={() => confirmPrinted(j.id)}>
-                      Printed successfully
-                    </button>
+                    <span className="row" style={{ flexWrap: 'nowrap' }}>
+                      <button className="small" onClick={() => confirmPrinted(j.id)}>
+                        Printed successfully
+                      </button>
+                      {j.printAgentOffline && (
+                        <>
+                          <button className="ghost small" onClick={() => retryPrint(j.id)}>
+                            Print failed — retry on another computer
+                          </button>
+                          {jobActions(j).paymentReturned && (
+                            <button className="ghost small" onClick={() => returnCounterPaymentAndClose(j.id, j.totalPaise)}>
+                              Cancel &amp; return payment
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </span>
                   )}
                   {j.status === 'finishing' && (
                     <button className="small" onClick={() => completeFinishing(j.id)}>

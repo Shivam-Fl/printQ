@@ -21,7 +21,7 @@ import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
-import { renderReceipt } from '../../lib/receipt.js';
+import { loadCompletedAt, renderReceipt } from '../../lib/receipt.js';
 import { releaseByOtp } from '../queue/release.js';
 import { loadShopQueue } from '../queue/bands.js';
 import {
@@ -36,6 +36,10 @@ import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
+import { agentGoneForStaff, isPrintOrphaned, markPrintFailedAgentGone } from '../jobs/printLease.js';
+import { describePrintProblem } from '../../lib/printProblem.js';
+import { istDayKey, lastIstDayKeys, startOfIstDay } from '../../lib/istDay.js';
+import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
@@ -518,8 +522,7 @@ shopRouter.get(
   requireShopOwner,
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = startOfIstDay();
     const since = new Date(Date.now() - 30 * 86_400_000);
 
     const [allTime, completedCount, printers, recentCompleted] = await Promise.all([
@@ -556,12 +559,11 @@ shopRouter.get(
       row.jobs += 1;
       row.pages += sheets;
       byPrinter.set(pid, row);
-      const day = j.updatedAt.toISOString().slice(0, 10);
+      const day = istDayKey(j.updatedAt);
       byDay.set(day, (byDay.get(day) ?? 0) + j.shopBasePaise);
     }
 
-    const days = [...Array(7)].map((_, i) => {
-      const d = new Date(Date.now() - (6 - i) * 86_400_000).toISOString().slice(0, 10);
+    const days = lastIstDayKeys(7).map((d) => {
       return { day: d, revenuePaise: byDay.get(d) ?? 0 };
     });
 
@@ -695,6 +697,9 @@ shopRouter.get(
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,
       paymentStatus: job.paymentStatus,
+      completedAt: await loadCompletedAt(job.id, job.status),
+      counterPaymentMethod: job.counterPaymentMethod,
+      totalPages: job.file.pages,
     });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="printq-receipt-${job.id.slice(0, 8)}.pdf"`);
@@ -725,6 +730,9 @@ shopRouter.get(
         paymentStatus: true,
         paymentProvider: true,
         cashCollectedAt: true,
+        counterPaymentMethod: true,
+        counterPaymentConfirmedAt: true,
+        claimedByAgentId: true,
         assignedPrinterId: true,
         otpExpiresAt: true,
         printError: true,
@@ -746,14 +754,31 @@ shopRouter.get(
     // Bands are computed server-side; the dashboard never derives them.
     const queue = await loadShopQueue(prisma, shopId);
     const bands = new Map(queue.entries.map((e) => [e.job.id, e]));
+    // Which printing jobs lost their print computer (offline / deleted)? One query.
+    const printingAgentIds = [...new Set(
+      jobs.filter((j) => j.status === 'printing' && j.claimedByAgentId).map((j) => j.claimedByAgentId as string),
+    )];
+    const printingAgents = printingAgentIds.length
+      ? await prisma.agent.findMany({
+          where: { shopId, id: { in: printingAgentIds } },
+          select: { id: true, status: true, lastHeartbeatAt: true, createdAt: true },
+        })
+      : [];
+    const agentById = new Map(printingAgents.map((a) => [a.id, a]));
     res.json({
       counterCapacity: queue.counterCapacity,
       revealGraceSeconds: queue.revealGraceSeconds,
       jobs: jobs.map((j) => {
         const live = bands.get(j.id);
-        const { revealedAt, revealDeadlineAt, absentAt, ...rest } = j;
+        const { revealedAt, revealDeadlineAt, absentAt, claimedByAgentId, printError, ...rest } = j;
+        const problem = describePrintProblem(printError);
+        const agent = claimedByAgentId ? agentById.get(claimedByAgentId) : undefined;
         return {
           ...rest,
+          // Raw agent/driver text never reaches the dashboard: friendly message + stable code only.
+          printError: problem?.message ?? null,
+          printErrorCode: problem?.code ?? null,
+          printAgentOffline: j.status === 'printing' && agentGoneForStaff(agent ?? null),
           position: live?.position ?? null,
           band: live?.band ?? null,
           revealDeadlineAt: live?.band === 'revealed' ? revealDeadlineAt : null,
@@ -869,6 +894,22 @@ shopRouter.post(
   }),
 );
 
+/**
+ * A job still `printing` whose print computer is offline/deleted can be failed
+ * by staff right away (the sweeper does the same after the lease timeout), so
+ * "retry" and "cancel & return payment" work on it. A job whose computer is
+ * still connected is left untouched. Returns the (possibly updated) job.
+ */
+async function releaseOrphanedPrint(job: Job, shopUserId: string): Promise<Job> {
+  if (job.status !== 'printing') return job;
+  if (!(await isPrintOrphaned(job))) {
+    throw conflict('This job is still printing on a connected computer');
+  }
+  const failed = await markPrintFailedAgentGone(job, { type: 'shop', id: shopUserId });
+  if (!failed) throw conflict('Job state changed, refresh and try again');
+  return failed;
+}
+
 /** Retry a failed print without asking the student for a second OTP. */
 shopRouter.post(
   '/jobs/:id/retry-print',
@@ -876,8 +917,9 @@ shopRouter.post(
   validateBody(z.object({ printerId: z.string().uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!job) throw notFound();
+    job = await releaseOrphanedPrint(job, req.shopUser!.id);
     if (job.status !== 'otp_verified') throw conflict('This job is not waiting for a print retry');
 
     const recommendation = await recommendPrinter(
@@ -944,8 +986,9 @@ shopRouter.post(
   validateBody(z.object({ reference: z.string().trim().min(1).max(120).optional() }).strict()),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!job) throw notFound();
+    job = await releaseOrphanedPrint(job, req.shopUser!.id);
     if (
       job.paymentProvider !== 'pay_at_shop'
       || job.paymentStatus !== 'paid'
@@ -1008,14 +1051,15 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
+    // socket first: the student's page must not wait behind push delivery
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
+    publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
     await notifyStudent(job.studentId, {
       title: 'Print ready ✓',
       body: 'Printing and finishing are complete. Collect it at the counter.',
       url: `/jobs/${job.id}`,
       eventKey: `finishing-ready:${job.id}:${updated.updatedAt.toISOString()}`,
     });
-    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
-    publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
     res.json({ ok: true, job: { id: updated.id, status: updated.status } });
   }),
 );
@@ -1036,6 +1080,9 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
+    // Live update for the student's page (no waiting for the 10 s poll). The
+    // job has left the live queue, so the queue snapshot never carries it.
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'completed' });
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),

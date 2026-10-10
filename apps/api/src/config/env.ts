@@ -146,6 +146,8 @@ const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().default('mailto:admin@printq.local'),
 
+  /// A `printing` job whose print computer has been silent this long is failed so staff can retry.
+  PRINT_LEASE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(90),
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
   // Unprinted uploads have a hard 24-hour maximum. Successful and terminal
