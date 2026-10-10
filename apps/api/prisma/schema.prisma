@@ -210,6 +210,9 @@ model Shop {
   rateCard          Json
   /// PrintOptions JSON (papers[], bindings[], duplexEnabled); null = defaults
   printOptions      Json?
+  /// Optimistic-concurrency token for printOptions: bumped on every menu change
+  /// so a stale Settings tab cannot overwrite a newer menu.
+  printOptionsVersion Int    @default(0)
   otpWindowMinutes  Int      @default(10)
   createdAt         DateTime @default(now())
 
@@ -327,6 +330,9 @@ model ShopUser {
   passwordHash String
   name         String
   role         ShopUserRole @default(staff)
+  /// Bumped on password reset and sign-out. Tokens carry the value they were
+  /// issued under; a mismatch means the session was revoked.
+  sessionVersion Int        @default(0)
   createdAt    DateTime     @default(now())
 }
 

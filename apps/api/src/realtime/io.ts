@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
+import { resolveShopSession } from '../lib/shopSession.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { subscribeEvents } from './events.js';
 import { advanceShopQueues, emitQueueUpdate } from '../modules/queue/engine.js';
@@ -47,8 +48,11 @@ export function setupRealtime(httpServer: HttpServer): Server {
       return next();
     }
     if (claims.typ !== 'shop') return next(new Error('unauthorized'));
+    // same revocation rules as the HTTP middleware (deleted staff, sign-out)
+    const session = await resolveShopSession(claims).catch(() => null);
+    if (!session) return next(new Error('unauthorized'));
     socket.data.kind = 'shop';
-    socket.data.shopId = claims.shopId;
+    socket.data.shopId = session.shopId;
     return next();
   });
 

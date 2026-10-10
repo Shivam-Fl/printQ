@@ -20,6 +20,7 @@ import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
+import { mountWebApp } from './webApp.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -81,8 +82,7 @@ export function createApp(): express.Express {
   // the PWA, push notifications and API share one origin. Dev uses Vite.
   const webDist = path.resolve(fileURLToPath(import.meta.url), '../../../web/dist');
   if (env.NODE_ENV === 'production' && existsSync(webDist)) {
-    app.use(express.static(webDist));
-    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+    mountWebApp(app, webDist);
     logger.info({ webDist }, 'serving_web_app');
   }
 

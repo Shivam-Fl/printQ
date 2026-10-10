@@ -33,29 +33,69 @@ export const jobSpecsSchema = z.object({
 export type JobSpecsInput = z.infer<typeof jobSpecsSchema>;
 
 /** Shop's configurable print menu (Settings page). */
-export const printOptionsSchema = z.object({
-  papers: z
-    .array(
-      z.object({
-        id: optionId,
-        label: z.string().trim().min(1).max(40),
-        bwPaise: z.number().int().min(0).max(1_000_000),
-        colorPaise: z.number().int().min(0).max(1_000_000).nullable(),
-      }),
-    )
-    .min(1, 'Add at least one paper type')
-    .max(12),
-  bindings: z
-    .array(
-      z.object({
-        id: optionId,
-        label: z.string().trim().min(1).max(40),
-        paise: z.number().int().min(0).max(1_000_000),
-      }),
-    )
-    .max(12),
-  duplexEnabled: z.boolean(),
-});
+/** Sanity ceilings: no spec sets a price, these only stop typos like 2000 for 20. */
+export const MAX_PAGE_PRICE_PAISE = 10_000; // Rs 100 per page
+export const MAX_BINDING_PRICE_PAISE = 100_000; // Rs 1000 per job
+
+export const printOptionsSchema = z
+  .object({
+    papers: z
+      .array(
+        z.object({
+          id: optionId,
+          label: z.string().trim().min(1).max(40),
+          bwPaise: z.number().int().min(0).max(MAX_PAGE_PRICE_PAISE, 'Price per page can be at most ₹100'),
+          colorPaise: z
+            .number()
+            .int()
+            .min(0)
+            .max(MAX_PAGE_PRICE_PAISE, 'Price per page can be at most ₹100')
+            .nullable(),
+        }),
+      )
+      .min(1, 'Add at least one paper type')
+      .max(12),
+    bindings: z
+      .array(
+        z.object({
+          id: optionId,
+          label: z.string().trim().min(1).max(40),
+          paise: z.number().int().min(0).max(MAX_BINDING_PRICE_PAISE, 'Binding price can be at most ₹1000'),
+        }),
+      )
+      .max(12),
+    duplexEnabled: z.boolean(),
+  })
+  .superRefine((menu, ctx) => {
+    const seenPapers = new Set<string>();
+    menu.papers.forEach((paper, index) => {
+      const key = paper.id.toLowerCase();
+      if (seenPapers.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['papers', index, 'id'], message: `Duplicate paper type "${paper.id}"` });
+      }
+      seenPapers.add(key);
+      if (paper.colorPaise != null && paper.colorPaise < paper.bwPaise) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['papers', index, 'colorPaise'],
+          message: `Colour price for "${paper.label}" cannot be lower than its black & white price`,
+        });
+      }
+    });
+    const seenBindings = new Set<string>();
+    menu.bindings.forEach((binding, index) => {
+      const key = binding.id.toLowerCase();
+      if (key === 'none') {
+        // "None" is always offered implicitly (binding: null); a real row with
+        // this id would shadow it.
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['bindings', index, 'id'], message: '"none" is reserved — it is always offered automatically' });
+      }
+      if (seenBindings.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['bindings', index, 'id'], message: `Duplicate binding "${binding.id}"` });
+      }
+      seenBindings.add(key);
+    });
+  });
 
 export const printerInputSchema = z.object({
   label: z.string().trim().min(1).max(80),
@@ -89,6 +129,36 @@ export const requestLoginOtpSchema = z.object({
 export const verifyLoginOtpSchema = z.object({
   phone: phoneSchema,
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
+});
+
+/** Self-serve shop onboarding. Messages name the field so the form can show them verbatim. */
+export const shopRegisterSchema = z.object({
+  shopName: z
+    .string({ required_error: 'Shop name is required' })
+    .trim()
+    .min(2, 'Shop name must be at least 2 characters')
+    .max(120, 'Shop name must be at most 120 characters'),
+  address: z
+    .string({ required_error: 'Address is required' })
+    .trim()
+    .min(3, 'Address must be at least 3 characters')
+    .max(300, 'Address must be at most 300 characters'),
+  campusName: z.string().trim().max(120, 'Campus name must be at most 120 characters').optional(),
+  ownerName: z
+    .string({ required_error: 'Owner name is required' })
+    .trim()
+    .min(1, 'Owner name is required')
+    .max(80, 'Owner name must be at most 80 characters'),
+  email: z
+    .string({ required_error: 'Email is required' })
+    .trim()
+    .toLowerCase()
+    .email('Email is invalid')
+    .max(254, 'Email must be at most 254 characters'),
+  password: z
+    .string({ required_error: 'Password is required' })
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be at most 128 characters'),
 });
 
 export const shopLoginSchema = z.object({

@@ -7,6 +7,7 @@ import {
   requestLoginOtpSchema,
   requestPasswordResetSchema,
   shopLoginSchema,
+  shopRegisterSchema,
   staffLoginSchema,
   verifyLoginOtpSchema,
 } from '@printq/shared';
@@ -21,7 +22,7 @@ import {
   otpRequestLimiter,
   otpVerifyLimiter,
 } from '../../middleware/rateLimit.js';
-import { requireStudent } from '../../middleware/auth.js';
+import { requireShopUser, requireStudent } from '../../middleware/auth.js';
 import { sendLoginOtp } from '../../providers/notification/index.js';
 import { emailProvider } from '../../providers/email/index.js';
 import { env } from '../../config/env.js';
@@ -183,15 +184,6 @@ authRouter.patch(
   }),
 );
 
-const shopRegisterSchema = z.object({
-  shopName: z.string().trim().min(2).max(120),
-  address: z.string().trim().min(3).max(300),
-  campusName: z.string().trim().max(120).optional(),
-  ownerName: z.string().trim().min(1).max(80),
-  email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8).max(128),
-});
-
 /** Phase 2: self-serve shop onboarding — creates the shop + its owner login. */
 authRouter.post(
   '/shop/register',
@@ -200,6 +192,9 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof shopRegisterSchema>;
 
+    // Known trade-off: this reveals whether an email is registered (account
+    // enumeration). Kept deliberately so a returning owner gets a clear message;
+    // the endpoint is behind loginLimiter.
     const existing = await prisma.shopUser.findUnique({ where: { email: body.email } });
     if (existing) throw badRequest('An account with this email already exists');
 
@@ -259,7 +254,7 @@ authRouter.post(
     if (!user || !valid) throw unauthorized('Invalid email or password');
 
     res.json({
-      token: signShopToken(user.id, user.shopId, user.role),
+      token: signShopToken(user.id, user.shopId, user.role, user.sessionVersion),
       user: { id: user.id, name: user.name, role: user.role, shopId: user.shopId },
       otpWindowMinutes: env.OTP_WINDOW_MINUTES,
     });
@@ -281,7 +276,7 @@ authRouter.post(
     if (!user || !valid) throw unauthorized('Invalid email or PIN');
 
     res.json({
-      token: signShopToken(user.id, user.shopId, user.role),
+      token: signShopToken(user.id, user.shopId, user.role, user.sessionVersion),
       user: { id: user.id, name: user.name, role: user.role, shopId: user.shopId },
       otpWindowMinutes: env.OTP_WINDOW_MINUTES,
     });
@@ -382,9 +377,29 @@ authRouter.post(
       prisma.passwordResetOtp.update({ where: { id: record.id }, data: { consumedAt: new Date() } }),
       prisma.shopUser.update({
         where: { id: user.id },
-        data: { passwordHash: await argon2.hash(newPassword, { type: argon2.argon2id }) },
+        data: {
+          passwordHash: await argon2.hash(newPassword, { type: argon2.argon2id }),
+          // every token issued under the old password stops working
+          sessionVersion: { increment: 1 },
+        },
       }),
     ]);
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * Sign out (shop owner or staff): revokes every session of this account, on all
+ * devices, by bumping the session version the tokens are checked against.
+ */
+authRouter.post(
+  '/shop/logout',
+  requireShopUser,
+  asyncHandler(async (req, res) => {
+    await prisma.shopUser.updateMany({
+      where: { id: req.shopUser!.id, shopId: req.shopUser!.shopId },
+      data: { sessionVersion: { increment: 1 } },
+    });
     res.json({ ok: true });
   }),
 );
