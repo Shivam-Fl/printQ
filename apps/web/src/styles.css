@@ -1345,3 +1345,16 @@ tr.row-revealed td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
 @media (prefers-reduced-motion: reduce) {
   .band-ticket .band-countdown.urgent { animation: none; }
 }
+
+/* Visually hidden, still announced by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

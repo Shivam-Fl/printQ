@@ -84,12 +84,16 @@ export function StudentBandPanel({ job, nowMs }: { job: BandJob; nowMs: number }
       <div className={`ticket turn band-ticket${cd?.urgent ? ' urgent' : ''}`} data-band="revealed">
         <div className="eyebrow">it’s your turn</div>
         {cd ? (
-          <div className={`band-countdown${cd.urgent ? ' urgent' : ''}`} role="timer" aria-live={cd.urgent ? 'assertive' : 'off'}>
+          <div className={`band-countdown${cd.urgent ? ' urgent' : ''}`} role="timer" aria-live="off">
             {cd.expired ? 'Be at the counter now' : `Be at the counter in ${cd.text}`}
           </div>
         ) : (
           <div className="band-countdown">Please be at the counter</div>
         )}
+        {/* One polite announcement that changes only when urgency flips, never every second. */}
+        <span className="sr-only" role="status">
+          {cd?.urgent ? 'Hurry, only a few seconds left to reach the counter.' : 'It’s your turn. Please be at the counter.'}
+        </span>
         <div className="otp-band">{job.otpCode}</div>
         <div className="sub">
           Tell staff this code. {cd ? 'If you are not there in time you lose your place and must check in again.' : 'Staff can find your order with it.'}

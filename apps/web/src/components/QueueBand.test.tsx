@@ -35,6 +35,14 @@ describe('student band panel', () => {
     expect(html).toContain('band-countdown urgent');
     expect(html).toContain('Be at the counter in 0:06');
   });
+  it('does not make the per-second countdown a live region (screen readers get one static announcement instead)', () => {
+    for (const s of [42, 6]) {
+      const html = render({ otpCode: '482913', revealDeadlineAt: new Date(NOW + s * 1000).toISOString() });
+      expect(html).not.toContain('aria-live="assertive"');
+      expect(html).toContain('class="sr-only" role="status"');
+      expect(html).not.toMatch(/role="status">[^<]*d:dd/);
+    }
+  });
   it('revealed without a timer (staff has the order) still shows the code', () => {
     const html = render({ otpCode: '111222' });
     expect(html).toContain('111222');
