@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { env } from '../../config/env.js';
 
 export interface CreatedOrder {
@@ -99,24 +99,3 @@ class RazorpayProvider implements PaymentProvider {
 
 export const paymentProvider: PaymentProvider =
   env.PAYMENT_PROVIDER === 'razorpay' ? new RazorpayProvider() : new MockPaymentProvider();
-
-/** Constant-time HMAC-SHA256 verification of the Razorpay webhook signature. */
-export function verifyRazorpayWebhookSignature(rawBody: Buffer, signature: string): boolean {
-  const expected = createHmac('sha256', env.RAZORPAY_WEBHOOK_SECRET ?? '')
-    .update(rawBody)
-    .digest('hex');
-  const a = Buffer.from(expected, 'utf8');
-  const b = Buffer.from(signature, 'utf8');
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/** The shop-collection webhook must never trust the retired student secret. */
-export function verifyRazorpayRecurringWebhookSignature(
-  rawBody: Buffer,
-  signature: string,
-  secret = env.RAZORPAY_RECURRING_WEBHOOK_SECRET,
-): boolean {
-  if (!secret || !/^[0-9a-fA-F]{64}$/.test(signature)) return false;
-  const expected = createHmac('sha256', secret).update(rawBody).digest();
-  return timingSafeEqual(expected, Buffer.from(signature, 'hex'));
-}

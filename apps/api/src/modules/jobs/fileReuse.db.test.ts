@@ -148,11 +148,13 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     expect(b.res.status).toBe(201);
 
     expect((await call(`/api/jobs/${a.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const afterFirst = await fileRow(file.id);
     expect(afterFirst.deletionScheduledAt).toBeNull();
     expect(afterFirst.deleteAfter!.getTime()).toBeGreaterThan(Date.now() + 23 * 3_600_000);
 
     expect((await call(`/api/jobs/${b.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const afterLast = await fileRow(file.id);
     expect(afterLast.deletionScheduledAt).not.toBeNull();
     const msLeft = afterLast.deleteAfter!.getTime() - Date.now();
@@ -175,7 +177,65 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
 
     // ...and once the remaining job ends, the same call starts the 10-minute clock
     expect((await call(`/api/jobs/${other.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     expect((await fileRow(file.id)).deletionScheduledAt).not.toBeNull();
+  });
+
+  it('D3: one file never backs two live orders (concurrent creates -> exactly one), so a printed file is gone at T+10', async () => {
+    const file = await newFile();
+    const results = await Promise.all([orderOn(file.id), orderOn(file.id), orderOn(file.id)]);
+    expect(results.filter((r) => r.res.status === 201)).toHaveLength(1);
+    expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(1);
+    const winner = results.find((r) => r.res.status === 201)!;
+    // print it: nothing else references the file, so the 10-minute clock starts immediately
+    await prisma.job.update({ where: { id: winner.body.job!.id }, data: { printConfirmedAt: new Date(), status: 'ready_for_pickup' } });
+    await scheduleVerifiedPrintFileDeletion(file.id, new Date());
+    const msLeft = (await fileRow(file.id)).deleteAfter!.getTime() - Date.now();
+    expect(msLeft).toBeLessThanOrEqual(10 * 60_000);
+  });
+
+  it('D3: a legacy requeued/no_show order still counts as a live order on the file', async () => {
+    const file = await newFile();
+    const first = await orderOn(file.id);
+    await prisma.job.update({ where: { id: first.body.job!.id }, data: { status: 'requeued' } });
+    const again = await orderOn(file.id);
+    expect(again.res.status).toBe(409);
+    await scheduleFileDeletion(file.id, new Date());
+    expect((await fileRow(file.id)).deletionScheduledAt).toBeNull();
+  });
+
+  it('D7: quote flags options the shop cannot print and order creation is refused with the same message', async () => {
+    const file = await newFile();
+    const colourSpecs = { ...specs, color: true };
+    const quote = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs: colourSpecs } });
+    expect(quote.status).toBe(200);
+    const body = (await quote.json()) as { unsupported?: { code: string; message: string }[] };
+    expect(body.unsupported?.map((u) => u.code)).toEqual(['color']);
+    expect(body.unsupported![0]!.message).toMatch(/colour/i);
+
+    const order = await call('/api/jobs', { method: 'POST', body: { fileId: file.id, specs: colourSpecs, mode: 'instant' } });
+    expect(order.status).toBe(409);
+    expect(((await order.json()) as { error: string }).error).toBe(body.unsupported![0]!.message);
+    expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(0);
+
+    const bwQuote = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs } });
+    expect(((await bwQuote.json()) as { unsupported?: unknown }).unsupported).toBeUndefined();
+    const oddPaper = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs: { ...specs, paperSize: 'A3' } } });
+    expect(((await oddPaper.json()) as { unsupported: { code: string }[] }).unsupported[0]!.code).toBe('paper_size');
+  });
+
+  it('D5: concurrent ratings are once-only (one 200, the rest 409)', async () => {
+    const file = await newFile();
+    const order = await orderOn(file.id);
+    const id = order.body.job!.id;
+    await prisma.job.update({ where: { id }, data: { status: 'completed', paymentStatus: 'paid' } });
+    const results = await Promise.all(
+      [5, 4, 3, 2].map((rating) => call(`/api/jobs/${id}/rating`, { method: 'POST', body: { rating } })),
+    );
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 409, 409, 409]);
+    const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
+    expect([2, 3, 4, 5]).toContain(stored.rating);
   });
 
   it('refuses a new job on a file that already printed, with a clear message', async () => {
@@ -194,6 +254,7 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     const file = await newFile();
     const only = await orderOn(file.id);
     await call(`/api/jobs/${only.body.job!.id}/cancel`, { method: 'POST' });
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const again = await orderOn(file.id);
     expect(again.res.status).toBe(409);
     expect(again.body.error).toMatch(/about to be deleted/i);

@@ -18,6 +18,7 @@ interface PublicShop {
   address: string;
   campusName: string | null;
   open: boolean;
+  temporarilyUnavailable?: boolean;
   colorAvailable: boolean;
   rating: { average: number | null; count: number };
   options: { papers: Paper[]; bindings: { id: string; label: string }[]; duplexEnabled: boolean };
@@ -205,7 +206,7 @@ export default function ShopLanding() {
             )}
           </div>
         </div>
-        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'Taking orders' : 'Currently closed'}</span>
+        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'Taking orders' : shop.temporarilyUnavailable ? 'Unavailable' : 'Currently closed'}</span>
       </div>
 
       {!loggedIn ? (
@@ -225,11 +226,13 @@ export default function ShopLanding() {
         >
           <div>
             <div className="upload-mark" aria-hidden>↑</div>
-            <h2>{shop.open ? 'Drop your files here' : 'Orders are paused'}</h2>
+            <h2>{shop.open ? 'Drop your files here' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Orders are paused'}</h2>
             <p>
               {shop.open
                 ? 'Choose one or several documents. We combine them into one preview before you pay.'
-                : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
+                : shop.temporarilyUnavailable
+                  ? 'New orders are not available here right now. Please try again later or choose another shop.'
+                  : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
             </p>
           </div>
           <input
@@ -265,7 +268,8 @@ export default function ShopLanding() {
               <div className="upload-meta">PDF · DOCX · JPG · PNG · private files auto-delete</div>
             </>
           )}
-          {!shop.open && <NotifyWhenOpen slug={slug} />}
+          {!shop.open && !shop.temporarilyUnavailable && <NotifyWhenOpen slug={slug} />}
+          {!shop.open && shop.temporarilyUnavailable && <Link to="/shops">Browse other shops</Link>}
           {error && <div className="error-box" role="alert">{error}</div>}
         </div>
       )}

@@ -30,3 +30,10 @@ describe('200 m check-in zone boundary', () => {
     expect(isWithinRadius(200.0001, 200)).toBe(false);
   });
 });
+
+import { isWithinIndia } from "./geo.js";
+describe("isWithinIndia", () => {
+  it.each([[28.6, 77.2, true], [6.75, 93.85, true], [37.4, 68.1, true], [77.5, 28.6, false], [0, 0, false], [51.5, -0.12, false]])("(0, 0) -> ", (lat, lng, ok) => {
+    expect(isWithinIndia(lat, lng)).toBe(ok);
+  });
+});

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, clearToken, getToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
+import { formatRupees } from '../../lib/fees.js';
 
 interface Campus {
   id: string;
@@ -20,6 +21,8 @@ interface ReviewShop {
   campus: { name: string; isActive: boolean } | null;
   printers: { id: string; status: string; osPrinterName: string | null }[];
   agents: { id: string; status: string }[];
+  feeBlockedAt: string | null;
+  fees: { state: 'paid_up' | 'due' | 'overdue' | 'blocked'; statementsDuePaise: number; overdueStatements: number; overduePaise: number };
 }
 interface AuditEvent {
   id: string;
@@ -72,6 +75,21 @@ export default function AdminConsole() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The shop state could not be changed.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function liftBlock(shop: ReviewShop) {
+    const reason = window.prompt(`Why is the fee block on ${shop.name} being lifted? (required, at least 10 characters, audited)`);
+    if (!reason || reason.trim().length < 10) return;
+    setBusyId(`lift:${shop.id}`);
+    setError('');
+    try {
+      await api(`/api/admin/shops/${shop.id}/fees/lift-block`, { method: 'POST', role: 'admin', body: { reason: reason.trim(), days: 3 } });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The block could not be lifted.');
     } finally {
       setBusyId(null);
     }
@@ -138,6 +156,21 @@ export default function AdminConsole() {
             <div className="row between" key={shop.id}>
               <div><strong>{shop.name}</strong><p className="dim">{shop.campus?.name ?? 'No approved campus'} · {shop.publishedAt ? 'Visible to students' : 'Hidden from students'}</p></div>
               {shop.publishedAt ? <button className="secondary small" disabled={busyId != null} onClick={() => changeShop(shop.id, 'unpublish')}>Unpublish</button> : <button className="button-link small" disabled={busyId != null} onClick={() => changeShop(shop.id, 'publish')}>Publish</button>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-copy"><h2>Platform fees</h2><p>Unpaid weekly fees pause new orders. A lift keeps the shop open for 3 days and does not forgive the statement.</p></div>
+        <div className="settings-surface stack">
+          {shops.filter((shop) => shop.fees.state !== 'paid_up').length === 0 ? <p className="dim">Every shop is paid up.</p> : shops.filter((shop) => shop.fees.state !== 'paid_up').map((shop) => (
+            <div className="row between" key={shop.id}>
+              <div><strong>{shop.name}</strong><p className="dim">{formatRupees(shop.fees.statementsDuePaise)} on statements{shop.fees.overdueStatements > 0 ? ` · ${shop.fees.overdueStatements} overdue (${formatRupees(shop.fees.overduePaise)})` : ''}</p></div>
+              <div className="row">
+                <span className={`stamp ${shop.fees.state === 'due' ? 'yellow' : 'red'}`}>{shop.fees.state}</span>
+                {shop.feeBlockedAt && <button className="secondary small" disabled={busyId != null} onClick={() => liftBlock(shop)}>Lift block</button>}
+              </div>
             </div>
           ))}
         </div>

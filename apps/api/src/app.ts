@@ -17,6 +17,7 @@ import { filesRouter } from './modules/files/routes.js';
 import { jobsRouter } from './modules/jobs/routes.js';
 import { paymentsRouter, webhookRouter } from './modules/payments/routes.js';
 import { shopRouter } from './modules/shops/routes.js';
+import { feesRouter } from './modules/fees/routes.js';
 import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
@@ -90,6 +91,7 @@ export function createApp(): express.Express {
   app.use('/api/jobs', jobsRouter);
   app.use('/api/payments', paymentsRouter);
   app.use('/api/push', pushRouter);
+  app.use('/api/shop/fees', feesRouter);
   app.use('/api/shop', shopRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/agent', agentRouter);

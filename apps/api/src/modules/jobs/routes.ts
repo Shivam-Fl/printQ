@@ -6,7 +6,9 @@ import {
   couponCodeSchema,
   createJobSchema,
   jobSpecsSchema,
+  unsupportedSpecs,
   type JobSpecs,
+  type UnsupportedSpec,
   type PriceBreakdown,
 } from '@printq/shared';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -15,9 +17,10 @@ import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.j
 import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
-import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
+import { checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
+import { runInBackground } from '../../lib/background.js';
 import { refundIfPaid } from '../payments/refund.js';
-import { renderReceipt } from '../../lib/receipt.js';
+import { loadCompletedAt, renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
 import { ACTIVE_FILE_JOB_STATUSES, assertFileCanBackNewJob, scheduleFileDeletion } from '../../lib/fileRetention.js';
@@ -37,6 +40,7 @@ import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperational } from '../shops/availability.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
+import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
 
 export const jobsRouter = Router();
 
@@ -46,6 +50,15 @@ const checkInSchema = z.object({
   accuracyM: z.number().finite().min(0).max(1_000),
   measuredAt: z.coerce.date(),
 });
+
+/** Capability problems for this shop's configured printers (online or not), friendly text included. */
+async function unsupportedForShop(shopId: string, specs: JobSpecs): Promise<UnsupportedSpec[]> {
+  const printers = await prisma.printer.findMany({
+    where: { shopId },
+    select: { paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
+  });
+  return unsupportedSpecs(printers, specs);
+}
 
 /** Live price quote — server-computed from the shop's rate card, never client math. */
 jobsRouter.post(
@@ -70,7 +83,13 @@ jobsRouter.post(
     if (couponCode) breakdown = applyCoupon(breakdown, await resolveCoupon(couponCode, file.shopId));
     // Student-facing pricing is intentionally one final amount. The shop base,
     // platform markup and line-item split remain private server-side data.
-    res.json({ quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise }, pages: file.pages });
+    // Hardware capability is checked here, not first at the counter: the student is told now.
+    const unsupported = await unsupportedForShop(file.shopId, specs);
+    res.json({
+      quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise },
+      pages: file.pages,
+      ...(unsupported.length > 0 ? { unsupported } : {}),
+    });
   }),
 );
 
@@ -155,6 +174,8 @@ jobsRouter.post(
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
     }
+    const unsupported = await unsupportedForShop(file.shopId, specs);
+    if (unsupported.length > 0) throw conflict(unsupported.map((u) => u.message).join(' '));
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
     const platformMarkupPaise = breakdown.totalPaise - shopBase.totalPaise;
@@ -184,6 +205,22 @@ jobsRouter.post(
         paymentProvider: 'pay_at_shop',
       },
     });
+    // Retention is per printed job, so one file must never back two live
+    // orders. The lock above normally guarantees it; if it ever lapsed and two
+    // creations raced, the later-created row (id breaks ties) withdraws itself.
+    const rival = await prisma.job.findFirst({
+      where: {
+        fileId: file.id,
+        id: { not: job.id },
+        status: { in: [...ACTIVE_FILE_JOB_STATUSES] },
+        OR: [{ createdAt: { lt: job.createdAt } }, { createdAt: job.createdAt, id: { lt: job.id } }],
+      },
+      select: { id: true },
+    });
+    if (rival) {
+      await prisma.job.delete({ where: { id: job.id } });
+      throw conflict(DUPLICATE_ORDER_MESSAGE);
+    }
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
     await preparePayAtShopOrder(job.id);
@@ -267,7 +304,7 @@ jobsRouter.get(
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, ...safeJob } = job;
+    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, printError, ...safeJob } = job;
     const safeShop = {
       name: shop.name,
       slug: shop.slug,
@@ -286,6 +323,8 @@ jobsRouter.get(
     res.json({
       job: {
         ...safeJob,
+        // Raw agent/driver text is never exposed: a fixed, friendly student message only.
+        printError: printError ? STUDENT_PRINT_PROBLEM_MESSAGE : null,
         shop: safeShop,
         ...live,
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
@@ -330,6 +369,9 @@ jobsRouter.get(
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,
       paymentStatus: job.paymentStatus,
+      completedAt: await loadCompletedAt(job.id, job.status),
+      counterPaymentMethod: job.counterPaymentMethod,
+      totalPages: job.file.pages,
       showPriceBreakdown: false,
     });
     res.setHeader('Content-Type', 'application/pdf');
@@ -389,11 +431,18 @@ jobsRouter.post(
         : {},
     );
     if (!updated) throw conflict('Job state changed, try again');
-    await refundIfPaid(job);
-    await scheduleFileDeletion(job.fileId);
-    // a cancelled front job must not block the printer's queue
-    if (job.assignedPrinterId) await advancePrinterQueue(job.assignedPrinterId, job.shopId);
-    await emitQueueUpdate(job.shopId);
+    // The cancellation is committed. Refund, file-retention clock and the line
+    // re-sync (a cancelled front job must not block the counter) are follow-ups
+    // that would otherwise add several network round trips to the response:
+    // they run in parallel after it. Each is idempotent and has a durable
+    // backstop (the refund sweeper, the file-retention sweeper, the 10 s queue sync).
+    runInBackground('cancel-followup', () =>
+      Promise.all([
+        refundIfPaid(job),
+        scheduleFileDeletion(job.fileId),
+        emitQueueUpdate(job.shopId),
+      ]),
+    );
     res.json({ job: { id: job.id, status: updated.status } });
   }),
 );
@@ -415,10 +464,12 @@ jobsRouter.post(
     if (job.status !== 'completed') throw conflict('Only a completed job can be rated');
     if (job.rating != null) throw conflict('This job has already been rated');
 
-    await prisma.job.update({
-      where: { id: job.id },
+    // Once-only even under concurrency: the conditional UPDATE is the lock.
+    const rated = await prisma.job.updateMany({
+      where: { id: job.id, studentId: req.student!.id, status: 'completed', rating: null },
       data: { rating, reviewText: reviewText ?? null },
     });
+    if (rated.count === 0) throw conflict('This job has already been rated');
     res.json({ ok: true });
   }),
 );

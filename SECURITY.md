@@ -126,3 +126,11 @@ This file records the decisions so future sessions (human or AI) don't undo them
 ## Reporting
 
 This is a pilot-stage project. Report issues to the repo owner directly.
+
+
+## Shop fee payments
+
+- Fee amounts are never client-supplied; the order endpoint rejects any body fields.
+- Settlement requires a verified Razorpay webhook signature (HMAC-SHA256 over the raw body; an empty secret is refused) with matching order, amount, currency and notes, or a server-side provider fetch. The Checkout callback alone settles nothing.
+- `FEE_PAYMENT_PROVIDER=mock` and Razorpay TEST keys are refused at boot in production; live keys are refused outside production unless explicitly allowed.
+- All fee queries are scoped by `shopId` in the WHERE clause; fee routes use `requireShopOwner`; the admin lift-block action is audited and requires a reason.

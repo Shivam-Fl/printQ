@@ -66,7 +66,7 @@ const dbReady = await (async () => {
 vi.setConfig({ testTimeout: 60_000 });
 
 /** Statements the check-in request may issue before it answers. */
-const CHECKIN_SQL_BUDGET = 17;
+const CHECKIN_SQL_BUDGET = 6;
 
 describe.runIf(dbReady)('check-in request budget (database)', () => {
   let shopId = '';
@@ -264,12 +264,12 @@ describe.runIf(dbReady)('check-in request budget (database)', () => {
   it('a failing post-commit queue sync never turns a committed check-in into a 500 (D1)', async () => {
     const order = await prepared(shopId);
     // Simulate the production failure: the advisory-locked reconcile transaction
-    // (the 2nd interactive transaction of a check-in) times out.
+    // (the only interactive transaction of a check-in) times out.
     const original = prisma.$transaction.bind(prisma) as (...a: unknown[]) => Promise<unknown>;
     let calls = 0;
     const spy = vi.spyOn(prisma, '$transaction').mockImplementation(((...args: unknown[]) => {
       calls += 1;
-      if (calls === 2) return Promise.reject(new Error('Transaction API error: timeout'));
+      if (calls === 1) return Promise.reject(new Error('Transaction API error: timeout'));
       return original(...args);
     }) as never);
     let res: Response;
@@ -278,7 +278,7 @@ describe.runIf(dbReady)('check-in request budget (database)', () => {
     } finally {
       spy.mockRestore();
     }
-    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(calls).toBeGreaterThanOrEqual(1);
     expect(res.status).toBe(200);
     const row = await prisma.job.findUniqueOrThrow({ where: { id: order.jobId } });
     expect(row.status).toBe('queued');

@@ -7,6 +7,7 @@ import ShopNav from '../../components/ShopNav.js';
 import ShopLocationPicker from '../../components/ShopLocationPicker.js';
 import {
   buildSettingsPatch,
+  locationChangeNeedsReview,
   coordinateWarning,
   formatRupeesField,
   parseRupees,
@@ -335,6 +336,10 @@ export default function Settings() {
     // Only what changed: re-sending untouched fields would unpublish a verified
     // shop and let a stale tab overwrite another tab's edits.
     const patch = buildSettingsPatch(baseline.draft, draft, baseline.menuVersion);
+    if (locationChangeNeedsReview(baseline.draft, draft)
+      && !confirm('Moving your counter location sends your shop for re-review and hides it from students until approved. Continue?')) {
+      return;
+    }
     setSaving(true);
     setError('');
     try {

@@ -143,5 +143,27 @@ export function coordinateWarning(latitude: number | null, longitude: number | n
   if (latitude >= 68 && latitude <= 98 && longitude >= 6 && longitude <= 36) {
     return 'These look swapped — in India, latitude is about 8–35 and longitude about 68–98. Check the two boxes.';
   }
+  if (latitude < 6 || latitude > 37.5 || longitude < 68 || longitude > 98) {
+    return 'That location is outside India — check latitude/longitude';
+  }
   return null;
+}
+
+const EARTH_RADIUS_M = 6_371_000;
+/** Mirrors the API's MATERIAL_MOVE_M: smaller moves are GPS jitter and never trigger re-review. */
+export const MATERIAL_MOVE_M = 150;
+
+function metersBetween(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(bLat - aLat) / 2) ** 2
+    + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(rad(bLng - aLng) / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
+/** True when saving this patch will move an existing counter pin far enough to need a fresh review. */
+export function locationChangeNeedsReview(original: SettingsDraft, draft: SettingsDraft): boolean {
+  if (original.latitude == null || original.longitude == null) return false;
+  if (draft.latitude === original.latitude && draft.longitude === original.longitude) return false;
+  if (draft.latitude == null || draft.longitude == null) return true;
+  return metersBetween(original.latitude, original.longitude, draft.latitude, draft.longitude) > MATERIAL_MOVE_M;
 }
