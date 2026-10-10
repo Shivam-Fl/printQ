@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, clearToken, getToken } from '../../api.js';
 import { enablePush, pushPermission } from '../../push.js';
 import { resetSockets } from '../../socket.js';
@@ -136,6 +136,7 @@ export default function Profile() {
         </div>
 
         <p className="dim" style={{ textAlign: 'center', marginTop: 12 }}>PrintQ · add to home screen for the full app</p>
+        <p className="dim" style={{ textAlign: 'center', margin: 0 }}><Link to="/support">Help &amp; policies</Link></p>
       </div>
     </StudentShell>
   );

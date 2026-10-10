@@ -1154,10 +1154,11 @@ tr:last-child td { border-bottom: none; }
 .directory-heading { margin: 28px 0 20px; }
 .directory-heading h1 { margin: 7px 0 5px; }
 .directory-heading p { margin: 0; color: var(--pencil); }
-.search-field { display: flex; align-items: center; padding-left: 13px; border: 1px solid var(--rule-dark); border-radius: 12px; background: var(--paper); }
-.search-field:focus-within { border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft); }
-.search-field > span { color: var(--pencil); font-size: 1.25rem; }
-.search-field input { border: 0; box-shadow: none !important; background: transparent; }
+.search-field { display: flex; align-items: center; gap: 4px; padding-left: 13px; border: 1px solid var(--rule-dark); border-radius: 12px; background: var(--paper); transition: border-color .15s, box-shadow .15s; }
+/* The whole field shows focus (one ring on the wrapper); the bare input never draws its own outline. */
+.search-field:focus-within { border-color: var(--stamp); box-shadow: 0 0 0 3px var(--stamp-soft), 0 0 0 5px var(--highlight); }
+.search-field > span { flex: 0 0 auto; display: grid; place-items: center; width: 22px; line-height: 1; color: var(--pencil); font-size: 1.25rem; }
+.search-field input { flex: 1 1 auto; min-width: 0; width: 100%; padding: 12px 13px 12px 6px; border: 0; border-radius: 0 12px 12px 0; outline: none !important; box-shadow: none !important; background: transparent; }
 .directory-list { display: grid; gap: 10px; margin-top: 16px; }
 .directory-card { display: flex; align-items: center; gap: 14px; padding: 16px; color: var(--ink); border: 1px solid var(--rule); border-radius: 14px; background: var(--paper); box-shadow: var(--shadow); text-decoration: none; }
 .directory-card:hover { border-color: #cbd3df; box-shadow: var(--shadow-raised); text-decoration: none; }
@@ -1240,4 +1241,41 @@ tr:last-child td { border-bottom: none; }
   .checkout-card { padding: 20px; }
   .auth-form-grid { grid-template-columns: 1fr; }
   .auth-form-grid .full-field { grid-column: auto; }
+}
+
+/* ---------- legal / support / 404 ---------- */
+.page.legal-page { max-width: 720px; }
+.legal-head { margin: 22px 0 8px; }
+.legal-head h1 { margin: 8px 0 6px; }
+.legal-summary { margin: 0; max-width: 56ch; color: var(--pencil); font-size: 1.02rem; }
+.legal-updated { display: inline-block; margin: 14px 0 0; padding: 3px 10px; border: 1px dashed var(--stamp); border-radius: 999px; background: var(--stamp-soft); color: var(--stamp-dark); font-family: var(--font-mono); font-size: .72rem; letter-spacing: .02em; }
+.legal-body { margin: 18px 0 0; border-top: 1px solid var(--rule); }
+.legal-body section { padding: 4px 0 6px; border-bottom: 1px solid var(--rule); }
+.legal-body h2 { margin: 18px 0 8px; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+.legal-body p, .legal-body li, .legal-body dd { max-width: 68ch; line-height: 1.65; }
+.legal-body ul { margin: 8px 0 12px; padding-left: 1.2rem; }
+.legal-body li { margin: 5px 0; padding-left: 2px; }
+.legal-body li::marker { color: var(--stamp); }
+.legal-body a { text-decoration: underline; text-underline-offset: 3px; }
+.legal-faq { margin: 8px 0 14px; display: grid; gap: 2px; }
+.legal-faq dt { margin-top: 12px; font-family: var(--font-display); font-weight: 700; }
+.legal-faq dd { margin-bottom: 0; }
+.legal-faq dd { margin: 2px 0 0; color: var(--pencil); }
+.legal-contact { list-style: none; padding-left: 0 !important; }
+.legal-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; margin-top: 28px; padding-top: 16px; color: var(--pencil); font-size: .85rem; }
+.legal-foot > span { font-family: var(--font-display); font-weight: 800; color: var(--ink); }
+.policy-links { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.policy-links a { color: var(--pencil); font-size: .85rem; }
+.policy-links a:hover { color: var(--stamp); }
+.policy-links a[aria-current='page'] { color: var(--ink); font-weight: 700; }
+.public-footer .policy-links a { padding: 10px 0; }
+.shopnav-help { flex: 0 0 auto; padding: 6px 8px; color: var(--pencil); font-size: .78rem; white-space: nowrap; }
+.shopnav-help:hover { color: var(--stamp); }
+.notfound { margin: 48px 0 0; }
+.notfound-code { display: inline-block; padding: 2px 14px; border: 2px dashed var(--stamp); border-radius: 10px; background: var(--stamp-soft); color: var(--stamp); font-family: var(--font-mono); font-weight: 700; font-size: 1.1rem; transform: rotate(-2deg); }
+.notfound h1 { margin: 18px 0 8px; }
+.notfound > p { max-width: 46ch; color: var(--pencil); }
+.notfound .welcome-actions { margin: 22px 0 16px; }
+@media (max-width: 640px) {
+  .public-footer .policy-links { gap: 0 18px; }
 }
