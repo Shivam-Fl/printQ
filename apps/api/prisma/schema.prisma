@@ -101,6 +101,7 @@ enum CollectionMandateStatus {
   revoked
   expired
   failed
+  paused
 }
 
 enum CollectionEnvironment {

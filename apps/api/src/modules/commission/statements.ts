@@ -47,7 +47,7 @@ export interface DebitGateInput {
   amountDuePaise: number;
   noticeSentAt: Date | null;
   debitNotBefore: Date | null;
-  mandateStatus: 'active' | 'pending' | 'revoked' | 'expired' | 'failed' | null;
+  mandateStatus: 'active' | 'pending' | 'revoked' | 'expired' | 'failed' | 'paused' | null;
   mandateMaxAmountPaise: number | null;
   mandateValidFrom?: Date | null;
   mandateValidUntil?: Date | null;

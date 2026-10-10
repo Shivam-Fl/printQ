@@ -1,9 +1,11 @@
 import { Router, raw } from 'express';
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { logger } from '../../lib/logger.js';
 import { asyncHandler } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { parseCapturedRecurringPayment, settleTestCapturedRecurringPayment } from '../commission/settlementService.js';
+import { applyTokenEvent, parseTokenEvent } from '../commission/mandateService.js';
 import { verifyRazorpayRecurringWebhookSignature } from '../../providers/payment/index.js';
 
 /**
@@ -35,19 +37,47 @@ webhookRouter.post(
       ? receivedEventId
       : `razorpay_sha256_${createHash('sha256').update(req.body as Buffer).digest('hex')}`;
 
-    // Preserve delivery evidence without customer or document payloads. The
-    // settlement service itself is TEST-only and verifies order, amount and
-    // mandate before posting exactly one PostgreSQL ledger reversal.
-    await prisma.paymentEvent.upsert({
-      where: { providerEventId },
-      create: { provider: 'razorpay_recurring_pending', providerEventId, jobId: null, payload: { event } },
-      update: {},
-    });
+    // Mandate lifecycle: signed token.* events are the only way a mandate
+    // becomes usable. Deduplicated by provider event id; the state machine is
+    // itself idempotent, so replays and out-of-order delivery cannot corrupt
+    // state, and events for unknown tokens are ignored.
+    const tokenEvent = parseTokenEvent(payload);
+    let tokenOutcome: string | null = null;
+    if (tokenEvent) {
+      try {
+        await prisma.paymentEvent.create({
+          data: { provider: 'razorpay_token_event', providerEventId, jobId: null, payload: { event } },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          logger.info({ event, providerEventId }, 'razorpay_token_event_duplicate');
+          res.json({ ok: true, duplicate: true });
+          return;
+        }
+        throw error;
+      }
+      try {
+        tokenOutcome = await applyTokenEvent(tokenEvent, providerEventId);
+      } catch (error) {
+        // Let Razorpay redeliver: forget the dedupe row so the retry re-applies.
+        await prisma.paymentEvent.deleteMany({ where: { providerEventId } });
+        throw error;
+      }
+    } else {
+      // Preserve delivery evidence without customer or document payloads. The
+      // settlement service itself is TEST-only and verifies order, amount and
+      // mandate before posting exactly one PostgreSQL ledger reversal.
+      await prisma.paymentEvent.upsert({
+        where: { providerEventId },
+        create: { provider: 'razorpay_recurring_pending', providerEventId, jobId: null, payload: { event } },
+        update: {},
+      });
+    }
     const captured = parseCapturedRecurringPayment(payload);
     const testStatementSettled = captured
       ? await settleTestCapturedRecurringPayment(captured)
       : false;
-    logger.info({ event, providerEventId, testStatementSettled }, 'razorpay_recurring_webhook_processed');
+    logger.info({ event, providerEventId, testStatementSettled, tokenOutcome }, 'razorpay_recurring_webhook_processed');
     res.json({ ok: true });
   }),
 );

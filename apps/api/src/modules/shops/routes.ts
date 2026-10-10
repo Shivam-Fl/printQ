@@ -38,6 +38,7 @@ import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
+import { mandateRouter } from '../commission/mandateRoutes.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
@@ -421,6 +422,9 @@ shopRouter.get(
     res.json({ earnings: await getCommissionOverview(req.shopUser!.shopId) });
   }),
 );
+
+/** Weekly-commission UPI AutoPay (Razorpay TEST only, owner-only). */
+shopRouter.use('/collection-mandate', mandateRouter);
 
 /** Analytics: the shop's private base earnings, prints and pages. */
 shopRouter.get(

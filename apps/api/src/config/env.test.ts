@@ -37,6 +37,8 @@ function loadConfig(overrides: Record<string, string>) {
   });
 }
 
+const ENC_KEY = Buffer.alloc(32, 7).toString('base64');
+
 describe('environment isolation contract', () => {
   it('accepts matching development identities and namespaced resources', () => {
     expect(loadConfig({}).status).toBe(0);
@@ -68,7 +70,7 @@ describe('environment isolation contract', () => {
   });
 
   it('permits recurring collection test mode only outside production', () => {
-    expect(loadConfig({ SHOP_COLLECTION_MODE: 'test' }).status).toBe(0);
+    expect(loadConfig({ SHOP_COLLECTION_MODE: 'test', COLLECTION_TOKEN_ENC_KEY: ENC_KEY }).status).toBe(0);
     const result = loadConfig({
       NODE_ENV: 'production',
       PRINTQ_ENVIRONMENT: 'production',
@@ -109,6 +111,20 @@ describe('environment isolation contract', () => {
     const result = loadConfig({ SHOP_COLLECTION_MODE: 'live' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('SHOP_COLLECTION_MODE=live is not enabled by this release');
+  });
+
+  it('requires a valid 32-byte token encryption key whenever collection is enabled', () => {
+    const missing = loadConfig({ SHOP_COLLECTION_MODE: 'test' });
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('COLLECTION_TOKEN_ENC_KEY');
+    expect(loadConfig({ SHOP_COLLECTION_MODE: 'test', COLLECTION_TOKEN_ENC_KEY: 'c2hvcnQ=' }).status).toBe(1);
+    expect(loadConfig({ SHOP_COLLECTION_MODE: 'disabled' }).status).toBe(0);
+  });
+
+  it('keeps live collection blocked even with a valid encryption key', () => {
+    const result = loadConfig({ SHOP_COLLECTION_MODE: 'live', COLLECTION_TOKEN_ENC_KEY: ENC_KEY });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('not enabled by this release');
   });
 
   it('parses a literal false simulator flag as false in production', () => {

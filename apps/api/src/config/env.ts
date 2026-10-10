@@ -107,6 +107,8 @@ const envSchema = z.object({
   // Distinct from retired student checkout keys and never accepted in production.
   RAZORPAY_RECURRING_TEST_KEY_ID: z.string().optional(),
   RAZORPAY_RECURRING_TEST_KEY_SECRET: z.string().optional(),
+  // AES-256-GCM key (32 random bytes, base64) encrypting mandate tokens at rest.
+  COLLECTION_TOKEN_ENC_KEY: z.string().optional(),
 
   // Student login OTPs happen pre-session, so they can't be in-app — an SMS
   // provider is required for a real launch (console just logs to the API).
@@ -216,6 +218,14 @@ if (env.SHOP_COLLECTION_MODE === 'live') {
   // eslint-disable-next-line no-console
   console.error('SHOP_COLLECTION_MODE=live is not enabled by this release');
   process.exit(1);
+}
+if (env.SHOP_COLLECTION_MODE !== 'disabled') {
+  const key = env.COLLECTION_TOKEN_ENC_KEY;
+  if (!key || Buffer.from(key, 'base64').length !== 32 || Buffer.from(key, 'base64').toString('base64') !== key) {
+    // eslint-disable-next-line no-console
+    console.error('SHOP_COLLECTION_MODE requires COLLECTION_TOKEN_ENC_KEY (32 random bytes, base64)');
+    process.exit(1);
+  }
 }
 if (env.STUDENT_AUTH_PROVIDER === 'firebase' && !env.FIREBASE_AUTH_API_KEY) {
   // eslint-disable-next-line no-console

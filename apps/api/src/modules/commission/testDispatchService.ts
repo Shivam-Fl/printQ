@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { conflict } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { readStoredToken } from '../../lib/tokenCrypto.js';
 import { RazorpayTestRecurringClient } from '../../providers/payment/recurringTest.js';
 import { debitGateReason, UPI_PRE_DEBIT_NOTICE_MS } from './statements.js';
 
@@ -111,7 +112,7 @@ export async function dispatchTestCollectionAttempt(
       orderId,
       amountPaise: candidate.amountPaise,
       customerId: candidate.statement.mandate.providerCustomerId,
-      tokenId: candidate.statement.mandate.providerTokenId,
+      tokenId: readStoredToken(candidate.statement.mandate.providerTokenId, candidate.statement.mandate.id),
       email: candidate.statement.mandate.ownerDebitEmail,
       contact: candidate.statement.mandate.ownerDebitContactE164,
     });
