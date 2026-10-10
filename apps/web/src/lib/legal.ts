@@ -13,8 +13,14 @@ export const LEGAL_PRODUCT_NAME = 'PrintQs';
 /** Shown at the top of every policy page. ISO date, rendered as written. */
 export const LEGAL_LAST_UPDATED = '2026-10-10';
 
-// Sole proprietor, operating as PrintQs.
-export const LEGAL_ENTITY_NAME: string | null = 'Shivam Mishra';
+// Individual proprietor, operating as PrintQs. Must match the business name on
+// the payment-provider account (Razorpay: Business Type "Individual").
+export const LEGAL_ENTITY_NAME: string | null = 'Shivam Ramkumar Mishra';
+
+/** How the legal entity is rendered on every policy page and the footer. */
+export const LEGAL_ENTITY_DESCRIPTION: string | null = LEGAL_ENTITY_NAME
+  ? `${LEGAL_ENTITY_NAME} (individual proprietor), trading as ${LEGAL_PRODUCT_NAME}`
+  : null;
 
 // TODO(owner): full street address and PIN code are still wanted.
 export const LEGAL_REGISTERED_ADDRESS: string | null = 'Bhiwandi, Maharashtra, India';
@@ -27,7 +33,7 @@ export const SUPPORT_PHONE: string | null = '+91 78228 75508';
 export const SUPPORT_HOURS: string | null = null;
 
 // Grievance Officer under the Information Technology Rules, 2021.
-export const GRIEVANCE_OFFICER_NAME: string | null = 'Shivam Mishra';
+export const GRIEVANCE_OFFICER_NAME: string | null = LEGAL_ENTITY_NAME;
 export const GRIEVANCE_OFFICER_EMAIL: string | null = 'admin@printqs.com';
 export const GRIEVANCE_OFFICE_LOCATION: string | null = 'Bhiwandi, Maharashtra';
 

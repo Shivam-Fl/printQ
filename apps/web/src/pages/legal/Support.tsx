@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import LegalLayout from '../../components/LegalLayout.js';
 import {
+  LEGAL_ENTITY_DESCRIPTION,
   LEGAL_ENTITY_NAME,
   LEGAL_REGISTERED_ADDRESS,
   SUPPORT_EMAIL,
@@ -53,7 +54,7 @@ export default function Support() {
         <section>
           <h2>Business details</h2>
           <p>
-            {LEGAL_ENTITY_NAME}
+            {LEGAL_ENTITY_DESCRIPTION}
             {LEGAL_REGISTERED_ADDRESS && <><br />{LEGAL_REGISTERED_ADDRESS}</>}
           </p>
         </section>
