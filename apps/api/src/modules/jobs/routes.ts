@@ -269,8 +269,7 @@ jobsRouter.post(
   requireStudent,
   validateBody(checkInSchema),
   asyncHandler(async (req, res) => {
-    const job = await checkInJob(param(req, 'id'), req.student!.id, req.body as z.infer<typeof checkInSchema>);
-    const live = await getJobLiveMetrics(job.id);
+    const { live, ...job } = await checkInJob(param(req, 'id'), req.student!.id, req.body as z.infer<typeof checkInSchema>);
     res.json({ job: { id: job.id, status: job.status, ...live } });
   }),
 );

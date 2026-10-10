@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const tx = {
-    job: { updateMany: vi.fn(), findUnique: vi.fn() },
+    job: { updateManyAndReturn: vi.fn() },
     jobEvent: { create: vi.fn() },
     realtimeOutbox: { create: vi.fn() },
   };
@@ -23,8 +23,7 @@ const { applyTransition } = await import('./transitions.js');
 describe('authoritative transition outbox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.tx.job.updateMany.mockResolvedValue({ count: 1 });
-    mocks.tx.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'awaiting_arrival' });
+    mocks.tx.job.updateManyAndReturn.mockResolvedValue([{ id: 'job-1', status: 'awaiting_arrival' }]);
     mocks.tx.jobEvent.create.mockResolvedValue({ id: 'event-1' });
     mocks.tx.realtimeOutbox.create.mockResolvedValue({ id: 'outbox-1' });
   });
@@ -43,7 +42,7 @@ describe('authoritative transition outbox', () => {
   });
 
   it('does not create an audit or projection record when optimistic concurrency loses', async () => {
-    mocks.tx.job.updateMany.mockResolvedValue({ count: 0 });
+    mocks.tx.job.updateManyAndReturn.mockResolvedValue([]);
     await expect(applyTransition('job-1', 'pending_payment', 'CASH_SELECTED', { type: 'system' })).resolves.toBeNull();
     expect(mocks.tx.jobEvent.create).not.toHaveBeenCalled();
     expect(mocks.tx.realtimeOutbox.create).not.toHaveBeenCalled();

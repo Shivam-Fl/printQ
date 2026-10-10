@@ -45,6 +45,16 @@ import {
   sweepExpiredReveals,
 } from './engine.js';
 import { releaseByOtp } from './release.js';
+import { drainBackground } from '../../lib/background.js';
+
+/** Check-in sends its notifications after responding; wait for them before asserting. */
+async function checkInAndSettle(...args: Parameters<typeof checkInJob>) {
+  try {
+    return await checkInJob(...args);
+  } finally {
+    await drainBackground();
+  }
+}
 
 const LAT = 28.6139;
 const LNG = 77.209;
@@ -137,7 +147,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
   async function joined(forShop = shopId) {
     const order = await prepared(forShop);
     await sleep(3);
-    await checkInJob(order.jobId, order.studentId, arrival());
+    await checkInAndSettle(order.jobId, order.studentId, arrival());
     return order;
   }
 
@@ -220,9 +230,9 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
   describe('check-in radius (200 m)', () => {
     it('accepts 199.5 m and rejects 200.5 m', async () => {
       const near = await prepared();
-      await expect(checkInJob(near.jobId, near.studentId, arrival(199.5))).resolves.toMatchObject({ status: 'queued' });
+      await expect(checkInAndSettle(near.jobId, near.studentId, arrival(199.5))).resolves.toMatchObject({ status: 'queued' });
       const far = await prepared();
-      await expect(checkInJob(far.jobId, far.studentId, arrival(200.5))).rejects.toMatchObject({ status: 409 });
+      await expect(checkInAndSettle(far.jobId, far.studentId, arrival(200.5))).rejects.toMatchObject({ status: 409 });
       expect((await row(far.jobId)).status).toBe('awaiting_arrival');
     });
   });
@@ -332,7 +342,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       await expect(requeueJob(a.jobId, a.studentId)).rejects.toMatchObject({ status: 409 });
       expect((await row(a.jobId)).status).toBe('awaiting_arrival');
       await sleep(3);
-      await checkInJob(a.jobId, a.studentId, arrival());
+      await checkInAndSettle(a.jobId, a.studentId, arrival());
       const metrics = await Promise.all([b, c, a].map((j) => getJobLiveMetrics(j.jobId)));
       expect(metrics.map((m) => m.position)).toEqual([1, 2, 3]);
       expect(metrics[2]!.band).toBe('arriving'); // behind two revealed students
