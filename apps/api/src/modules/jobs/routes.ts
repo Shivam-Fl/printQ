@@ -6,7 +6,9 @@ import {
   couponCodeSchema,
   createJobSchema,
   jobSpecsSchema,
+  unsupportedSpecs,
   type JobSpecs,
+  type UnsupportedSpec,
   type PriceBreakdown,
 } from '@printq/shared';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -48,6 +50,15 @@ const checkInSchema = z.object({
   measuredAt: z.coerce.date(),
 });
 
+/** Capability problems for this shop's configured printers (online or not), friendly text included. */
+async function unsupportedForShop(shopId: string, specs: JobSpecs): Promise<UnsupportedSpec[]> {
+  const printers = await prisma.printer.findMany({
+    where: { shopId },
+    select: { paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
+  });
+  return unsupportedSpecs(printers, specs);
+}
+
 /** Live price quote — server-computed from the shop's rate card, never client math. */
 jobsRouter.post(
   '/quote',
@@ -71,7 +82,13 @@ jobsRouter.post(
     if (couponCode) breakdown = applyCoupon(breakdown, await resolveCoupon(couponCode, file.shopId));
     // Student-facing pricing is intentionally one final amount. The shop base,
     // platform markup and line-item split remain private server-side data.
-    res.json({ quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise }, pages: file.pages });
+    // Hardware capability is checked here, not first at the counter: the student is told now.
+    const unsupported = await unsupportedForShop(file.shopId, specs);
+    res.json({
+      quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise },
+      pages: file.pages,
+      ...(unsupported.length > 0 ? { unsupported } : {}),
+    });
   }),
 );
 
@@ -156,6 +173,8 @@ jobsRouter.post(
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
     }
+    const unsupported = await unsupportedForShop(file.shopId, specs);
+    if (unsupported.length > 0) throw conflict(unsupported.map((u) => u.message).join(' '));
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
     const platformMarkupPaise = breakdown.totalPaise - shopBase.totalPaise;

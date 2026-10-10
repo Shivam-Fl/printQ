@@ -201,6 +201,26 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     expect((await fileRow(file.id)).deletionScheduledAt).toBeNull();
   });
 
+  it('D7: quote flags options the shop cannot print and order creation is refused with the same message', async () => {
+    const file = await newFile();
+    const colourSpecs = { ...specs, color: true };
+    const quote = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs: colourSpecs } });
+    expect(quote.status).toBe(200);
+    const body = (await quote.json()) as { unsupported?: { code: string; message: string }[] };
+    expect(body.unsupported?.map((u) => u.code)).toEqual(['color']);
+    expect(body.unsupported![0]!.message).toMatch(/colour/i);
+
+    const order = await call('/api/jobs', { method: 'POST', body: { fileId: file.id, specs: colourSpecs, mode: 'instant' } });
+    expect(order.status).toBe(409);
+    expect(((await order.json()) as { error: string }).error).toBe(body.unsupported![0]!.message);
+    expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(0);
+
+    const bwQuote = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs } });
+    expect(((await bwQuote.json()) as { unsupported?: unknown }).unsupported).toBeUndefined();
+    const oddPaper = await call('/api/jobs/quote', { method: 'POST', body: { fileId: file.id, specs: { ...specs, paperSize: 'A3' } } });
+    expect(((await oddPaper.json()) as { unsupported: { code: string }[] }).unsupported[0]!.code).toBe('paper_size');
+  });
+
   it('D5: concurrent ratings are once-only (one 200, the rest 409)', async () => {
     const file = await newFile();
     const order = await orderOn(file.id);
