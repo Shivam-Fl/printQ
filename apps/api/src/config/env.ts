@@ -149,6 +149,10 @@ const envSchema = z.object({
 
   /// A `printing` job whose print computer has been silent this long is failed so staff can retry.
   PRINT_LEASE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(90),
+  /// Hard backstop: a printing job the spooler never acknowledged (no spoolAcceptedAt) is failed after this long even if its computer is online.
+  PRINT_CLAIM_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(120),
+  /// A spooler-accepted print nobody confirmed (staff / simulator) is failed after this long and flagged 'check the printer'.
+  PRINT_SPOOL_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
   // Unprinted uploads have a hard 24-hour maximum. Successful and terminal

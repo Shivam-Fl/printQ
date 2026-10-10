@@ -16,6 +16,8 @@ type ColumnKind = 'text' | 'int' | 'ts' | { enum: string } | 'increment';
 const FAST_COLUMNS: Readonly<Record<string, ColumnKind>> = {
   assignedPrinterId: 'text',
   claimedByAgentId: 'text',
+  claimedBySessionId: 'text',
+  printConfirmedById: 'text',
   printError: 'text',
   paymentId: 'text',
   paymentProvider: 'text',
@@ -33,15 +35,22 @@ const FAST_COLUMNS: Readonly<Record<string, ColumnKind>> = {
   revealDeadlineAt: 'ts',
   arrivingNotifiedAt: 'ts',
   absentAt: 'ts',
+  spoolAcceptedAt: 'ts',
+  printConfirmedAt: 'ts',
   otpExpiresAt: 'ts',
   cashCollectedAt: 'ts',
   counterPaymentConfirmedAt: 'ts',
   paymentStatus: { enum: 'PaymentStatus' },
   counterPaymentMethod: { enum: 'CounterPaymentMethod' },
+  printCompletionMethod: { enum: 'PrintCompletionMethod' },
   checkInCount: 'increment',
+  printAttempts: 'increment',
 };
 /** Columns a guard may compare (all timestamps), with the operators supported. */
 const GUARD_TS_COLUMNS = new Set(['revealedAt', 'revealDeadlineAt']);
+/** Columns a guard may compare for equality / NULL (value is a string or null). */
+const GUARD_TEXT_COLUMNS = new Set(['claimedByAgentId', 'claimedBySessionId']);
+const GUARD_NULL_ONLY_COLUMNS = new Set(['spoolAcceptedAt']);
 
 const ident = (column: string) => Prisma.raw(`"${column}"`);
 
@@ -64,6 +73,14 @@ function guardClauses(guard: Prisma.JobWhereInput | undefined): Prisma.Sql[] | n
   if (!guard) return [];
   const out: Prisma.Sql[] = [];
   for (const [column, cond] of Object.entries(guard)) {
+    if (GUARD_TEXT_COLUMNS.has(column) && (cond === null || typeof cond === 'string')) {
+      out.push(cond === null ? Prisma.sql`${ident(column)} IS NULL` : Prisma.sql`${ident(column)} = ${cond}`);
+      continue;
+    }
+    if (GUARD_NULL_ONLY_COLUMNS.has(column) && cond === null) {
+      out.push(Prisma.sql`${ident(column)} IS NULL`);
+      continue;
+    }
     if (!GUARD_TS_COLUMNS.has(column) || cond === null || typeof cond !== 'object' || cond instanceof Date) return null;
     for (const [op, operand] of Object.entries(cond as Record<string, unknown>)) {
       if (op === 'not' && operand === null) out.push(Prisma.sql`${ident(column)} IS NOT NULL`);

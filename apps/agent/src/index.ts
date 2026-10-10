@@ -23,6 +23,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import readline from 'node:readline/promises';
 import { io, type Socket } from 'socket.io-client';
 import { detectPrinters, isSimulationMode, sendToPrinter } from './printerRuntime.js';
@@ -31,6 +32,15 @@ import { loadEphemeralAgentToken } from './cliToken.js';
 
 const API_URL = process.env.PRINTQ_API_URL ?? 'http://localhost:4000';
 const HEARTBEAT_MS = 30_000;
+
+/**
+ * Random id of THIS process run. The server uses it to tell a restarted agent
+ * (same agent id, new session) from the one that claimed a job: whatever the
+ * previous process held is failed for staff instead of staying 'printing'.
+ */
+const SESSION_ID = randomUUID();
+/** Jobs this process has claimed and not yet handed to the spooler (or failed). Sent on every heartbeat. */
+const inFlight = new Set<string>();
 
 interface DispatchPayload {
   jobId: string;
@@ -71,7 +81,12 @@ const TOKEN = await loadToken();
 async function api(pathname: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API_URL}${pathname}`, {
     ...init,
-    headers: { 'x-agent-token': TOKEN, 'content-type': 'application/json', ...init.headers },
+    headers: {
+      'x-agent-token': TOKEN,
+      'x-agent-session': SESSION_ID,
+      'content-type': 'application/json',
+      ...init.headers,
+    },
   });
 }
 
@@ -91,7 +106,18 @@ async function reportPrinters(): Promise<void> {
   }
 }
 
+/** Tracks the job as in flight for the whole time this process may still be working on it. */
 async function printJob(job: DispatchPayload): Promise<void> {
+  if (inFlight.has(job.jobId)) return; // already being handled (dispatch + pending drain race)
+  inFlight.add(job.jobId);
+  try {
+    await printJobInner(job);
+  } finally {
+    inFlight.delete(job.jobId);
+  }
+}
+
+async function printJobInner(job: DispatchPayload): Promise<void> {
   // claim first (server already scopes this to printers this PC is linked
   // to, via connectedPrinterIds) — the conditional update is the lock.
   const claim = await api(`/api/agent/jobs/${job.jobId}/claim`, { method: 'POST' });
@@ -227,7 +253,7 @@ async function drainPending(): Promise<void> {
 }
 
 function connect(): Socket {
-  const socket = io(API_URL, { auth: { agentToken: TOKEN } });
+  const socket = io(API_URL, { auth: { agentToken: TOKEN, sessionId: SESSION_ID } });
 
   socket.on('connect', () => {
     console.log('Connected to PrintQ');
@@ -251,7 +277,7 @@ function connect(): Socket {
 
 connect();
 setInterval(() => {
-  api('/api/agent/heartbeat', { method: 'POST' }).catch((err) =>
+  api('/api/agent/heartbeat', { method: 'POST', body: JSON.stringify({ inFlightJobIds: [...inFlight] }) }).catch((err) =>
     console.error('heartbeat failed', err instanceof Error ? err.message : err),
   );
   void reportPrinters();

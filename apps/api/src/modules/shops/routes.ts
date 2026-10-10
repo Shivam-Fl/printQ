@@ -36,7 +36,7 @@ import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
-import { agentGoneForStaff, isPrintOrphaned, markPrintFailedAgentGone } from '../jobs/printLease.js';
+import { isPrintOrphaned, markPrintFailedAgentGone, printLostReason } from '../jobs/printLease.js';
 import { describePrintProblem } from '../../lib/printProblem.js';
 import { istDayKey, lastIstDayKeys, startOfIstDay } from '../../lib/istDay.js';
 import type { Job } from '@prisma/client';
@@ -733,6 +733,8 @@ shopRouter.get(
         counterPaymentMethod: true,
         counterPaymentConfirmedAt: true,
         claimedByAgentId: true,
+        claimedBySessionId: true,
+        updatedAt: true,
         assignedPrinterId: true,
         otpExpiresAt: true,
         printError: true,
@@ -761,7 +763,7 @@ shopRouter.get(
     const printingAgents = printingAgentIds.length
       ? await prisma.agent.findMany({
           where: { shopId, id: { in: printingAgentIds } },
-          select: { id: true, status: true, lastHeartbeatAt: true, createdAt: true },
+          select: { id: true, status: true, lastHeartbeatAt: true, createdAt: true, sessionId: true },
         })
       : [];
     const agentById = new Map(printingAgents.map((a) => [a.id, a]));
@@ -770,7 +772,7 @@ shopRouter.get(
       revealGraceSeconds: queue.revealGraceSeconds,
       jobs: jobs.map((j) => {
         const live = bands.get(j.id);
-        const { revealedAt, revealDeadlineAt, absentAt, claimedByAgentId, printError, ...rest } = j;
+        const { revealedAt, revealDeadlineAt, absentAt, claimedByAgentId, claimedBySessionId, updatedAt, printError, ...rest } = j;
         const problem = describePrintProblem(printError);
         const agent = claimedByAgentId ? agentById.get(claimedByAgentId) : undefined;
         return {
@@ -778,7 +780,7 @@ shopRouter.get(
           // Raw agent/driver text never reaches the dashboard: friendly message + stable code only.
           printError: problem?.message ?? null,
           printErrorCode: problem?.code ?? null,
-          printAgentOffline: j.status === 'printing' && agentGoneForStaff(agent ?? null),
+          printAgentOffline: j.status === 'printing' && printLostReason({ claimedByAgentId, claimedBySessionId, spoolAcceptedAt: j.spoolAcceptedAt, updatedAt }, agent ?? null, Date.now(), 'staff') !== null,
           position: live?.position ?? null,
           band: live?.band ?? null,
           revealDeadlineAt: live?.band === 'revealed' ? revealDeadlineAt : null,
@@ -939,7 +941,7 @@ shopRouter.post(
 
     const updated = await prisma.job.update({
       where: { id: job.id },
-      data: { assignedPrinterId: printerId, claimedByAgentId: null, printError: null },
+      data: { assignedPrinterId: printerId, claimedByAgentId: null, claimedBySessionId: null, printError: null },
     });
     await dispatchJob(updated, { type: 'shop', id: req.shopUser!.id });
     publishEvent(`shop:${shopId}`, 'queue:retry_dispatched', { jobId: updated.id, printerId });
@@ -1003,7 +1005,7 @@ shopRouter.post(
       'otp_verified',
       'COUNTER_PAYMENT_RETURNED',
       { type: 'shop', id: req.shopUser!.id },
-      { paymentStatus: 'refunded', claimedByAgentId: null, printError: null },
+      { paymentStatus: 'refunded', claimedByAgentId: null, claimedBySessionId: null, printError: null },
     );
     if (!updated) throw conflict('Job state changed, try again');
     await prisma.paymentEvent.upsert({

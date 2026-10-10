@@ -220,6 +220,7 @@ export async function releaseByOtp(
     {
       assignedPrinterId: printerId,
       claimedByAgentId: null,
+      claimedBySessionId: null,
       printError: null,
       ...(isCounterDue || isLegacyCashDue
         ? {

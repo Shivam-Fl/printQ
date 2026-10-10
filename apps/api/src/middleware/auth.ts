@@ -12,7 +12,7 @@ declare global {
       student?: { id: string };
       shopUser?: { id: string; shopId: string; role: 'owner' | 'staff' };
       admin?: { id: string; role: 'platform_admin' };
-      agent?: { id: string; shopId: string; connectedPrinterIds: string[] };
+      agent?: { id: string; shopId: string; connectedPrinterIds: string[]; sessionId: string | null };
       /** Firebase App Check claim, populated only after server verification. */
       firebaseAppCheck?: { appId: string };
     }
@@ -90,6 +90,11 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
 }
 
 /** Agents authenticate with their opaque token (x-agent-token header). */
+/** A random per-process id from the agent; anything malformed is treated as 'not sent'. */
+export function parseAgentSessionId(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value) ? value : null;
+}
+
 export async function requireAgent(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const token = req.headers['x-agent-token'];
   if (typeof token !== 'string' || token.length < 32) return next(unauthorized());
@@ -99,6 +104,8 @@ export async function requireAgent(req: Request, _res: Response, next: NextFunct
     id: agent.id,
     shopId: agent.shopId,
     connectedPrinterIds: agent.connectedPrinterIds,
+    // Per-process id (x-agent-session); null = legacy agent that predates it.
+    sessionId: parseAgentSessionId(req.headers['x-agent-session']),
   };
   next();
 }

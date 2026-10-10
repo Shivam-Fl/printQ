@@ -572,7 +572,7 @@ export default function Dashboard() {
                   </span>
                   {j.printError && <div className="print-error-detail">{j.printError}</div>}
                   {j.status === 'printing' && j.printAgentOffline && (
-                    <div className="print-error-detail">The print computer went offline while printing this job. Check whether it printed, then pick an option.</div>
+                    <div className="print-error-detail">The print computer went offline, restarted or stalled while printing this job. Check whether it printed, then pick an option.</div>
                   )}
                 </td>
                 <td>
