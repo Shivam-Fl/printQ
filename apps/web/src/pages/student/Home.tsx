@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../api.js';
+import { ApiError, ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../api.js';
 import { statusMeta } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import InstallPrompt from '../../components/InstallPrompt.js';
+import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
+import { useResource } from '../../lib/useResource.js';
 import { IconChevron, IconPlus, IconStore } from '../../components/Icons.js';
 
 interface JobRow {
@@ -48,33 +50,38 @@ export function filterPublishedHistoryShops<T extends { slug: string }>(
 export default function Home() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [me, setMe] = useState<Me | null>(null);
-  const [jobs, setJobs] = useState<JobRow[]>([]);
-  const [publishedShops, setPublishedShops] = useState<Array<{ slug: string }>>([]);
-  const [loading, setLoading] = useState(true);
+  const signedIn = Boolean(getToken('student'));
   const [pickOpen, setPickOpen] = useState(params.get('pick') === '1');
-  const [error, setError] = useState('');
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerHeadingRef = useRef<HTMLHeadingElement>(null);
 
+  const home = useResource<{ me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string }> }>(
+    async (signal) => {
+      const [m, j, published] = await Promise.all([
+        api<{ student: Me }>('/api/auth/student/me', { role: 'student', signal }),
+        api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student', signal }),
+        api<{ shops: Array<{ slug: string }> }>('/api/public/shops', { signal }),
+      ]);
+      return { me: m.student, jobs: j.jobs, publishedShops: published.shops };
+    },
+    [],
+    {
+      enabled: signedIn,
+      validate: (v): v is { me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string }> } => {
+        const d = v as { me?: unknown; jobs?: unknown; publishedShops?: unknown };
+        return Boolean(d.me) && Array.isArray(d.jobs) && Array.isArray(d.publishedShops);
+      },
+    },
+  );
+  const me = home.data?.me ?? null;
+  const jobs = useMemo(() => home.data?.jobs ?? [], [home.data]);
+  const publishedShops = useMemo(() => home.data?.publishedShops ?? [], [home.data]);
+  const loading = home.status !== 'ready' && home.status !== 'error';
+  const unauthorized = home.status === 'error' && home.error instanceof ApiError && home.error.status === 401;
+
   useEffect(() => {
-    if (!getToken('student')) {
-      navigate('/login', { replace: true });
-      return;
-    }
-    Promise.all([
-      api<{ student: Me }>('/api/auth/student/me', { role: 'student' }),
-      api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student' }),
-      api<{ shops: Array<{ slug: string }> }>('/api/public/shops'),
-    ])
-      .then(([m, j, published]) => {
-        setMe(m.student);
-        setJobs(j.jobs);
-        setPublishedShops(published.shops);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your prints'))
-      .finally(() => setLoading(false));
-  }, [navigate]);
+    if (!signedIn || unauthorized) navigate('/login', { replace: true });
+  }, [signedIn, unauthorized, navigate]);
 
   // distinct shops from history, most recent first
   const shops = useMemo(() => {
@@ -84,9 +91,9 @@ export default function Home() {
   }, [jobs, publishedShops]);
 
   useEffect(() => {
-    if (loading || !pickOpen || shops.length > 0) return;
+    if (home.status !== 'ready' || !pickOpen || shops.length > 0) return;
     navigate('/shops', { replace: true });
-  }, [loading, navigate, pickOpen, shops.length]);
+  }, [home.status, navigate, pickOpen, shops.length]);
 
   useEffect(() => {
     if (!pickOpen || shops.length === 0) return;
@@ -117,7 +124,8 @@ export default function Home() {
 
         <InstallPrompt />
 
-        {error && <div className="error-box" role="alert">{error}</div>}
+        {home.status === 'error' && !unauthorized && <ErrorState onRetry={home.retry} title="Could not load your prints" />}
+        {loading && <LoadingState status={home.status} rows={2} />}
 
         <button
           className={`cta-print${pickOpen && shops.length > 1 ? ' is-open' : ''}`}
@@ -191,7 +199,7 @@ export default function Home() {
           </>
         )}
 
-        {!loading && jobs.length === 0 && (
+        {home.status === 'ready' && jobs.length === 0 && (
           <div className="card" style={{ marginTop: 16 }}>
             <div className="row" style={{ gap: 12 }}>
               <span className="ic" style={{ color: 'var(--stamp)' }}>
