@@ -75,7 +75,19 @@ export async function assertFileCanBackNewJob(file: { id: string; deletionSchedu
       ],
     },
   });
-  if (printed > 0) {
+  assertFileCanBackNewJobFrom(file, printed > 0);
+}
+
+/** Jobs of a file that mean "this file has already been printed". */
+export const isPrintedFileJob = (job: { status: string; printConfirmedAt: Date | null }): boolean =>
+  job.printConfirmedAt !== null || ['finishing', 'ready_for_pickup', 'completed'].includes(job.status);
+
+/** Same rules as assertFileCanBackNewJob for callers that already loaded the file's jobs. */
+export function assertFileCanBackNewJobFrom(
+  file: { deletionScheduledAt: Date | null },
+  alreadyPrinted: boolean,
+): void {
+  if (alreadyPrinted) {
     throw conflict('This file has already been printed. Upload it again to place a new order.');
   }
   if (file.deletionScheduledAt) {

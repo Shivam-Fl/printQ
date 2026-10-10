@@ -197,31 +197,52 @@ function publishQueueSnapshots(shopId: string, queue: ShopQueue): void {
 export async function preparePayAtShopOrder(jobId: string): Promise<void> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job || job.status !== 'pending_payment') return;
+  const updated = await allocatePayAtShopCode(job);
+  if (!updated) return; // lost race (e.g. duplicate webhook) — already handled
+  await notifyPayAtShopPrepared(job);
+}
 
-  let code = '';
-  let codeDigest = '';
+/** A counter code that is not in use by any unfinished job of this shop (digest-compared). */
+export function newCounterCode(shopId: string): { code: string; digest: string } {
+  const code = generateOtp();
+  return { code, digest: digestReleaseCode(shopId, code) };
+}
+
+export const counterCodeInUse = (shopId: string, digest: string): Promise<number> =>
+  prisma.job.count({
+    where: {
+      shopId,
+      releaseCodeDigest: digest,
+      status: { notIn: ['completed', 'expired', 'cancelled'] },
+    },
+  });
+
+/**
+ * Critical part of preparing an order: allocate the counter code and move
+ * pending_payment -> awaiting_arrival (ONE statement). A caller that already
+ * checked a candidate code for collisions in parallel with creating the job
+ * passes it as `preallocated`; otherwise the code is searched here.
+ * Returns null when another request already prepared this job.
+ */
+export async function allocatePayAtShopCode(
+  job: Job,
+  preallocated?: { code: string; digest: string },
+): Promise<Job | null> {
+  let code = preallocated?.code ?? '';
+  let codeDigest = preallocated?.digest ?? '';
   // Six digits are easy to exchange over a noisy counter. Keep them unique
   // among unfinished jobs in this shop so lookup is deterministic.
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = generateOtp();
-    const digest = digestReleaseCode(job.shopId, candidate);
-    const collision = await prisma.job.count({
-      where: {
-        shopId: job.shopId,
-        releaseCodeDigest: digest,
-        status: { notIn: ['completed', 'expired', 'cancelled'] },
-      },
-    });
-    if (collision === 0) {
-      code = candidate;
-      codeDigest = digest;
-      break;
+  for (let attempt = 0; !code && attempt < 20; attempt += 1) {
+    const candidate = newCounterCode(job.shopId);
+    if ((await counterCodeInUse(job.shopId, candidate.digest)) === 0) {
+      code = candidate.code;
+      codeDigest = candidate.digest;
     }
   }
   if (!code) throw new Error('Could not allocate a unique release code');
 
-  const updated = await applyTransition(
-    jobId,
+  return applyTransition(
+    job.id,
     'pending_payment',
     'CASH_SELECTED',
     { type: 'system' },
@@ -233,8 +254,11 @@ export async function preparePayAtShopOrder(jobId: string): Promise<void> {
       releaseCodeGeneratedAt: new Date(),
     },
   );
-  if (!updated) return; // lost race (e.g. duplicate webhook) — already handled
+}
 
+/** Non-critical follow-up of a prepared order: reminder timer, "order prepared" push, live queue refresh. */
+export async function notifyPayAtShopPrepared(job: Pick<Job, 'id' | 'shopId' | 'studentId' | 'mode' | 'scheduledTime'>): Promise<void> {
+  const jobId = job.id;
   if (job.mode === 'scheduled' && job.scheduledTime) {
     const wakeAt = job.scheduledTime.getTime() - leadMs();
     await timersQueue.add(

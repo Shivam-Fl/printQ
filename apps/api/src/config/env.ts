@@ -148,7 +148,18 @@ const envSchema = z.object({
   VAPID_SUBJECT: z.string().default('mailto:admin@printq.local'),
 
   /// A `printing` job whose print computer has been silent this long is failed so staff can retry.
+  /// Per-minute request limits. Authenticated traffic is limited per principal (student / shop user /
+  /// agent) so a campus NAT address is not throttled as one client; the per-IP ceilings are far
+  /// higher and exist only as flood protection. Login/OTP limiters stay strictly per IP.
+  RATE_LIMIT_GENERAL_PER_USER: z.coerce.number().int().min(10).max(100_000).default(300),
+  RATE_LIMIT_GENERAL_PER_IP: z.coerce.number().int().min(10).max(1_000_000).default(3_000),
+  RATE_LIMIT_UPLOAD_PER_USER: z.coerce.number().int().min(1).max(10_000).default(10),
+  RATE_LIMIT_UPLOAD_PER_IP: z.coerce.number().int().min(1).max(100_000).default(120),
   PRINT_LEASE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(90),
+  /// Hard backstop: a printing job the spooler never acknowledged (no spoolAcceptedAt) is failed after this long even if its computer is online.
+  PRINT_CLAIM_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(120),
+  /// A spooler-accepted print nobody confirmed (staff / simulator) is failed after this long and flagged 'check the printer'.
+  PRINT_SPOOL_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
   OTP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   NO_SHOW_GRACE_MINUTES: z.coerce.number().int().min(5).max(240).default(30),
   // Unprinted uploads have a hard 24-hour maximum. Successful and terminal

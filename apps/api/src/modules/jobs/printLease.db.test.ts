@@ -52,7 +52,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     vi.spyOn(fileRetentionQueue, 'add').mockResolvedValue(undefined as never),
   ];
 
-  async function makeAgent(opts: { alive: boolean }) {
+  async function makeAgent(opts: { alive: boolean; sessionId?: string }) {
     const { token, tokenHash } = generateAgentToken();
     const agent = await prisma.agent.create({
       data: {
@@ -60,12 +60,16 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
         connectedPrinterIds: [printerId],
         status: opts.alive ? 'online' : 'offline',
         lastHeartbeatAt: opts.alive ? new Date() : OLD(),
+        sessionId: opts.sessionId ?? null,
       },
     });
     return { agent, token };
   }
 
-  async function printingJob(agentId: string | null) {
+  async function printingJob(
+    agentId: string | null,
+    opts: { ageMs?: number; sessionId?: string | null; spooled?: boolean } = {},
+  ) {
     const file = await prisma.uploadedFile.create({
       data: {
         studentId, shopId, originalName: 'doc.pdf', originalKey: `orig/${randomUUID()}.pdf`,
@@ -80,10 +84,15 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
         paymentProvider: 'pay_at_shop', paymentStatus: 'paid',
         counterPaymentMethod: 'cash', counterPaymentConfirmedAt: new Date(), counterPaymentAmountPaise: 500,
         status: 'printing', assignedPrinterId: printerId, claimedByAgentId: agentId, printAttempts: 1,
+        claimedBySessionId: opts.sessionId ?? null,
+        spoolAcceptedAt: opts.spooled ? new Date(Date.now() - (opts.ageMs ?? 600_000)) : null,
       },
     });
-    // the claim happened long ago
-    await prisma.job.updateMany({ where: { id: job.id }, data: { updatedAt: OLD() } });
+    // the claim happened long ago (default 10 min)
+    await prisma.job.updateMany({
+      where: { id: job.id },
+      data: { updatedAt: new Date(Date.now() - (opts.ageMs ?? 600_000)) },
+    });
     return job;
   }
 
@@ -93,14 +102,18 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
       headers: { 'content-type': 'application/json', authorization: `Bearer ${shopToken}` },
       body: method === 'GET' ? undefined : JSON.stringify(body),
     });
-  const agentCall = (token: string, path: string, method = 'POST', body: unknown = {}) =>
+  const agentCall = (token: string, path: string, method = 'POST', body: unknown = {}, session?: string) =>
     fetch(`${base}/api/agent${path}`, {
       method,
-      headers: { 'content-type': 'application/json', 'x-agent-token': token },
+      headers: {
+        'content-type': 'application/json',
+        'x-agent-token': token,
+        ...(session ? { 'x-agent-session': session } : {}),
+      },
       body: method === 'GET' ? undefined : JSON.stringify(body),
     });
   const fresh = (id: string) => prisma.job.findUniqueOrThrow({ where: { id } });
-  const commissions = (id: string) => prisma.shopCommissionEntry.count({ where: { jobId: id, type: 'print_commission' } });
+  const commissions = async (id: string) => { await drainBackground(); return prisma.shopCommissionEntry.count({ where: { jobId: id, type: 'print_commission' } }); };
 
   beforeAll(async () => {
     const shop = await prisma.shop.create({
@@ -213,7 +226,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
 
   it('a healthy agent (recent heartbeat) keeps its lease; a revoked/deleted agent loses it', async () => {
     const alive = await makeAgent({ alive: true });
-    const keep = await printingJob(alive.agent.id);
+    const keep = await printingJob(alive.agent.id, { ageMs: 30_000 });
     const doomed = await makeAgent({ alive: true });
     const lost = await printingJob(doomed.agent.id);
     await prisma.agent.delete({ where: { id: doomed.agent.id } }); // owner revokes / deletes the computer
@@ -227,7 +240,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
 
   it('staff can retry and cancel-and-return a printing job whose computer is offline; connected computer is refused', async () => {
     const live = await makeAgent({ alive: true });
-    const guarded = await printingJob(live.agent.id);
+    const guarded = await printingJob(live.agent.id, { ageMs: 30_000 });
     expect((await shopCall(`/jobs/${guarded.id}/retry-print`)).status).toBe(409);
     expect((await shopCall(`/jobs/${guarded.id}/counter-payment-returned`)).status).toBe(409);
     expect((await fresh(guarded.id)).status).toBe('printing');
@@ -289,6 +302,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     vi.mocked(publishEvent).mockClear();
     vi.mocked(notifyStudent).mockClear();
     expect((await shopCall(`/jobs/${job.id}/confirm-print-completion`)).status).toBe(200);
+    await drainBackground();
     const studentUpdate = vi.mocked(publishEvent).mock.calls.findIndex(
       (c) => c[0] === `student:${studentId}` && c[1] === 'job:update' && (c[2] as { status: string }).status === 'ready_for_pickup',
     );
@@ -310,6 +324,146 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     expect(res.status).toBe(403);
     const anon = await fetch(`${base}/api/shop/stats`);
     expect(anon.status).toBe(401);
+  });
+
+  describe('agent process restart (same agent id, new sessionId)', () => {
+    const sid = () => `s-${randomUUID()}`;
+    const heartbeat = (token: string, session: string | undefined, body: unknown = {}) =>
+      agentCall(token, '/heartbeat', 'POST', body, session);
+
+    it('claim records the claiming session', async () => {
+      const s1 = sid();
+      const a = await makeAgent({ alive: true, sessionId: s1 });
+      const job = await printingJob(null, { ageMs: 1_000 });
+      await prisma.job.update({ where: { id: job.id }, data: { status: 'otp_verified', spoolAcceptedAt: null } });
+      expect((await agentCall(a.token, `/jobs/${job.id}/claim`, 'POST', {}, s1)).status).toBe(200);
+      const claimed = await fresh(job.id);
+      expect(claimed.status).toBe('printing');
+      expect(claimed.claimedBySessionId).toBe(s1);
+    });
+
+    it('restart with the SAME agent id: heartbeat from the new process fails the orphaned print immediately; old process is refused; retry prints once', async () => {
+      const s1 = sid();
+      const s2 = sid();
+      const a = await makeAgent({ alive: true, sessionId: s1 });
+      const job = await printingJob(a.agent.id, { ageMs: 5_000, sessionId: s1 });
+      vi.mocked(notifyStudent).mockClear();
+
+      // new process (s2) comes up with the same token and heartbeats: the job it never claimed is recovered
+      expect((await heartbeat(a.token, s2, { inFlightJobIds: [] })).status).toBe(200);
+      const failed = await fresh(job.id);
+      expect(failed.status).toBe('otp_verified');
+      expect(failed.printError).toBe('agent_restarted');
+      expect(failed.claimedByAgentId).toBeNull();
+      expect(failed.claimedBySessionId).toBeNull();
+      expect((await prisma.agent.findUniqueOrThrow({ where: { id: a.agent.id } })).sessionId).toBe(s2);
+      const events = await prisma.jobEvent.findMany({ where: { jobId: job.id } });
+      expect(events.some((e) => e.event === 'print_agent_restarted' && e.toStatus === 'otp_verified')).toBe(true);
+      expect(notifyStudent).toHaveBeenCalledTimes(1);
+
+      // a late report from the OLD process (or anything that still holds s1) is refused
+      expect((await agentCall(a.token, `/jobs/${job.id}/complete`, 'POST', { outcome: 'spool_accepted' }, s1)).status).toBe(409);
+      expect((await agentCall(a.token, `/jobs/${job.id}/complete`, 'POST', { outcome: 'spool_accepted' }, s2)).status).toBe(409);
+      // never auto re-printed: it waits for staff
+      const pending = await agentCall(a.token, '/jobs/pending', 'GET', {}, s2);
+      expect(((await pending.json()) as { jobs: { id: string }[] }).jobs.some((j) => j.id === job.id)).toBe(false);
+      expect((await agentCall(a.token, `/jobs/${job.id}/claim`, 'POST', {}, s2)).status).toBe(409);
+
+      // staff retry (now allowed even though the agent id is online), new process prints it once
+      expect((await shopCall(`/jobs/${job.id}/retry-print`)).status).toBe(200);
+      expect((await agentCall(a.token, `/jobs/${job.id}/claim`, 'POST', {}, s2)).status).toBe(200);
+      expect((await agentCall(a.token, `/jobs/${job.id}/complete`, 'POST', { outcome: 'spool_accepted' }, s2)).status).toBe(200);
+      expect((await shopCall(`/jobs/${job.id}/confirm-print-completion`)).status).toBe(200);
+      expect(await commissions(job.id)).toBe(1);
+      expect((await fresh(job.id)).printAttempts).toBe(2);
+    });
+
+    it('the sweep recovers a restart even when no heartbeat has run yet, and staff can act before the sweep', async () => {
+      const s1 = sid();
+      const a = await makeAgent({ alive: true, sessionId: sid() }); // already the NEW process
+      const job = await printingJob(a.agent.id, { ageMs: 5_000, sessionId: s1 });
+      // staff are not told "still printing on a connected computer"
+      expect((await shopCall(`/jobs/${job.id}/counter-payment-returned`)).status).toBe(200);
+      expect((await fresh(job.id)).status).toBe('cancelled');
+      const job2 = await printingJob(a.agent.id, { ageMs: 5_000, sessionId: s1 });
+      expect(await failOrphanedPrints()).toBeGreaterThanOrEqual(1);
+      expect((await fresh(job2.id)).printError).toBe('agent_restarted');
+    });
+
+    it('in-flight list: a claimed job the process is not working on is failed; reported or just-claimed jobs are kept', async () => {
+      const s1 = sid();
+      const a = await makeAgent({ alive: true, sessionId: s1 });
+      const lost = await printingJob(a.agent.id, { ageMs: 60_000, sessionId: s1 });
+      const working = await printingJob(a.agent.id, { ageMs: 60_000, sessionId: s1 });
+      const justClaimed = await printingJob(a.agent.id, { ageMs: 2_000, sessionId: s1 });
+      await heartbeat(a.token, s1, { inFlightJobIds: [working.id] });
+      expect((await fresh(lost.id)).printError).toBe('agent_restarted');
+      expect((await fresh(working.id)).status).toBe('printing');
+      expect((await fresh(justClaimed.id)).status).toBe('printing'); // inside the claim/heartbeat race grace
+      // an agent that does not report a list (older) is never failed by it
+      const legacyView = await printingJob(a.agent.id, { ageMs: 60_000, sessionId: s1 });
+      await heartbeat(a.token, s1);
+      expect((await fresh(legacyView.id)).status).toBe('printing');
+    });
+
+    it('spooler-accepted prints are NOT failed by a restart (staff still confirm the paper)', async () => {
+      const s1 = sid();
+      const s2 = sid();
+      const a = await makeAgent({ alive: true, sessionId: s1 });
+      const job = await printingJob(a.agent.id, { ageMs: 60_000, sessionId: s1, spooled: true });
+      await heartbeat(a.token, s2, { inFlightJobIds: [] });
+      expect((await fresh(job.id)).status).toBe('printing');
+      expect((await shopCall(`/jobs/${job.id}/confirm-print-completion`)).status).toBe(200);
+      expect(await commissions(job.id)).toBe(1);
+    });
+
+    it('legacy agent (no session id): behaves as before, restart undetectable but the hard time limits still apply', async () => {
+      const a = await makeAgent({ alive: true });
+      const fresh30 = await printingJob(a.agent.id, { ageMs: 30_000 });
+      expect((await heartbeat(a.token, undefined)).status).toBe(200); // no body, no header
+      expect((await fresh(fresh30.id)).status).toBe('printing');
+      expect((await agentCall(a.token, `/jobs/${fresh30.id}/complete`, 'POST', { outcome: 'spool_accepted' })).status).toBe(200);
+
+      // online agent, never spooled, older than PRINT_CLAIM_TIMEOUT_SECONDS (120 s) -> failed
+      const stuck = await printingJob(a.agent.id, { ageMs: 150_000 });
+      await failOrphanedPrints();
+      const failed = await fresh(stuck.id);
+      expect(failed.status).toBe('otp_verified');
+      expect(failed.printError).toBe('claim_timeout');
+      expect((await shopCall('/queue', 'GET').then((r) => r.json()) as { jobs: { id: string; printErrorCode: string }[] })
+        .jobs.find((j) => j.id === stuck.id)!.printErrorCode).toBe('claim_timeout');
+    });
+
+    it('spooled but never confirmed: failed after PRINT_SPOOL_TIMEOUT_SECONDS with a check-the-printer message; sooner it is left alone', async () => {
+      const a = await makeAgent({ alive: true });
+      const waiting = await printingJob(a.agent.id, { ageMs: 300_000, spooled: true });
+      const abandoned = await printingJob(a.agent.id, { ageMs: 1_000_000, spooled: true });
+      await failOrphanedPrints();
+      expect((await fresh(waiting.id)).status).toBe('printing');
+      const failed = await fresh(abandoned.id);
+      expect(failed.status).toBe('otp_verified');
+      expect(failed.printError).toBe('spool_timeout');
+      const queue = (await (await shopCall('/queue', 'GET')).json()) as { jobs: { id: string; printError: string }[] };
+      expect(queue.jobs.find((j) => j.id === abandoned.id)!.printError).toMatch(/check the printer|Check the printer/);
+      expect((await shopCall(`/jobs/${abandoned.id}/counter-payment-returned`)).status).toBe(200);
+    });
+
+    it('concurrent staff confirmations + restart recovery: exactly one transition, exactly one commission', async () => {
+      const s1 = sid();
+      const a = await makeAgent({ alive: true, sessionId: s1 });
+      const job = await printingJob(a.agent.id, { ageMs: 60_000, sessionId: s1, spooled: true });
+      const results = await Promise.all([
+        shopCall(`/jobs/${job.id}/confirm-print-completion`),
+        shopCall(`/jobs/${job.id}/confirm-print-completion`),
+        shopCall(`/jobs/${job.id}/confirm-print-completion`),
+        heartbeat(a.token, sid(), { inFlightJobIds: [] }),
+      ]);
+      expect(results.slice(0, 3).filter((r) => r.status === 200)).toHaveLength(1);
+      expect((await fresh(job.id)).status).toBe('ready_for_pickup');
+      expect(await commissions(job.id)).toBe(1);
+      const events = await prisma.jobEvent.findMany({ where: { jobId: job.id } });
+      expect(events.filter((e) => e.fromStatus === 'printing')).toHaveLength(1);
+    });
   });
 
   it('student and staff responses never carry raw agent error text', async () => {

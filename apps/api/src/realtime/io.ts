@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
 import { resolveShopSession } from '../lib/shopSession.js';
 import { hashAgentToken } from '../lib/otp.js';
+import { parseAgentSessionId } from '../middleware/auth.js';
+import { reconcileAgentSession } from '../modules/jobs/printLease.js';
 import { clientIpOf } from '../lib/clientIpConfig.js';
 import { handshakeLimiter } from './handshakeLimit.js';
 import { subscribeEvents } from './events.js';
@@ -33,9 +35,10 @@ export function setupRealtime(httpServer: HttpServer): Server {
   });
 
   io.use(async (socket, next) => {
-    const { token, agentToken } = socket.handshake.auth as {
+    const { token, agentToken, sessionId } = socket.handshake.auth as {
       token?: string;
       agentToken?: string;
+      sessionId?: string;
     };
 
     if (typeof agentToken === 'string' && agentToken.length >= 32) {
@@ -45,6 +48,7 @@ export function setupRealtime(httpServer: HttpServer): Server {
       if (!agent) return next(new Error('unauthorized'));
       socket.data.kind = 'agent';
       socket.data.agentId = agent.id;
+      socket.data.agentSessionId = parseAgentSessionId(sessionId);
       socket.data.shopId = agent.shopId;
       return next();
     }
@@ -73,10 +77,16 @@ export function setupRealtime(httpServer: HttpServer): Server {
       await socket.join(`shop:${socket.data.shopId}`);
     } else {
       await socket.join(`agent:${socket.data.agentId}`);
+      const agentSessionId = socket.data.agentSessionId as string | null;
       await prisma.agent.update({
         where: { id: socket.data.agentId as string },
-        data: { status: 'online', lastHeartbeatAt: new Date() },
+        data: { status: 'online', lastHeartbeatAt: new Date(), ...(agentSessionId ? { sessionId: agentSessionId } : {}) },
       });
+      // Registration by a NEW process: recover what the previous process held.
+      if (agentSessionId) {
+        await reconcileAgentSession({ id: socket.data.agentId as string }, agentSessionId)
+          .catch((err) => logger.error({ err }, 'agent_session_reconcile_failed'));
+      }
       await advanceShopQueues(socket.data.shopId as string);
       await emitQueueUpdate(socket.data.shopId as string);
       await notifyShopReopened(socket.data.shopId as string);

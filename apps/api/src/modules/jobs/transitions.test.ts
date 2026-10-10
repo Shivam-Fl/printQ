@@ -31,7 +31,7 @@ describe('authoritative transition outbox', () => {
 
   it('records the audit event and rebuildable projection delivery in the same transaction', async () => {
     // A column outside the single-statement fast path takes the transaction path.
-    await expect(applyTransition('job-1', 'pending_payment', 'CASH_SELECTED', { type: 'system' }, { printAttempts: { increment: 1 } }))
+    await expect(applyTransition('job-1', 'pending_payment', 'CASH_SELECTED', { type: 'system' }, { priceBreakdown: {} }))
       .resolves.toEqual({ id: 'job-1', status: 'awaiting_arrival' });
 
     expect(mocks.prisma.$transaction).toHaveBeenCalledOnce();
@@ -45,7 +45,7 @@ describe('authoritative transition outbox', () => {
 
   it('does not create an audit or projection record when optimistic concurrency loses', async () => {
     mocks.tx.job.updateManyAndReturn.mockResolvedValue([]);
-    await expect(applyTransition('job-1', 'pending_payment', 'CASH_SELECTED', { type: 'system' }, { printAttempts: { increment: 1 } })).resolves.toBeNull();
+    await expect(applyTransition('job-1', 'pending_payment', 'CASH_SELECTED', { type: 'system' }, { priceBreakdown: {} })).resolves.toBeNull();
     expect(mocks.tx.jobEvent.create).not.toHaveBeenCalled();
     expect(mocks.tx.realtimeOutbox.create).not.toHaveBeenCalled();
   });

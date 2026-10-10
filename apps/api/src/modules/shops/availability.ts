@@ -10,20 +10,38 @@ export async function reachablePrinterIds(shopId: string): Promise<Set<string>> 
   return new Set(agents.flatMap((agent) => agent.connectedPrinterIds));
 }
 
+/** Shop columns + its ONLINE agents + its printers, as loaded in one joined query. */
+export interface OperationalShopRows {
+  acceptingOrders: boolean;
+  feeBlockedAt: Date | null;
+  latitude: number | null;
+  longitude: number | null;
+  agents: { connectedPrinterIds: string[] }[];
+  printers: { id: string; status: string }[];
+}
+
+/** Pure form of isShopOperational for callers that already loaded the rows (saves 3 round trips). */
+export function isShopOperationalFrom(shop: OperationalShopRows | null | undefined): boolean {
+  // A fee block cannot be bypassed by the owner's own acceptingOrders toggle.
+  if (!shop?.acceptingOrders || shop.feeBlockedAt || shop.latitude == null || shop.longitude == null) return false;
+  const reachable = new Set(shop.agents.flatMap((agent) => agent.connectedPrinterIds));
+  return shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id));
+}
+
 export async function isShopOperational(shopId: string): Promise<boolean> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
-    select: { acceptingOrders: true, latitude: true, longitude: true, feeBlockedAt: true },
+    relationLoadStrategy: 'join',
+    select: {
+      acceptingOrders: true,
+      latitude: true,
+      longitude: true,
+      feeBlockedAt: true,
+      agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
+      printers: { select: { id: true, status: true } },
+    },
   });
-  // A fee block cannot be bypassed by the owner's own acceptingOrders toggle.
-  if (!shop?.acceptingOrders || shop.feeBlockedAt || shop.latitude == null || shop.longitude == null) return false;
-  const reachable = await reachablePrinterIds(shopId);
-  if (reachable.size === 0) return false;
-  return (
-    (await prisma.printer.count({
-      where: { shopId, id: { in: [...reachable] }, status: 'online' },
-    })) > 0
-  );
+  return isShopOperationalFrom(shop);
 }
 
 /** Connect a printer profile to every registered PC that currently detects its OS name. */

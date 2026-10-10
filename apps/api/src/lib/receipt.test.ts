@@ -1,6 +1,6 @@
-import { inflateSync } from 'node:zlib';
+import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
-import { paymentLine, renderReceipt, type ReceiptData } from './receipt.js';
+import { paymentLine, receiptLines, receiptRuns, renderReceipt, type ReceiptData } from './receipt.js';
 
 const base: ReceiptData = {
   jobId: 'abcdef12-0000-0000-0000-000000000000',
@@ -8,7 +8,6 @@ const base: ReceiptData = {
   shopName: 'Test Shop',
   shopAddress: 'Lane 1',
   studentLabel: 'Asha',
-  fileName: 'doc.pdf',
   specs: { copies: 1, paperSize: 'A4', color: false, duplex: false, binding: null, pageRange: '1-3,3,5' },
   breakdown: { pagesTotalPaise: 400, bindingPaise: 0 } as never,
   totalPaise: 500,
@@ -16,21 +15,14 @@ const base: ReceiptData = {
   showPriceBreakdown: false,
 };
 
-async function text(data: ReceiptData): Promise<string> {
-  const raw = Buffer.from(await renderReceipt(data)).toString('latin1');
-  // page content streams are Flate-compressed: inflate every stream and join the text
-  const out: string[] = [];
-  for (const m of raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-    try {
-      out.push(inflateSync(Buffer.from(m[1]!, 'latin1')).toString('latin1'));
-    } catch {
-      // fonts etc. - not text content
-    }
-  }
-  // pdf-lib writes shown text as hex strings: <48656C6C6F> Tj
-  return out
-    .join('\n')
-    .replace(/<([0-9A-Fa-f]+)>\s*Tj/g, (_m, hex: string) => Buffer.from(hex, 'hex').toString('latin1') + '\n');
+const text = async (data: ReceiptData) => (await receiptLines(data)).join('\n');
+
+async function validPdf(data: ReceiptData): Promise<PDFDocument> {
+  const bytes = await renderReceipt(data);
+  expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
+  const doc = await PDFDocument.load(bytes);
+  expect(doc.getPageCount()).toBe(1);
+  return doc;
 }
 
 describe('receipt content', () => {
@@ -58,9 +50,79 @@ describe('receipt content', () => {
     expect(out.toLowerCase()).not.toContain('shop base');
   });
 
+  it('never prints the document file name; shows the page count instead', async () => {
+    const withName = { ...base, totalPages: 7, fileName: 'आधार_कार्ड_final.pdf' } as ReceiptData;
+    const out = await text(withName);
+    expect(out).not.toContain('आधार');
+    expect(out).not.toContain('.pdf');
+    expect(out).toContain('Document (7 pages)');
+    expect(await text({ ...base, totalPages: 1 })).toContain('Document (1 page)');
+    expect(await text({ ...base, totalPages: null })).toContain('Document');
+  });
+
   it('payment wording', () => {
     expect(paymentLine({ paymentStatus: 'paid', counterPaymentMethod: 'cash' })).toBe('Paid at shop (cash)');
     expect(paymentLine({ paymentStatus: 'paid', counterPaymentMethod: null })).toBe('Paid at shop');
     expect(paymentLine({ paymentStatus: 'refunded', counterPaymentMethod: 'cash' })).toBe('refunded');
+  });
+});
+
+describe('receipt is Unicode-safe and never throws', () => {
+  it('renders Devanagari shop, address and student names (the old 500)', async () => {
+    const data = {
+      ...base,
+      shopName: 'श्री गणेश प्रिंटिंग एवं ज़ेरॉक्स',
+      shopAddress: 'दुकान नं. 4, भिवंडी, महाराष्ट्र 421302',
+      studentLabel: 'आशा शर्मा',
+      totalPages: 12,
+    };
+    await validPdf(data);
+    const runs = await receiptRuns(data.shopName);
+    expect(runs.some((r) => r.script === 'deva')).toBe(true);
+    expect(runs.map((r) => r.text).join('')).not.toContain('?');
+    expect(await text(data)).toContain('श्री गणेश');
+  });
+
+  it('mixes Latin, Devanagari and digits in one line using per-glyph font fallback', async () => {
+    const runs = await receiptRuns('Shop भिवंडी No. 42 ज़ेरॉक्स');
+    expect(runs.some((r) => r.script === 'latin')).toBe(true);
+    expect(runs.some((r) => r.script === 'deva')).toBe(true);
+    await validPdf({ ...base, shopName: 'Shop भिवंडी No. 42 ज़ेरॉक्स' });
+  });
+
+  it('substitutes ? for characters no bundled font covers (emoji, RTL, CJK) without throwing', async () => {
+    const runs = await receiptRuns('Print 🖨️ مطبعة שלום 印刷');
+    const joined = runs.map((r) => r.text).join('');
+    expect(joined).toContain('Print');
+    expect(joined).toContain('?');
+    expect(joined).not.toMatch(/[\u{1F5A8}مש印]/u);
+    await validPdf({
+      ...base,
+      shopName: 'Print 🖨️ مطبعة',
+      shopAddress: 'שלום עולם 印刷店 👩‍👩‍👧‍👦',
+      studentLabel: '‮evil‬ name\u0000\n\r\t🙂',
+    });
+  });
+
+  it('wraps and truncates very long strings instead of overflowing or throwing', async () => {
+    const longWord = 'W'.repeat(5000);
+    const longDeva = 'प्रिंटिंग '.repeat(500);
+    const data = { ...base, shopName: longWord, shopAddress: longDeva, studentLabel: 'ए'.repeat(10_000) };
+    const doc = await validPdf(data);
+    const lines = await receiptLines(data);
+    expect(lines.length).toBeLessThan(40);
+    expect(lines.some((l) => l.endsWith('...'))).toBe(true);
+    expect(doc.getPage(0).getHeight()).toBeLessThan(900);
+  });
+
+  it('handles empty, whitespace-only and non-string values', async () => {
+    await validPdf({ ...base, shopName: '', shopAddress: '   ', studentLabel: undefined as never });
+  });
+
+  it('falls back to a minimal ASCII receipt if the Unicode path fails (never a 500)', async () => {
+    // corrupt job data (no specs) makes the full layout throw; the download must still be a valid PDF
+    const broken = { ...base, specs: null as never, shopName: 'दुकान ✓' };
+    await validPdf(broken);
+    await validPdf({ ...broken, createdAt: new Date('nope'), totalPages: Number.NaN });
   });
 });

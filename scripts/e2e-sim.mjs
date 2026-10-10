@@ -267,7 +267,7 @@ async function main() {
     body: { machineLabel: 'E2E simulated counter PC', connectedPrinterIds: [printerId] },
   });
   assert(agentRegistration.status === 201 && agentRegistration.data.token, 'shop computer registered');
-  start('agent', agentEntry, {
+  const startAgent = () => start('agent', agentEntry, {
     PRINTQ_API_URL: API,
     PRINTQ_AGENT_TOKEN: agentRegistration.data.token,
     PRINTQ_AGENT_MODE: 'simulate',
@@ -275,12 +275,25 @@ async function main() {
     PRINTQ_SIM_DELAY_MS: '200',
     PRINTQ_SIM_FAIL_FIRST: 'true',
   }, ['--simulate']);
+  const agentIsOnline = async () => {
+    const result = await request('/api/shop/agents', { token: shopToken });
+    return result.data.agents?.some((agent) => agent.status === 'online' && agent.detectedPrinters?.length > 0);
+  };
+  const firstAgent = startAgent();
 
-  await waitFor('agent connection', async () => {
+  await waitFor('agent connection', agentIsOnline);
+  assert(true, 'simulator connected and reported its virtual printer');
+  // Restart the agent PROCESS with the same token: it gets a new sessionId,
+  // re-registers and must come back online without disturbing anything.
+  const exited = new Promise((resolve) => firstAgent.once('exit', resolve));
+  firstAgent.kill();
+  await exited;
+  startAgent();
+  await waitFor('restarted agent reconnects with a new session', async () => {
     const result = await request('/api/shop/agents', { token: shopToken });
     return result.data.agents?.some((agent) => agent.status === 'online' && agent.detectedPrinters?.length > 0);
   });
-  assert(true, 'simulator connected and reported its virtual printer');
+  assert(true, 'restarted agent process re-registered under the same agent id');
   const submitted = await request('/api/shop/verification/submit', { method: 'POST', token: shopToken });
   assert(submitted.status === 200 && submitted.data.verification?.status === 'submitted', 'shop independently requested verification');
   const verifiedShop = await request(`/api/admin/shops/${registered.data.user.shopId}/verify`, {
