@@ -50,7 +50,9 @@ export default function Terms() {
         <h2>Print shops</h2>
         <ul>
           <li>Shops run their own counter, printers and rates, and are responsible for print quality and for handling documents properly.</li>
-          <li>{LEGAL_PRODUCT_NAME} charges shops a commission under the arrangement agreed with each shop.</li>
+          <li>{LEGAL_PRODUCT_NAME} charges shops a commission under the arrangement agreed with each shop. The commission rate is the one the shop owner supplied or agreed to.</li>
+          <li>Commission is totalled into a weekly statement. The shop owner pays it online from the shop dashboard within 7 days of the statement date.</li>
+          <li>If a statement stays unpaid after its due date, {LEGAL_PRODUCT_NAME} may temporarily pause the shop for new orders. Orders already placed continue, and the shop reopens as soon as the unpaid amount is paid.</li>
           <li>Shops must not keep, copy or share a customer's document.</li>
         </ul>
       </section>

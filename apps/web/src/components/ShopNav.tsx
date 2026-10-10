@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api, getShopRole, getToken, setShopRole, signOutShop } from '../api.js';
 import { resetSockets } from '../socket.js';
+import FeeBanner from './FeeBanner.js';
 
 const LINKS = [
   { to: '/dashboard', label: 'Queue', end: true },
@@ -58,6 +59,7 @@ export default function ShopNav() {
   }
 
   return (
+    <>
     <div className="shopnav">
       <span className="brand">
         Print<em>Q</em>
@@ -78,5 +80,7 @@ export default function ShopNav() {
       <NavLink to="/support" className="shopnav-help">Help &amp; policies</NavLink>
       <button className="ghost small" onClick={signOut}>Sign out</button>
     </div>
+    <FeeBanner />
+    </>
   );
 }

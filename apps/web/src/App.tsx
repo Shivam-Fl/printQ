@@ -24,6 +24,7 @@ const Insights = lazy(() => import('./pages/shop/Insights.js'));
 const History = lazy(() => import('./pages/shop/History.js'));
 const ShopSetup = lazy(() => import('./pages/shop/ShopSetup.js'));
 const Earnings = lazy(() => import('./pages/shop/Earnings.js'));
+const FeeReceipt = lazy(() => import('./pages/shop/FeeReceipt.js'));
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin.js'));
 const AdminConsole = lazy(() => import('./pages/admin/AdminConsole.js'));
 const Privacy = lazy(() => import('./pages/legal/Privacy.js'));
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/dashboard/insights" element={<Insights />} />
         <Route path="/dashboard/earnings" element={<Earnings />} />
+        <Route path="/dashboard/earnings/receipt/:id" element={<FeeReceipt />} />
         <Route path="/dashboard/history" element={<History />} />
         <Route path="/dashboard/setup" element={<ShopSetup />} />
         <Route path="/dashboard/printers" element={<Printers />} />
