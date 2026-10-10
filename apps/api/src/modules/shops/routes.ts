@@ -38,6 +38,7 @@ import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
 import { agentGoneForStaff, isPrintOrphaned, markPrintFailedAgentGone } from '../jobs/printLease.js';
 import { describePrintProblem } from '../../lib/printProblem.js';
+import { istDayKey, lastIstDayKeys, startOfIstDay } from '../../lib/istDay.js';
 import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
@@ -515,8 +516,7 @@ shopRouter.get(
   requireShopOwner,
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const startOfToday = startOfIstDay();
     const since = new Date(Date.now() - 30 * 86_400_000);
 
     const [allTime, completedCount, printers, recentCompleted] = await Promise.all([
@@ -553,12 +553,11 @@ shopRouter.get(
       row.jobs += 1;
       row.pages += sheets;
       byPrinter.set(pid, row);
-      const day = j.updatedAt.toISOString().slice(0, 10);
+      const day = istDayKey(j.updatedAt);
       byDay.set(day, (byDay.get(day) ?? 0) + j.shopBasePaise);
     }
 
-    const days = [...Array(7)].map((_, i) => {
-      const d = new Date(Date.now() - (6 - i) * 86_400_000).toISOString().slice(0, 10);
+    const days = lastIstDayKeys(7).map((d) => {
       return { day: d, revenuePaise: byDay.get(d) ?? 0 };
     });
 

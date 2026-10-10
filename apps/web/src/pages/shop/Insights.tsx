@@ -69,7 +69,7 @@ export default function Insights() {
               {stats.last7Days.map((d) => (
                 <div className="bar" key={d.day}>
                   <div className="fill" style={{ height: `${(d.revenuePaise / maxRev) * 100}%` }} title={rupees(d.revenuePaise)} />
-                  <span className="lbl">{new Date(d.day).toLocaleDateString([], { weekday: 'short' })}</span>
+                  <span className="lbl">{new Date(d.day).toLocaleDateString([], { weekday: 'short', timeZone: 'UTC' })}</span>
                 </div>
               ))}
             </div>

@@ -262,6 +262,27 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     expect(events.filter((e) => e.fromStatus === 'printing')).toHaveLength(1);
   });
 
+  it('D4: owner Insights buckets "today" and the last 7 days by IST, not UTC', async () => {
+    const done = async (completedAt: string) => {
+      const j = await printingJob(null);
+      await prisma.job.updateMany({ where: { id: j.id }, data: { status: 'completed', updatedAt: new Date(completedAt) } });
+    };
+    // two completions: 23:50 IST on the 10th (18:20Z) and 00:10 IST on the 11th (18:40Z)
+    await done('2026-10-10T18:20:00Z');
+    await done('2026-10-10T18:40:00Z');
+    try {
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-10T18:45:00Z') }); // 00:15 IST, 11 Oct
+      const at1 = (await (await shopCall('/stats', 'GET')).json()) as { stats: { todayJobs: number; last7Days: { day: string }[] } };
+      expect(at1.stats.todayJobs).toBe(1); // only the 00:10 IST one is "today"
+      expect(at1.stats.last7Days.at(-1)!.day).toBe('2026-10-11');
+      vi.setSystemTime(new Date('2026-10-10T18:25:00Z')); // 23:55 IST, 10 Oct
+      const at2 = (await (await shopCall('/stats', 'GET')).json()) as { stats: { todayJobs: number; last7Days: { day: string }[] } };
+      expect(at2.stats.last7Days.at(-1)!.day).toBe('2026-10-10');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('student and staff responses never carry raw agent error text', async () => {
     const a = await makeAgent({ alive: true });
     const job = await printingJob(a.agent.id);
