@@ -52,7 +52,7 @@ export default function FeeCard({ fees, paying, message, onPay, now = Date.now()
 export function FeeStatementsTable({ fees }: { fees: FeeOverview }) {
   return (
     <div className="table-shell">
-      <table>
+      <table className="fee-table">
         <thead><tr><th>Week</th><th>Orders</th><th>Amount</th><th>Due date</th><th>Status</th></tr></thead>
         <tbody>
           {fees.statements.length === 0 && (
@@ -77,7 +77,7 @@ export function FeePaymentsTable({ fees }: { fees: FeeOverview }) {
   const rows = fees.payments.filter((p) => p.status === 'paid');
   return (
     <div className="table-shell">
-      <table>
+      <table className="fee-table">
         <thead><tr><th>Paid on</th><th>Amount</th><th>Razorpay payment</th><th>Receipt</th></tr></thead>
         <tbody>
           {rows.length === 0 && <tr><td colSpan={4} className="dim">Payments you make will be listed here with a receipt.</td></tr>}

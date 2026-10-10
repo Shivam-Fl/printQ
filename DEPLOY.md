@@ -180,3 +180,58 @@ Before giving the URL to a real student, all of these must be true:
 - [ ] VAPID keys are configured and an approaching-position notification opens the correct job from an installed PWA.
 - [ ] A real Windows printer passes B/W, colour, duplex and multi-copy tests for every advertised option.
 - [ ] Shop terms, privacy/contact details, Razorpay KYC and a support escalation path are in place.
+
+
+## Shop fee payments (shops pay PrintQs)
+
+Students pay the shop at the counter. PrintQs earns a commission per completed
+print; shops pay the weekly total from **Dashboard > Earnings > Pay now** using
+a normal one-time Razorpay Checkout order. (The earlier UPI AutoPay/mandate idea
+was dropped; its tables stay dormant and its env vars no longer exist.)
+
+### Configuration
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `FEE_PAYMENT_PROVIDER` | `disabled` | `disabled` / `mock` / `razorpay`. `mock` (instant-settle button, local QA only) is refused when `PRINTQ_ENVIRONMENT=production`. While `disabled` no one is notified or blocked. |
+| `FEE_PAYMENT_TERMS_DAYS` | `7` | Days to pay a statement after it is frozen (`dueAt`). |
+| `FEE_OVERDUE_BLOCK_AFTER_DAYS` | `0` | Extra days after `dueAt` before new orders pause. Default: blocked once a statement is unpaid 7 days after freezing. |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | - | Required for `razorpay`. Production accepts only `rzp_live_` keys; TEST keys are refused in production; live keys are refused elsewhere unless `ALLOW_LIVE_RAZORPAY_KEYS_OUTSIDE_PRODUCTION=true`. |
+| `EMAIL_PROVIDER=resend`, `EMAIL_FROM`, `EMAIL_REPLY_TO` | - | Fee emails use the existing Resend provider. |
+| `VAPID_*` | - | Optional Web Push for owners who tap "Get fee reminders on this device". |
+
+`PAYMENT_PROVIDER` (the retired student checkout) is unaffected and stays `mock`.
+
+### Webhook setup (Razorpay Dashboard > Settings > Webhooks)
+
+- URL: `https://<api-host>/api/payments/webhook/razorpay` (production: `https://api.printqs.com/api/payments/webhook/razorpay`)
+- Secret: any strong random string; set the same value as `RAZORPAY_WEBHOOK_SECRET`.
+- Events: **`payment.captured`**, **`order.paid`**, **`payment.failed`**.
+- The handler verifies the HMAC signature over the raw body, then matches the order id against PrintQs fee orders and requires amount, currency (INR) and `notes` (`kind=shop_fee`) to match. Events for unknown orders are acknowledged and ignored.
+
+### How the cycle works
+
+1. Hourly (`fee-maintenance-hourly`, DB-driven like the queue sweepers): freeze the last IST Monday-Sunday week into a statement (`dueAt = frozenAt + terms`), send each statement notice once (ready at day 0, reminder day 3, final warning day 6), apply or clear blocks, retry failed emails.
+2. Every 5 minutes (`fee-reconcile`): orders open 15+ minutes are checked against the Razorpay API (authorized payments are captured) so a missed webhook still settles.
+3. A block pauses **new** orders and the storefront ("temporarily unavailable"); queued and checked-in jobs continue, and the owner can still sign in and pay. Settlement clears the block immediately. Admins can lift a block (reason required, audited, 3-day override) from the admin console.
+4. Statements frozen while fee payments were `disabled` have no due date; the first maintenance run after enabling gives them `dueAt = now + terms`, so enabling the feature never blocks anyone retroactively.
+
+### TEST-mode end-to-end procedure (Razorpay TEST keys, public tunnel)
+
+1. Use a non-production environment with `FEE_PAYMENT_PROVIDER=razorpay`, an `rzp_test_` key pair and a webhook secret. Expose the API through a tunnel and register `https://<tunnel>/api/payments/webhook/razorpay` with the three events above.
+2. Seed a verified shop with a frozen unpaid statement (complete a few prints and let the weekly job run, or insert a statement).
+3. As the owner open Earnings: amount, due date and **Pay now** appear. Pay with a Razorpay test card or UPI (success).
+4. Confirm: the payment shows under Payments and receipts, the statement turns Paid, the banner clears, a receipt email and notice were sent, and exactly one `statement_settlement` ledger entry exists.
+5. Failure path: use a failing test card; the card shows a retry message and the same order is reused. Dismiss the window: "Nothing was charged".
+6. Missed webhook: pay with the tunnel stopped; within about 5 minutes the reconcile job settles it.
+7. Block path: backdate a statement `dueAt` by 8 days, wait for the hourly job (or restart the worker), confirm the storefront shows "temporarily unavailable" and the owner banner; pay and confirm the shop reopens immediately.
+
+### Production go-live checklist
+
+- [ ] Razorpay account activated (KYC, Individual: Shivam Ramkumar Mishra) and a **live** key pair generated.
+- [ ] Live webhook created with the three events and a new secret.
+- [ ] Render env: `FEE_PAYMENT_PROVIDER=razorpay`, `RAZORPAY_KEY_ID=rzp_live_...`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`. Boot refuses TEST keys and `mock`.
+- [ ] `npm run db:deploy` applied `20261011120000_shop_fee_payments`.
+- [ ] Resend sending domain verified; `EMAIL_REPLY_TO` set.
+- [ ] TEST-mode procedure above passed on the same build.
+- [ ] Shops informed about weekly fees (Terms and Help pages are already updated); first live payment made from the owner own shop.

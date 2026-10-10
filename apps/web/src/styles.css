@@ -1469,3 +1469,6 @@ tr.row-revealed td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
   body { background: #fff; }
   .receipt-sheet { border: 0; padding: 0; }
 }
+
+.fee-table { min-width: 540px; }
+.fee-table td, .fee-table th { white-space: nowrap; }
