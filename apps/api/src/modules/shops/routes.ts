@@ -36,6 +36,9 @@ import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
+import { agentGoneForStaff, isPrintOrphaned, markPrintFailedAgentGone } from '../jobs/printLease.js';
+import { describePrintProblem } from '../../lib/printProblem.js';
+import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
@@ -719,6 +722,9 @@ shopRouter.get(
         paymentStatus: true,
         paymentProvider: true,
         cashCollectedAt: true,
+        counterPaymentMethod: true,
+        counterPaymentConfirmedAt: true,
+        claimedByAgentId: true,
         assignedPrinterId: true,
         otpExpiresAt: true,
         printError: true,
@@ -740,14 +746,31 @@ shopRouter.get(
     // Bands are computed server-side; the dashboard never derives them.
     const queue = await loadShopQueue(prisma, shopId);
     const bands = new Map(queue.entries.map((e) => [e.job.id, e]));
+    // Which printing jobs lost their print computer (offline / deleted)? One query.
+    const printingAgentIds = [...new Set(
+      jobs.filter((j) => j.status === 'printing' && j.claimedByAgentId).map((j) => j.claimedByAgentId as string),
+    )];
+    const printingAgents = printingAgentIds.length
+      ? await prisma.agent.findMany({
+          where: { shopId, id: { in: printingAgentIds } },
+          select: { id: true, status: true, lastHeartbeatAt: true, createdAt: true },
+        })
+      : [];
+    const agentById = new Map(printingAgents.map((a) => [a.id, a]));
     res.json({
       counterCapacity: queue.counterCapacity,
       revealGraceSeconds: queue.revealGraceSeconds,
       jobs: jobs.map((j) => {
         const live = bands.get(j.id);
-        const { revealedAt, revealDeadlineAt, absentAt, ...rest } = j;
+        const { revealedAt, revealDeadlineAt, absentAt, claimedByAgentId, printError, ...rest } = j;
+        const problem = describePrintProblem(printError);
+        const agent = claimedByAgentId ? agentById.get(claimedByAgentId) : undefined;
         return {
           ...rest,
+          // Raw agent/driver text never reaches the dashboard: friendly message + stable code only.
+          printError: problem?.message ?? null,
+          printErrorCode: problem?.code ?? null,
+          printAgentOffline: j.status === 'printing' && agentGoneForStaff(agent ?? null),
           position: live?.position ?? null,
           band: live?.band ?? null,
           revealDeadlineAt: live?.band === 'revealed' ? revealDeadlineAt : null,
@@ -864,6 +887,22 @@ shopRouter.post(
   }),
 );
 
+/**
+ * A job still `printing` whose print computer is offline/deleted can be failed
+ * by staff right away (the sweeper does the same after the lease timeout), so
+ * "retry" and "cancel & return payment" work on it. A job whose computer is
+ * still connected is left untouched. Returns the (possibly updated) job.
+ */
+async function releaseOrphanedPrint(job: Job, shopUserId: string): Promise<Job> {
+  if (job.status !== 'printing') return job;
+  if (!(await isPrintOrphaned(job))) {
+    throw conflict('This job is still printing on a connected computer');
+  }
+  const failed = await markPrintFailedAgentGone(job, { type: 'shop', id: shopUserId });
+  if (!failed) throw conflict('Job state changed, refresh and try again');
+  return failed;
+}
+
 /** Retry a failed print without asking the student for a second OTP. */
 shopRouter.post(
   '/jobs/:id/retry-print',
@@ -871,8 +910,9 @@ shopRouter.post(
   validateBody(z.object({ printerId: z.string().uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!job) throw notFound();
+    job = await releaseOrphanedPrint(job, req.shopUser!.id);
     if (job.status !== 'otp_verified') throw conflict('This job is not waiting for a print retry');
 
     const recommendation = await recommendPrinter(
@@ -939,8 +979,9 @@ shopRouter.post(
   validateBody(z.object({ reference: z.string().trim().min(1).max(120).optional() }).strict()),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
-    const job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
+    let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!job) throw notFound();
+    job = await releaseOrphanedPrint(job, req.shopUser!.id);
     if (
       job.paymentProvider !== 'pay_at_shop'
       || job.paymentStatus !== 'paid'

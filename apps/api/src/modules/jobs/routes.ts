@@ -37,6 +37,7 @@ import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperational } from '../shops/availability.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
+import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
 
 export const jobsRouter = Router();
 
@@ -267,7 +268,7 @@ jobsRouter.get(
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, ...safeJob } = job;
+    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, printError, ...safeJob } = job;
     const safeShop = {
       name: shop.name,
       slug: shop.slug,
@@ -286,6 +287,8 @@ jobsRouter.get(
     res.json({
       job: {
         ...safeJob,
+        // Raw agent/driver text is never exposed: a fixed, friendly student message only.
+        printError: printError ? STUDENT_PRINT_PROBLEM_MESSAGE : null,
         shop: safeShop,
         ...live,
         otpCode: codeVisible ? decryptReleaseCode(shopId, releaseCodeEncrypted) : null,
