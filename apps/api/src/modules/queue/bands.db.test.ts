@@ -55,7 +55,8 @@ const dbReady = await (async () => {
     await prisma.shop.findFirst({ select: { counterCapacity: true, revealGraceSeconds: true } });
     await prisma.job.findFirst({ select: { revealedAt: true, revealDeadlineAt: true, arrivingNotifiedAt: true } });
     return true;
-  } catch {
+  } catch (error) {
+    console.warn('bands.db.test skipped: database not ready —', String(error).slice(0, 300));
     return false;
   }
 })();

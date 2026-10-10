@@ -123,7 +123,7 @@ export const releaseOtpSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
   /** manual-mode: shop picks the printer; auto-mode: omitted */
   printerId: z.string().uuid().optional(),
-  /** Explicit staff confirmation for a paid order outside the near-front window. */
+  /** Explicit staff confirmation for a paid order outside the revealed band. */
   overrideQueue: z.boolean().default(false),
   /**
    * An attended counter confirmation. Amount is deliberately absent: the API
