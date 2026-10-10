@@ -22,3 +22,15 @@ export function distanceMeters(from: Coordinates, to: Coordinates): number {
 export function isWithinRadius(distanceM: number, radiusM: number): boolean {
   return distanceM <= radiusM;
 }
+
+/** PrintQs is India-only (INR, +91, Razorpay). Generous box incl. Andaman/Nicobar and Lakshadweep. */
+export const INDIA_BOUNDS = { minLat: 6.0, maxLat: 37.5, minLng: 68.0, maxLng: 98.0 } as const;
+export const OUTSIDE_INDIA_MESSAGE = 'That location is outside India — check latitude/longitude';
+
+export function isWithinIndia(latitude: number, longitude: number): boolean {
+  return latitude >= INDIA_BOUNDS.minLat && latitude <= INDIA_BOUNDS.maxLat
+    && longitude >= INDIA_BOUNDS.minLng && longitude <= INDIA_BOUNDS.maxLng;
+}
+
+/** A pin that moved less than this is GPS jitter / a re-capture, not a relocation needing re-review. */
+export const MATERIAL_MOVE_M = 150;

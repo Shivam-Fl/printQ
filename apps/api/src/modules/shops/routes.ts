@@ -39,14 +39,13 @@ import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
+import { distanceMeters, isWithinIndia, MATERIAL_MOVE_M, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
 
-/** ~1.1 m. Below this a pin is the same place (map clicks, float round-trips). */
-const COORDINATE_EPSILON_DEG = 1e-5;
 
 const maskPhone = (phone: string) => `•••${phone.slice(-4)}`;
 
@@ -194,6 +193,11 @@ const shopPatchSchema = z.object({
   /** printOptionsVersion the client last loaded; a stale one cannot overwrite a newer menu. */
   expectedPrintOptionsVersion: z.number().int().min(0).optional(),
 }).superRefine((value, context) => {
+  if (typeof value.latitude === 'number' && typeof value.longitude === 'number'
+    && !(value.latitude === 0 && value.longitude === 0)
+    && !isWithinIndia(value.latitude, value.longitude)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+  }
   if (value.latitude === 0 && value.longitude === 0) {
     // "Null Island": the classic unset/geolocation-failed default, never a real counter.
     context.addIssue({
@@ -270,10 +274,12 @@ shopRouter.patch(
     if ('latitude' in body) {
       const lat = body.latitude as number | null;
       const lng = body.longitude as number | null;
+      // Re-review only for a real relocation (> 150 m). A smaller move (owner
+      // re-capturing "Use this device", GPS jitter) is still saved, silently.
       locationChanged = lat == null || lng == null || current.latitude == null || current.longitude == null
         ? lat !== current.latitude || lng !== current.longitude
-        : Math.abs(lat - current.latitude) > COORDINATE_EPSILON_DEG || Math.abs(lng - current.longitude) > COORDINATE_EPSILON_DEG;
-      if (!locationChanged) {
+        : distanceMeters({ latitude: lat, longitude: lng }, { latitude: current.latitude, longitude: current.longitude }) > MATERIAL_MOVE_M;
+      if (!locationChanged && lat === current.latitude && lng === current.longitude) {
         delete body.latitude;
         delete body.longitude;
       }

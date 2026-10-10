@@ -12,6 +12,7 @@ import { validateBody } from '../../middleware/validate.js';
 import { emailProvider } from '../../providers/email/index.js';
 import { logger } from '../../lib/logger.js';
 import { invalidatePublicCaches } from '../public/cache.js';
+import { isWithinIndia, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
 
 export const adminRouter = Router();
 
@@ -37,6 +38,9 @@ const coordinatesSchema = z.object({
     || (value.latitude != null) !== (value.longitude != null)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
+  if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+  }
 });
 const campusInputSchema = z.object({
   name: z.string().trim().min(2).max(160),
@@ -55,6 +59,9 @@ const campusPatchSchema = z.object({
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+  }
+  if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
