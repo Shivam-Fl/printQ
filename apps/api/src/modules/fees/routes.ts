@@ -25,7 +25,8 @@ feesRouter.get(
   requireShopUser,
   asyncHandler(async (req, res) => {
     const account = await computeFeeAccount(prisma, req.shopUser!.shopId);
-    const base = { enabled: getFeePaymentProvider() !== null, state: account.state, banner: account.banner };
+    const enabled = getFeePaymentProvider() !== null;
+    const base = { enabled, state: account.state, banner: enabled ? account.banner : null };
     if (req.shopUser!.role !== 'owner') {
       res.json({ status: base });
       return;

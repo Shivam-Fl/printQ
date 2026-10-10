@@ -94,15 +94,15 @@ export default function Earnings() {
       <ShopNav />
       <div className="page-heading">
         <div>
-          <h1>Earnings and fees</h1>
-          <p>Students pay you at the counter. PrintQs earns a commission on each completed print, summed into a weekly statement that you pay here.</p>
+          <h1>{fees?.enabled ? 'Earnings and fees' : 'Earnings'}</h1>
+          <p>{fees?.enabled ? 'Students pay you at the counter. PrintQs earns a commission on each completed print, summed into a weekly statement that you pay here.' : 'Students pay you at the counter. PrintQs posts one commission entry for each completed print.'}</p>
         </div>
       </div>
 
       {error && <div className="error-box" role="alert">{error}</div>}
       {!data || !fees ? <p className="dim">Loading…</p> : (
         <>
-          <FeeCard fees={fees} paying={paying} message={message} onPay={pay} />
+          {fees.enabled && <FeeCard fees={fees} paying={paying} message={message} onPay={pay} />}
           {fees.enabled && pushState !== 'on' && (
             <p className="dim fee-push">
               <button
@@ -115,11 +115,15 @@ export default function Earnings() {
             </p>
           )}
 
-          <div className="section-head"><h2>Weekly statements</h2></div>
-          <FeeStatementsTable fees={fees} />
+          {fees.enabled && (
+            <>
+              <div className="section-head"><h2>Weekly statements</h2></div>
+              <FeeStatementsTable fees={fees} />
 
-          <div className="section-head"><h2>Payments and receipts</h2></div>
-          <FeePaymentsTable fees={fees} />
+              <div className="section-head"><h2>Payments and receipts</h2></div>
+              <FeePaymentsTable fees={fees} />
+            </>
+          )}
 
           <div className="section-head"><h2>Commission activity</h2></div>
           <div className="table-shell">

@@ -27,7 +27,7 @@ export default function FeeBanner() {
     let alive = true;
     const load = () => {
       api<{ status: FeeStatus }>('/api/shop/fees/status', { role: 'shop' })
-        .then((r) => { if (alive) setStatus(r.status); })
+        .then((r) => { if (alive) setStatus(r.status.enabled ? r.status : null); })
         .catch(() => undefined);
     };
     load();
