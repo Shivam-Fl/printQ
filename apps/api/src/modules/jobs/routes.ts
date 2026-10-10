@@ -434,10 +434,12 @@ jobsRouter.post(
     if (job.status !== 'completed') throw conflict('Only a completed job can be rated');
     if (job.rating != null) throw conflict('This job has already been rated');
 
-    await prisma.job.update({
-      where: { id: job.id },
+    // Once-only even under concurrency: the conditional UPDATE is the lock.
+    const rated = await prisma.job.updateMany({
+      where: { id: job.id, studentId: req.student!.id, status: 'completed', rating: null },
       data: { rating, reviewText: reviewText ?? null },
     });
+    if (rated.count === 0) throw conflict('This job has already been rated');
     res.json({ ok: true });
   }),
 );

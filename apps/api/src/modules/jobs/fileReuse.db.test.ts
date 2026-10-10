@@ -201,6 +201,20 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     expect((await fileRow(file.id)).deletionScheduledAt).toBeNull();
   });
 
+  it('D5: concurrent ratings are once-only (one 200, the rest 409)', async () => {
+    const file = await newFile();
+    const order = await orderOn(file.id);
+    const id = order.body.job!.id;
+    await prisma.job.update({ where: { id }, data: { status: 'completed', paymentStatus: 'paid' } });
+    const results = await Promise.all(
+      [5, 4, 3, 2].map((rating) => call(`/api/jobs/${id}/rating`, { method: 'POST', body: { rating } })),
+    );
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 409, 409, 409]);
+    const stored = await prisma.job.findUniqueOrThrow({ where: { id } });
+    expect([2, 3, 4, 5]).toContain(stored.rating);
+  });
+
   it('refuses a new job on a file that already printed, with a clear message', async () => {
     const file = await newFile();
     const first = await orderOn(file.id);
