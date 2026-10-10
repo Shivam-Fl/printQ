@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { api, fetchBytes } from '../api.js';
@@ -37,16 +37,17 @@ export default function PdfPreview({ fileId, totalPages, pageRange }: Props) {
   // load the document once per file
   useEffect(() => {
     const controller = new AbortController();
-    let loaded: PDFDocumentProxy | null = null;
+    let loadingTask: PDFDocumentLoadingTask | null = null;
     setPhase('loading');
     setDoc(null);
     (async () => {
       try {
         const bytes = await fetchBytes(`/api/files/${fileId}/preview/data`, 'student', controller.signal);
         const task = pdfjs.getDocument({ data: new Uint8Array(bytes) });
-        loaded = await task.promise;
+        loadingTask = task;
+        const loaded = await task.promise;
         if (controller.signal.aborted) {
-          void loaded.destroy();
+          void task.destroy();
           return;
         }
         setDoc(loaded);
@@ -57,7 +58,8 @@ export default function PdfPreview({ fileId, totalPages, pageRange }: Props) {
     })();
     return () => {
       controller.abort();
-      if (loaded) void loaded.destroy();
+      // pdf.js 6: teardown lives on the loading task (frees the document and its worker)
+      if (loadingTask) void loadingTask.destroy();
     };
   }, [fileId]);
 
