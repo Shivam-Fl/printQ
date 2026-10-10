@@ -5,6 +5,8 @@ import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
+import { clientIpOf } from '../lib/clientIpConfig.js';
+import { handshakeLimiter } from './handshakeLimit.js';
 import { subscribeEvents } from './events.js';
 import { advanceShopQueues, emitQueueUpdate } from '../modules/queue/engine.js';
 import { notifyShopReopened } from '../modules/shops/availability.js';
@@ -20,6 +22,13 @@ import { notifyShopReopened } from '../modules/shops/availability.js';
 export function setupRealtime(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
     cors: { origin: env.CORS_ORIGINS, credentials: false },
+  });
+
+  // Cheap pre-auth throttle per client IP: runs before any token/DB lookup.
+  io.use((socket, next) => {
+    const ip = clientIpOf(socket.handshake.address, socket.handshake.headers);
+    if (!handshakeLimiter.allow(ip)) return next(new Error('rate_limited'));
+    return next();
   });
 
   io.use(async (socket, next) => {

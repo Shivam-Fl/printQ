@@ -35,6 +35,14 @@ const envSchema = z.object({
   // cannot accidentally attach development resources to production code.
   PRINTQ_ENVIRONMENT: z.enum(['development', 'test', 'production']).optional(),
   PORT: z.coerce.number().int().default(4000),
+  // How to find the real client IP behind proxies (see lib/clientIp.ts):
+  // a hop count ("1"), "cloudflare" (Cloudflare->Render chain) or "none".
+  TRUST_PROXY: z.string().trim().regex(/^(\d{1,2}|cloudflare|none)$/i).default('1'),
+  // Extra trusted proxy CIDRs for TRUST_PROXY=cloudflare (comma separated).
+  TRUST_PROXY_CIDRS: z
+    .string()
+    .default('')
+    .transform((v) => v.split(',').map((c) => c.trim()).filter(Boolean)),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173')

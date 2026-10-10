@@ -7,6 +7,7 @@ vi.mock('../../config/env.js', () => ({
     EMAIL_PROVIDER: 'resend',
     RESEND_API_KEY: 'resend-test-key-that-is-long-enough',
     EMAIL_FROM: 'PrintQs <security@printqs.test>',
+    EMAIL_REPLY_TO: 'admin@printqs.test',
   },
 }));
 vi.mock('../../lib/logger.js', () => ({ logger: { info: mocks.info } }));
@@ -32,6 +33,14 @@ describe('Resend password-reset delivery', () => {
     }));
     expect(mocks.info).toHaveBeenCalledWith({ provider: 'resend', accepted: true }, 'email_sent');
     expect(JSON.stringify(mocks.info.mock.calls)).not.toContain('owner@example.test');
+  });
+
+  it('sets Reply-To when configured so replies reach a real mailbox', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await emailProvider.send('owner@example.test', 's', 'b');
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body) as Record<string, unknown>;
+    expect(body.reply_to).toBe('admin@printqs.test');
   });
 
   it('does not expose a provider response body when delivery fails', async () => {

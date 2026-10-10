@@ -7,6 +7,7 @@ import cors from 'cors';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
+import { trustProxySetting } from './lib/clientIpConfig.js';
 import { generalLimiter } from './middleware/rateLimit.js';
 import { createAppCheckMiddleware } from './middleware/appCheck.js';
 import { errorHandler } from './middleware/error.js';
@@ -25,7 +26,8 @@ export function createApp(): express.Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', 1); // real client IPs behind the TLS-terminating proxy
+  // Real client IPs behind Cloudflare/Render: trust by address, never by client-supplied headers.
+  app.set('trust proxy', trustProxySetting);
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -56,7 +58,7 @@ export function createApp(): express.Express {
       },
     }),
   );
-  app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/healthz' } }));
+  app.use(pinoHttp({ logger, customProps: (req) => ({ clientIp: req.ip }), autoLogging: { ignore: (req) => req.url === '/healthz' } }));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
