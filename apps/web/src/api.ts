@@ -103,6 +103,31 @@ export async function renewStudentSession(): Promise<string | null> {
   return studentRenewal;
 }
 
+/**
+ * The API answers a failed schema check with `{ error: 'Validation failed',
+ * details: [{ path, message }] }`. Show the first detail, named after its field
+ * ("Email is invalid"), rather than the useless generic headline.
+ */
+function validationMessage(data: { error?: string; details?: { path?: string; message?: string }[] }): string | null {
+  if (data.error !== 'Validation failed') return null;
+  const first = data.details?.[0];
+  if (!first?.message) return null;
+  const field = (first.path ?? '').split('.').pop() ?? '';
+  const label = field.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  if (!label || first.message.toLowerCase().includes(label)) return first.message;
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}: ${first.message}`;
+}
+
+/** Sign out of the shop dashboard: revoke the session server-side (best effort), then forget the token. */
+export async function signOutShop(): Promise<void> {
+  try {
+    await api('/api/auth/shop/logout', { method: 'POST', role: 'shop' });
+  } catch {
+    /* offline or already expired — local sign-out still proceeds */
+  }
+  clearToken('shop');
+}
+
 async function requestJson<T>(
   path: string,
   options: { method?: string; body?: unknown; role?: Role; formData?: FormData },
@@ -123,8 +148,9 @@ async function requestJson<T>(
   }
 
   const res = await fetch(`${API_URL}${path}`, { method: options.method ?? 'GET', headers, body });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  const data = (await res.json().catch(() => ({}))) as { error?: string; details?: { path?: string; message?: string }[] };
   if (!res.ok) {
+    data.error = validationMessage(data) ?? data.error;
     if (res.status === 401 && options.role === 'student' && allowStudentRenewal) {
       const token = await renewStudentSession();
       if (token) return requestJson<T>(path, options, false);

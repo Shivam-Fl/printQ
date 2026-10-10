@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
+import { resolveShopSession } from '../lib/shopSession.js';
 import { unauthorized } from '../lib/errors.js';
 
 declare global {
@@ -48,12 +49,19 @@ export function requireStudentAllowQueryToken(
   next();
 }
 
-export function requireShopUser(req: Request, _res: Response, next: NextFunction): void {
+export async function requireShopUser(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const token = bearer(req);
   const claims = token ? verifyToken(token) : null;
   if (!claims || claims.typ !== 'shop') return next(unauthorized());
-  req.shopUser = { id: claims.sub, shopId: claims.shopId, role: claims.role };
-  next();
+  try {
+    // Revocation: deleted staff, sign-out and password reset all invalidate here.
+    const session = await resolveShopSession(claims);
+    if (!session) return next(unauthorized());
+    req.shopUser = session;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 export function requireShopOwner(req: Request, res: Response, next: NextFunction): void {

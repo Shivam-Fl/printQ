@@ -90,6 +90,44 @@ describe('student session renewal', () => {
   });
 });
 
+describe('validation errors (OWN-12)', () => {
+  it('surfaces the first field-specific message instead of "Validation failed"', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'Validation failed',
+      details: [{ path: 'email', message: 'Email is invalid' }, { path: 'password', message: 'Password must be at least 8 characters' }],
+    }), { status: 400 }));
+    await expect(apiModule.api('/api/auth/shop/register', { method: 'POST', body: {} })).rejects.toMatchObject({
+      status: 400,
+      message: 'Email is invalid',
+    });
+  });
+
+  it('keeps the plain error text when there are no details', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'Not found' }), { status: 404 }));
+    await expect(apiModule.api('/api/x')).rejects.toMatchObject({ message: 'Not found' });
+  });
+});
+
+describe('shop sign-out (OWN-4)', () => {
+  it('revokes the session on the server, then clears the local token', async () => {
+    storage.set('printq:shop:token', 'shop-jwt');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await apiModule.signOutShop();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain('/api/auth/shop/logout');
+    expect((init as RequestInit).method).toBe('POST');
+    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe('Bearer shop-jwt');
+    expect(storage.has('printq:shop:token')).toBe(false);
+  });
+
+  it('still signs out locally when the network call fails', async () => {
+    storage.set('printq:shop:token', 'shop-jwt');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+    await apiModule.signOutShop();
+    expect(storage.has('printq:shop:token')).toBe(false);
+  });
+});
+
 describe('API base URL configuration', () => {
   it('trims deployment whitespace and trailing slashes', () => {
     expect(apiModule.normalizeBaseUrl(' https://api.printqs.com/\r\n')).toBe('https://api.printqs.com');

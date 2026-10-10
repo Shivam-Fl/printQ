@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
   COUNTER_CAPACITY_MAX,
@@ -44,6 +45,9 @@ import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
 
+/** ~1.1 m. Below this a pin is the same place (map clicks, float round-trips). */
+const COORDINATE_EPSILON_DEG = 1e-5;
+
 const maskPhone = (phone: string) => `•••${phone.slice(-4)}`;
 
 /** Shop settings + profile for the logged-in staff member. */
@@ -78,6 +82,7 @@ shopRouter.get(
         counterUpiVerifiedAt: true,
         acceptingOrders: true,
         printOptions: true,
+        printOptionsVersion: true,
         otpWindowMinutes: true,
       },
     });
@@ -186,7 +191,17 @@ const shopPatchSchema = z.object({
   counterUpiPayeeName: z.string().trim().min(2).max(120).nullable().optional(),
   acceptingOrders: z.boolean().optional(),
   printOptions: printOptionsSchema.optional(),
+  /** printOptionsVersion the client last loaded; a stale one cannot overwrite a newer menu. */
+  expectedPrintOptionsVersion: z.number().int().min(0).optional(),
 }).superRefine((value, context) => {
+  if (value.latitude === 0 && value.longitude === 0) {
+    // "Null Island": the classic unset/geolocation-failed default, never a real counter.
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['latitude'],
+      message: 'Coordinates 0, 0 are not a real location — choose the shop entrance on the map',
+    });
+  }
   const latitudeProvided = value.latitude !== undefined;
   const longitudeProvided = value.longitude !== undefined;
   if (latitudeProvided !== longitudeProvided || (latitudeProvided && ((value.latitude == null) !== (value.longitude == null)))) {
@@ -213,38 +228,107 @@ shopRouter.patch(
   requireShopOwner,
   validateBody(shopPatchSchema),
   asyncHandler(async (req, res) => {
-    const body = req.body as Record<string, unknown>;
+    const shopId = req.shopUser!.shopId;
+    const { expectedPrintOptionsVersion, ...incoming } = req.body as Record<string, unknown> & {
+      expectedPrintOptionsVersion?: number;
+    };
+    const body: Record<string, unknown> = { ...incoming };
     if (typeof body.campusId === 'string') {
       const campus = await prisma.campus.findFirst({ where: { id: body.campusId, isActive: true }, select: { id: true } });
       if (!campus) throw badRequest('Choose an active campus from the approved list');
     }
-    // Any material profile, location, campus or menu change must go through
-    // review again. An old publish decision cannot silently cover new facts.
-    const verificationReset = ['name', 'address', 'campusId', 'campusName', 'latitude', 'longitude', 'printOptions']
-      .some((key) => key in body);
-    const shop = await prisma.shop.update({
-      where: { id: req.shopUser!.shopId },
-      data: {
+
+    // Compare against what is stored: a key being PRESENT is not a change. The
+    // dashboard re-sends whole forms, and re-saving identical values must not
+    // throw away a verification/publish decision.
+    const current = await prisma.shop.findUnique({
+      where: { id: shopId },
+      select: {
+        name: true,
+        address: true,
+        campusId: true,
+        campusName: true,
+        latitude: true,
+        longitude: true,
+        printOptions: true,
+        printOptionsVersion: true,
+        counterUpiVpa: true,
+        counterUpiPayeeName: true,
+      },
+    });
+    if (!current) throw notFound();
+
+    // Material = facts a reviewer approved about WHO and WHERE the shop is.
+    // Operational settings (capacity, grace, radius, cash, accepting orders,
+    // auto-assign, prices/menu) never need a fresh review.
+    const sameText = (key: 'name' | 'address' | 'campusId' | 'campusName') =>
+      !(key in body) || body[key] === current[key];
+    const nameChanged = !sameText('name');
+    const addressChanged = !sameText('address');
+    const campusChanged = !sameText('campusId') || !sameText('campusName');
+    let locationChanged = false;
+    if ('latitude' in body) {
+      const lat = body.latitude as number | null;
+      const lng = body.longitude as number | null;
+      locationChanged = lat == null || lng == null || current.latitude == null || current.longitude == null
+        ? lat !== current.latitude || lng !== current.longitude
+        : Math.abs(lat - current.latitude) > COORDINATE_EPSILON_DEG || Math.abs(lng - current.longitude) > COORDINATE_EPSILON_DEG;
+      if (!locationChanged) {
+        delete body.latitude;
+        delete body.longitude;
+      }
+    }
+    const verificationReset = nameChanged || addressChanged || campusChanged || locationChanged;
+
+    let menuChanged = false;
+    if ('printOptions' in body) {
+      menuChanged = !isDeepStrictEqual(body.printOptions, shopOptions(current));
+      if (!menuChanged) delete body.printOptions;
+    }
+    const upiChanged = ('counterUpiVpa' in body && body.counterUpiVpa !== current.counterUpiVpa)
+      || ('counterUpiPayeeName' in body && body.counterUpiPayeeName !== current.counterUpiPayeeName);
+
+    // Menu saves carry the version the tab loaded; only a menu write is
+    // version-checked, so editing capacity from a stale tab still just works.
+    const menuGuard = menuChanged && expectedPrintOptionsVersion !== undefined
+      ? { printOptionsVersion: expectedPrintOptionsVersion }
+      : {};
+    const data = {
         ...(body as object),
         ...('latitude' in body ? {
           locationUpdatedAt: typeof body.latitude === 'number' && typeof body.longitude === 'number'
             ? new Date()
             : null,
         } : {}),
+        ...(menuChanged ? { printOptionsVersion: { increment: 1 } } : {}),
         ...(verificationReset ? {
-          verificationStatus: 'draft',
+          verificationStatus: 'draft' as const,
           verificationSubmittedAt: null,
           verifiedAt: null,
           publishedAt: null,
           verificationNotes: null,
         } : {}),
-        ...(('counterUpiVpa' in body || 'counterUpiPayeeName' in body) ? {
+        ...(upiChanged ? {
           // Changing either merchant identity invalidates the prior manual
           // verification; no browser callback can restore it.
           counterUpiVerifiedAt: null,
         } : {}),
-      },
+    };
+    // Nothing actually changed (e.g. a full-form re-save): skip the write.
+    const written = Object.keys(data).length === 0
+      ? { count: 1 }
+      : await prisma.shop.updateMany({ where: { id: shopId, ...menuGuard }, data });
+    if (written.count === 0) {
+      throw new HttpError(
+        409,
+        'Your print menu was changed elsewhere (another tab or device). Reload this page to see the latest menu, then re-apply your edit.',
+        'SETTINGS_CHANGED_ELSEWHERE',
+      );
+    }
+    const shop = await prisma.shop.findUniqueOrThrow({
+      where: { id: shopId },
       select: {
+        printOptionsVersion: true,
         id: true,
         name: true,
         address: true,
