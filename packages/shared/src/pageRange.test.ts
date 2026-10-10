@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { countSelectedPages, PageRangeError, parsePageRange } from './pageRange.js';
+import { countSelectedPages, normalizePageRange, PageRangeError, parsePageRange } from './pageRange.js';
+
+describe('normalizePageRange', () => {
+  it('sorts, de-duplicates and merges', () => {
+    expect(normalizePageRange('1-3,3,5', 10)).toBe('1-3,5');
+    expect(normalizePageRange('5,1-2,3-4', 10)).toBe('1-5');
+    expect(normalizePageRange('7', 10)).toBe('7');
+    expect(normalizePageRange(null, 10)).toBeNull();
+    expect(normalizePageRange('', 10)).toBeNull();
+  });
+});
 
 describe('parsePageRange', () => {
   it('parses single pages, ranges and mixes', () => {

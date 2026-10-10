@@ -283,6 +283,35 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     }
   });
 
+  it('D8/UI13b: confirm publishes the student socket update before slow side effects; handover emits completed', async () => {
+    const a = await makeAgent({ alive: true });
+    const job = await printingJob(a.agent.id);
+    vi.mocked(publishEvent).mockClear();
+    vi.mocked(notifyStudent).mockClear();
+    expect((await shopCall(`/jobs/${job.id}/confirm-print-completion`)).status).toBe(200);
+    const studentUpdate = vi.mocked(publishEvent).mock.calls.findIndex(
+      (c) => c[0] === `student:${studentId}` && c[1] === 'job:update' && (c[2] as { status: string }).status === 'ready_for_pickup',
+    );
+    expect(studentUpdate).toBeGreaterThanOrEqual(0);
+    expect(vi.mocked(publishEvent).mock.invocationCallOrder[studentUpdate]!)
+      .toBeLessThan(vi.mocked(notifyStudent).mock.invocationCallOrder[0]!);
+
+    vi.mocked(publishEvent).mockClear();
+    expect((await shopCall(`/jobs/${job.id}/handover`)).status).toBe(200);
+    expect(publishEvent).toHaveBeenCalledWith(`student:${studentId}`, 'job:update', { jobId: job.id, status: 'completed' });
+  });
+
+  it('D8: a staff member (not owner) gets 403 - not 401 - on owner-only endpoints', async () => {
+    const staff = await prisma.shopUser.create({
+      data: { shopId, email: `${randomUUID()}@staff.test`, passwordHash: 'x', name: 'Staff', role: 'staff' },
+    });
+    const staffToken = signShopToken(staff.id, shopId, 'staff', staff.sessionVersion);
+    const res = await fetch(`${base}/api/shop/stats`, { headers: { authorization: `Bearer ${staffToken}` } });
+    expect(res.status).toBe(403);
+    const anon = await fetch(`${base}/api/shop/stats`);
+    expect(anon.status).toBe(401);
+  });
+
   it('student and staff responses never carry raw agent error text', async () => {
     const a = await makeAgent({ alive: true });
     const job = await printingJob(a.agent.id);

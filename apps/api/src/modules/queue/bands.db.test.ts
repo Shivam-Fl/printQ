@@ -456,7 +456,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       for (const good of [{ counterCapacity: 1 }, { counterCapacity: 20 }, { revealGraceSeconds: 30 }, { revealGraceSeconds: 120 }, { checkInRadiusM: 200 }]) {
         expect((await setSettings(good)).status).toBe(200);
       }
-      expect((await api('/api/shop/me', staffToken, { method: 'PATCH', body: { counterCapacity: 3 } })).status).toBe(401);
+      expect((await api('/api/shop/me', staffToken, { method: 'PATCH', body: { counterCapacity: 3 } })).status).toBe(403);
       const me = await (await api('/api/shop/me', ownerToken)).json() as { shop: Record<string, unknown> };
       expect(me.shop).toMatchObject({ counterCapacity: 20, revealGraceSeconds: 120, checkInRadiusM: 200 });
       // settings never leak across shops

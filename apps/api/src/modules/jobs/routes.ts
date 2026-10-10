@@ -19,7 +19,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { advancePrinterQueue, checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
 import { refundIfPaid } from '../payments/refund.js';
-import { renderReceipt } from '../../lib/receipt.js';
+import { loadCompletedAt, renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
 import { ACTIVE_FILE_JOB_STATUSES, assertFileCanBackNewJob, scheduleFileDeletion } from '../../lib/fileRetention.js';
@@ -368,6 +368,9 @@ jobsRouter.get(
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,
       paymentStatus: job.paymentStatus,
+      completedAt: await loadCompletedAt(job.id, job.status),
+      counterPaymentMethod: job.counterPaymentMethod,
+      totalPages: job.file.pages,
       showPriceBreakdown: false,
     });
     res.setHeader('Content-Type', 'application/pdf');

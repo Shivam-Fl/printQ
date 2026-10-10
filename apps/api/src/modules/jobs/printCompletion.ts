@@ -39,6 +39,17 @@ export async function confirmSuccessfulPrint(
   );
   if (!updated) return null;
 
+  // Live updates go out FIRST, straight after the committed transition: the
+  // student's page and the dashboard must not wait behind file-deletion
+  // scheduling, the commission upsert or a (possibly slow) push delivery.
+  if (finishingRequired) {
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'finishing' });
+    publishEvent(`shop:${job.shopId}`, 'queue:finishing_required', { jobId: job.id, binding: specs.binding });
+  } else {
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
+    publishEvent(`shop:${job.shopId}`, 'queue:job_ready', { jobId: job.id });
+  }
+
   // The timestamp is in PostgreSQL before scheduling work begins. If Redis or
   // storage orchestration is temporarily unavailable, the minute reconciler
   // finds printConfirmedAt and schedules the same earlier deadline; never
@@ -62,8 +73,6 @@ export async function confirmSuccessfulPrint(
       url: `/jobs/${job.id}`,
       eventKey: `printing-finished:${job.id}:${confirmedAt.toISOString()}`,
     }).catch((error) => logger.error({ error, jobId: job.id }, 'print_finishing_notification_failed'));
-    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'finishing' });
-    publishEvent(`shop:${job.shopId}`, 'queue:finishing_required', { jobId: job.id, binding: specs.binding });
     return { job: updated, finishingRequired: true };
   }
 
@@ -73,8 +82,6 @@ export async function confirmSuccessfulPrint(
     url: `/jobs/${job.id}`,
     eventKey: `print-ready:${job.id}:${confirmedAt.toISOString()}`,
   }).catch((error) => logger.error({ error, jobId: job.id }, 'print_ready_notification_failed'));
-  publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
-  publishEvent(`shop:${job.shopId}`, 'queue:job_ready', { jobId: job.id });
   return { job: updated, finishingRequired: false };
 }
 

@@ -21,7 +21,7 @@ import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
-import { renderReceipt } from '../../lib/receipt.js';
+import { loadCompletedAt, renderReceipt } from '../../lib/receipt.js';
 import { releaseByOtp } from '../queue/release.js';
 import { loadShopQueue } from '../queue/bands.js';
 import {
@@ -691,6 +691,9 @@ shopRouter.get(
       breakdown: job.priceBreakdown as unknown as PriceBreakdown,
       totalPaise: job.totalPaise,
       paymentStatus: job.paymentStatus,
+      completedAt: await loadCompletedAt(job.id, job.status),
+      counterPaymentMethod: job.counterPaymentMethod,
+      totalPages: job.file.pages,
     });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="printq-receipt-${job.id.slice(0, 8)}.pdf"`);
@@ -1043,14 +1046,15 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
+    // socket first: the student's page must not wait behind push delivery
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
+    publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
     await notifyStudent(job.studentId, {
       title: 'Print ready ✓',
       body: 'Printing and finishing are complete. Collect it at the counter.',
       url: `/jobs/${job.id}`,
       eventKey: `finishing-ready:${job.id}:${updated.updatedAt.toISOString()}`,
     });
-    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'ready_for_pickup' });
-    publishEvent(`shop:${shopId}`, 'queue:job_ready', { jobId: job.id });
     res.json({ ok: true, job: { id: updated.id, status: updated.status } });
   }),
 );
@@ -1071,6 +1075,9 @@ shopRouter.post(
     });
     if (!updated) throw conflict('Job state changed, try again');
 
+    // Live update for the student's page (no waiting for the 10 s poll). The
+    // job has left the live queue, so the queue snapshot never carries it.
+    publishEvent(`student:${job.studentId}`, 'job:update', { jobId: job.id, status: 'completed' });
     await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),
