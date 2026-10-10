@@ -8,7 +8,6 @@ import {
   jobSpecsSchema,
   unsupportedSpecs,
   type JobSpecs,
-  type UnsupportedSpec,
   type PriceBreakdown,
 } from '@printq/shared';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -17,13 +16,27 @@ import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.j
 import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
-import { checkInJob, emitQueueUpdate, getJobLiveMetrics, preparePayAtShopOrder, requeueJob } from '../queue/engine.js';
+import {
+  allocatePayAtShopCode,
+  checkInJob,
+  counterCodeInUse,
+  emitQueueUpdate,
+  getJobLiveMetrics,
+  newCounterCode,
+  notifyPayAtShopPrepared,
+  requeueJob,
+} from '../queue/engine.js';
 import { runInBackground } from '../../lib/background.js';
 import { refundIfPaid } from '../payments/refund.js';
 import { loadCompletedAt, renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
-import { ACTIVE_FILE_JOB_STATUSES, assertFileCanBackNewJob, scheduleFileDeletion } from '../../lib/fileRetention.js';
+import {
+  ACTIVE_FILE_JOB_STATUSES,
+  assertFileCanBackNewJobFrom,
+  isPrintedFileJob,
+  scheduleFileDeletion,
+} from '../../lib/fileRetention.js';
 import {
   claimIdempotency,
   completeIdempotency,
@@ -38,7 +51,7 @@ const DUPLICATE_ORDER_MESSAGE =
 import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
-import { isShopOperational } from '../shops/availability.js';
+import { isShopOperationalFrom } from '../shops/availability.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
 import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
 
@@ -51,14 +64,30 @@ const checkInSchema = z.object({
   measuredAt: z.coerce.date(),
 });
 
-/** Capability problems for this shop's configured printers (online or not), friendly text included. */
-async function unsupportedForShop(shopId: string, specs: JobSpecs): Promise<UnsupportedSpec[]> {
-  const printers = await prisma.printer.findMany({
-    where: { shopId },
-    select: { paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
+/**
+ * A ready file of this student's with everything an order/quote needs about its
+ * shop in ONE joined statement: the shop row, its online agents and its
+ * printers (production round trips cost ~230 ms each, so this replaces six).
+ * Ownership (studentId) is in the WHERE clause.
+ */
+function loadFileForOrder(fileId: string, studentId: string) {
+  return prisma.uploadedFile.findFirst({
+    where: { id: fileId, studentId, status: 'ready' },
+    relationLoadStrategy: 'join',
+    include: {
+      shop: {
+        include: {
+          agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
+          printers: {
+            select: { id: true, status: true, paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
+          },
+        },
+      },
+    },
   });
-  return unsupportedSpecs(printers, specs);
 }
+
+const SHOP_PAUSED_MESSAGE = 'This shop has paused new orders or has no connected printer. Try again when it reopens.';
 
 /** Live price quote — server-computed from the shop's rate card, never client math. */
 jobsRouter.post(
@@ -67,14 +96,9 @@ jobsRouter.post(
   validateBody(z.object({ fileId: z.string().uuid(), specs: jobSpecsSchema, couponCode: couponCodeSchema.optional() })),
   asyncHandler(async (req, res) => {
     const { fileId, specs, couponCode } = req.body as { fileId: string; specs: JobSpecs; couponCode?: string };
-    const file = await prisma.uploadedFile.findFirst({
-      where: { id: fileId, studentId: req.student!.id, status: 'ready' },
-      include: { shop: true },
-    });
+    const file = await loadFileForOrder(fileId, req.student!.id);
     if (!file || file.pages == null) throw notFound('File not ready');
-    if (!(await isShopOperational(file.shopId))) {
-      throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
-    }
+    if (!isShopOperationalFrom(file.shop)) throw conflict(SHOP_PAUSED_MESSAGE);
 
     let breakdown = applyPlatformMarkup(
       computePrice(specs, file.pages, shopOptions(file.shop)),
@@ -84,7 +108,7 @@ jobsRouter.post(
     // Student-facing pricing is intentionally one final amount. The shop base,
     // platform markup and line-item split remain private server-side data.
     // Hardware capability is checked here, not first at the counter: the student is told now.
-    const unsupported = await unsupportedForShop(file.shopId, specs);
+    const unsupported = unsupportedSpecs(file.shop.printers, specs);
     res.json({
       quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise },
       pages: file.pages,
@@ -152,29 +176,29 @@ jobsRouter.post(
     }
 
     async function createPreparedJob() {
-    const file = await prisma.uploadedFile.findFirst({
-      where: { id: fileId, studentId, status: 'ready' },
-      include: { shop: true },
-    });
+    // Independent reads in ONE round trip: the file with its shop/agents/printers
+    // (joined), and every job that already references this file.
+    const [file, fileJobs] = await Promise.all([
+      loadFileForOrder(fileId, studentId),
+      prisma.job.findMany({
+        where: { fileId },
+        select: { id: true, studentId: true, shopId: true, status: true, printConfirmedAt: true },
+      }),
+    ]);
     if (!file || file.pages == null) throw notFound('File not ready');
     // one active order per student+file+shop
-    const active = await prisma.job.findFirst({
-      where: {
-        studentId,
-        fileId: file.id,
-        shopId: file.shopId,
-        status: { in: [...ACTIVE_FILE_JOB_STATUSES] },
-      },
-      select: { id: true },
-    });
+    const active = fileJobs.some(
+      (j) =>
+        j.studentId === studentId
+        && j.shopId === file.shopId
+        && (ACTIVE_FILE_JOB_STATUSES as readonly string[]).includes(j.status),
+    );
     if (active) throw conflict(DUPLICATE_ORDER_MESSAGE);
     // reference-counted file semantics: see fileRetention.ts
-    await assertFileCanBackNewJob(file);
+    assertFileCanBackNewJobFrom(file, fileJobs.some(isPrintedFileJob));
 
-    if (!(await isShopOperational(file.shopId))) {
-      throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
-    }
-    const unsupported = await unsupportedForShop(file.shopId, specs);
+    if (!isShopOperationalFrom(file.shop)) throw conflict(SHOP_PAUSED_MESSAGE);
+    const unsupported = unsupportedSpecs(file.shop.printers, specs);
     if (unsupported.length > 0) throw conflict(unsupported.map((u) => u.message).join(' '));
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
@@ -186,25 +210,31 @@ jobsRouter.post(
       resolvedCouponCode = resolved.code;
     }
     if (breakdown.totalPaise < 100) throw badRequest('Minimum order is ₹1');
-    const job = await prisma.job.create({
-      data: {
-        shopId: file.shopId,
-        studentId: req.student!.id,
-        fileId: file.id,
-        specs: specs as object,
-        pagesPerCopy: breakdown.pagesPerCopy,
-        priceBreakdown: breakdown as unknown as object,
-        totalPaise: breakdown.totalPaise,
-        shopBasePaise: shopBase.totalPaise,
-        platformMarkupPaise,
-        platformDiscountPaise: breakdown.discountPaise,
-        couponCode: resolvedCouponCode,
-        discountPaise: breakdown.discountPaise,
-        mode,
-        scheduledTime: mode === 'scheduled' ? scheduledTime : null,
-        paymentProvider: 'pay_at_shop',
-      },
-    });
+    // The counter-code collision check does not depend on the new row, so it
+    // runs alongside the insert (same round trip).
+    const candidate = newCounterCode(file.shopId);
+    const [job, collisions] = await Promise.all([
+      prisma.job.create({
+        data: {
+          shopId: file.shopId,
+          studentId,
+          fileId: file.id,
+          specs: specs as object,
+          pagesPerCopy: breakdown.pagesPerCopy,
+          priceBreakdown: breakdown as unknown as object,
+          totalPaise: breakdown.totalPaise,
+          shopBasePaise: shopBase.totalPaise,
+          platformMarkupPaise,
+          platformDiscountPaise: breakdown.discountPaise,
+          couponCode: resolvedCouponCode,
+          discountPaise: breakdown.discountPaise,
+          mode,
+          scheduledTime: mode === 'scheduled' ? scheduledTime : null,
+          paymentProvider: 'pay_at_shop',
+        },
+      }),
+      counterCodeInUse(file.shopId, candidate.digest),
+    ]);
     // Retention is per printed job, so one file must never back two live
     // orders. The lock above normally guarantees it; if it ever lapsed and two
     // creations raced, the later-created row (id breaks ties) withdraws itself.
@@ -223,7 +253,10 @@ jobsRouter.post(
     }
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
-    await preparePayAtShopOrder(job.id);
+    const prepared = await allocatePayAtShopCode(job, collisions === 0 ? candidate : undefined);
+    // "Order prepared" push, scheduled-arrival timer and live-queue refresh
+    // happen after the response; a failure is logged, never thrown.
+    if (prepared) runInBackground('pay-at-shop-prepared', () => notifyPayAtShopPrepared(job));
     return {
       job: { id: job.id, status: 'awaiting_arrival' as const, totalPaise: job.totalPaise },
       checkout: { mode: 'pay_at_shop' as const, amountPaise: job.totalPaise },

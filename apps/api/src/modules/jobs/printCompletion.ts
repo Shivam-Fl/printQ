@@ -2,6 +2,7 @@ import type { Job, PrintCompletionMethod } from '@prisma/client';
 import type { JobSpecs } from '@printq/shared';
 import { scheduleVerifiedPrintFileDeletion } from '../../lib/fileRetention.js';
 import { logger } from '../../lib/logger.js';
+import { runInBackground } from '../../lib/background.js';
 import { prisma } from '../../lib/prisma.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { publishEvent } from '../../realtime/events.js';
@@ -50,39 +51,41 @@ export async function confirmSuccessfulPrint(
     publishEvent(`shop:${job.shopId}`, 'queue:job_ready', { jobId: job.id });
   }
 
-  // The timestamp is in PostgreSQL before scheduling work begins. If Redis or
-  // storage orchestration is temporarily unavailable, the minute reconciler
-  // finds printConfirmedAt and schedules the same earlier deadline; never
-  // extend retention to mask that outage.
-  await scheduleVerifiedPrintFileDeletion(updated.fileId, confirmedAt).catch((error) => {
-    logger.error({ error, fileId: updated.fileId, jobId: updated.id }, 'verified_print_deletion_schedule_failed');
-  });
+  // Everything below is durable-by-reconciliation, so it runs AFTER the response
+  // (each step is several database round trips; production RTT is ~230 ms):
+  // printConfirmedAt is already committed, and the minute reconciler / the
+  // commission reconciler re-derive deletion deadlines and receivables from it
+  // if this process dies first. Never extend retention to mask an outage.
+  runInBackground('print-confirmed-effects', async () => {
+    const deletion = scheduleVerifiedPrintFileDeletion(updated.fileId, confirmedAt).catch((error) => {
+      logger.error({ error, fileId: updated.fileId, jobId: updated.id }, 'verified_print_deletion_schedule_failed');
+    });
+    // A completed physical print, not pickup or a browser click, is the only
+    // event that can post the pay-at-shop commission receivable. The idempotent
+    // PostgreSQL upsert prevents duplicate simulator callbacks or staff actions
+    // from creating a second amount due.
+    const commission = postVerifiedPrintCommission(updated.id).catch((error) => {
+      logger.error({ error, jobId: updated.id }, 'commission_receivable_post_deferred');
+    });
+    await Promise.all([deletion, commission]);
 
-  // A completed physical print, not pickup or a browser click, is the only
-  // event that can post the pay-at-shop commission receivable. The idempotent
-  // PostgreSQL upsert prevents duplicate simulator callbacks or staff actions
-  // from creating a second amount due.
-  await postVerifiedPrintCommission(updated.id).catch((error) => {
-    logger.error({ error, jobId: updated.id }, 'commission_receivable_post_deferred');
-  });
-
-  if (finishingRequired) {
+    if (finishingRequired) {
+      await notifyStudent(job.studentId, {
+        title: 'Printing complete — finishing in progress',
+        body: 'The shop is completing the requested binding. We’ll tell you when it is ready to collect.',
+        url: `/jobs/${job.id}`,
+        eventKey: `printing-finished:${job.id}:${confirmedAt.toISOString()}`,
+      }).catch((error) => logger.error({ error, jobId: job.id }, 'print_finishing_notification_failed'));
+      return;
+    }
     await notifyStudent(job.studentId, {
-      title: 'Printing complete — finishing in progress',
-      body: 'The shop is completing the requested binding. We’ll tell you when it is ready to collect.',
+      title: 'Print ready ✓',
+      body: 'Collect it at the counter.',
       url: `/jobs/${job.id}`,
-      eventKey: `printing-finished:${job.id}:${confirmedAt.toISOString()}`,
-    }).catch((error) => logger.error({ error, jobId: job.id }, 'print_finishing_notification_failed'));
-    return { job: updated, finishingRequired: true };
-  }
-
-  await notifyStudent(job.studentId, {
-    title: 'Print ready ✓',
-    body: 'Collect it at the counter.',
-    url: `/jobs/${job.id}`,
-    eventKey: `print-ready:${job.id}:${confirmedAt.toISOString()}`,
-  }).catch((error) => logger.error({ error, jobId: job.id }, 'print_ready_notification_failed'));
-  return { job: updated, finishingRequired: false };
+      eventKey: `print-ready:${job.id}:${confirmedAt.toISOString()}`,
+    }).catch((error) => logger.error({ error, jobId: job.id }, 'print_ready_notification_failed'));
+  });
+  return { job: updated, finishingRequired };
 }
 
 /** Record a driver/spooler acknowledgement without declaring a print successful. */

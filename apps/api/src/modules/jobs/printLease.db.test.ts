@@ -113,7 +113,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
       body: method === 'GET' ? undefined : JSON.stringify(body),
     });
   const fresh = (id: string) => prisma.job.findUniqueOrThrow({ where: { id } });
-  const commissions = (id: string) => prisma.shopCommissionEntry.count({ where: { jobId: id, type: 'print_commission' } });
+  const commissions = async (id: string) => { await drainBackground(); return prisma.shopCommissionEntry.count({ where: { jobId: id, type: 'print_commission' } }); };
 
   beforeAll(async () => {
     const shop = await prisma.shop.create({
@@ -302,6 +302,7 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
     vi.mocked(publishEvent).mockClear();
     vi.mocked(notifyStudent).mockClear();
     expect((await shopCall(`/jobs/${job.id}/confirm-print-completion`)).status).toBe(200);
+    await drainBackground();
     const studentUpdate = vi.mocked(publishEvent).mock.calls.findIndex(
       (c) => c[0] === `student:${studentId}` && c[1] === 'job:update' && (c[2] as { status: string }).status === 'ready_for_pickup',
     );
