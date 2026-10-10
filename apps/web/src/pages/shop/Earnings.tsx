@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getShopRole, getToken, rupees } from '../../api.js';
 import ShopNav from '../../components/ShopNav.js';
+import AutopayCard from '../../components/AutopayCard.js';
 
 interface CommissionData {
   amountDuePaise: number;
@@ -86,11 +87,13 @@ export default function Earnings() {
             </div>
           </div>
 
+          <AutopayCard />
+
           <section className="notice settlement-due-card">
             <div>
               <span className="eyebrow-label">Weekly collection</span>
-              <strong>Mandate setup is not active yet</strong>
-              <p>Before any debit, PrintQs will freeze a weekly statement and issue the required 24-hour pre-debit notice. A Razorpay TEST mandate and signed webhook reconciliation must pass before production collection can be enabled.</p>
+              <strong>Weekly debits are not running yet</strong>
+              <p>Before any debit, PrintQs will freeze a weekly statement and issue the required pre-debit notice. Setting up AutoPay above only authorizes a future debit; no debit is attempted until collection is enabled.</p>
             </div>
             <span className="stamp yellow">No debit will be attempted</span>
           </section>

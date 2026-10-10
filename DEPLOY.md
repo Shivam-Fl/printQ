@@ -180,3 +180,12 @@ Before giving the URL to a real student, all of these must be true:
 - [ ] VAPID keys are configured and an approaching-position notification opens the correct job from an installed PWA.
 - [ ] A real Windows printer passes B/W, colour, duplex and multi-copy tests for every advertised option.
 - [ ] Shop terms, privacy/contact details, Razorpay KYC and a support escalation path are in place.
+
+## Shop commission AutoPay TEST setup (non-production only)
+
+The owner generates these in Razorpay **Test Mode** (never Live) and sets them on the dev/staging API only:
+`RAZORPAY_RECURRING_TEST_KEY_ID` (`rzp_test_...`), `RAZORPAY_RECURRING_TEST_KEY_SECRET`,
+`RAZORPAY_RECURRING_WEBHOOK_SECRET` (secret of a webhook to `/api/payments/webhook/razorpay` subscribed to
+`token.confirmed`, `token.rejected`, `token.cancelled`, `token.paused` plus the payment events), and
+`COLLECTION_TOKEN_ENC_KEY` (`openssl rand -base64 32`, required whenever `SHOP_COLLECTION_MODE` is not `disabled`).
+Then set `SHOP_COLLECTION_MODE=test`. Production must keep `SHOP_COLLECTION_MODE=disabled` and hold none of these.

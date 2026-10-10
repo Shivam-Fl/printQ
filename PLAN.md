@@ -222,3 +222,15 @@ Supersedes the old `NEAR_FRONT_THRESHOLD` code reveal.
   waiting, absent or not-checked-in jobs still need the explicit override.
 - **Check-in zone** is 200 m by default (migration moved every shop to 200; owners may still pick
   20/50/100/200).
+
+## Shop commission AutoPay - stage 1 (Razorpay TEST only)
+
+- Students pay at the shop; PrintQs collects its weekly commission from the shop owner through Razorpay
+  Recurring Payments (UPI AutoPay): variable amount, at most `SHOP_COLLECTION_PILOT_CAP_PAISE` per debit.
+- Stage 1 (this release): owner sets up / cancels the mandate on Earnings (`/api/shop/collection-mandate`,
+  owner-only, hidden unless `SHOP_COLLECTION_MODE=test`). Flow: POST /customers -> POST /orders (method upi,
+  token{max_amount, expire_at, frequency as_presented}) -> Checkout (`recurring: "1"`) -> signed `token.confirmed`
+  webhook. The mandate is usable only after that webhook; statuses pending/active/paused/failed/revoked.
+- The Razorpay token id is stored AES-256-GCM encrypted (`COLLECTION_TOKEN_ENC_KEY`, bound to the mandate id).
+- `SHOP_COLLECTION_MODE=live` is still a boot-time refusal; production refuses TEST keys and TEST mode.
+- Stage 2 (not built): pre-debit notice, dispatch worker, failure/retry, reconciler, admin page, kill switches.

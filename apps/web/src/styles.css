@@ -1358,3 +1358,19 @@ tr.row-revealed td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
   white-space: nowrap;
   border: 0;
 }
+
+/* Weekly commission AutoPay card (Earnings) */
+.autopay-card { display: block; margin: 0 0 18px; }
+.autopay-body { display: grid; gap: 12px; }
+.autopay-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.autopay-head strong { font-size: 1.05rem; margin-top: 4px; }
+.autopay-points { margin: 0; padding-left: 18px; color: var(--pencil); font-size: .88rem; line-height: 1.5; }
+.autopay-note { margin: 0; color: var(--pencil); font-size: .88rem; }
+.autopay-form { display: grid; gap: 10px; max-width: 420px; }
+.autopay-terms { display: flex; gap: 10px; align-items: flex-start; font-size: .88rem; line-height: 1.4; }
+.autopay-terms input { margin-top: 3px; flex: none; width: 18px; height: 18px; }
+.autopay-confirm { border: 1px solid #f2c8ce; border-radius: 10px; padding: 12px 14px; background: var(--danger-soft); }
+.autopay-confirm p { margin: 0 0 10px; }
+.autopay-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.autopay-card button { justify-self: start; min-height: 44px; }
+.autopay-card button.small { min-height: 40px; }
