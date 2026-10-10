@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import LegalLayout from '../../components/LegalLayout.js';
-import { GRIEVANCE_OFFICE_LOCATION, GRIEVANCE_OFFICER_NAME, LEGAL_ENTITY_NAME, LEGAL_PRODUCT_NAME, grievanceEmail } from '../../lib/legal.js';
+import { GRIEVANCE_OFFICE_LOCATION, GRIEVANCE_OFFICER_NAME, LEGAL_ENTITY_DESCRIPTION, LEGAL_PRODUCT_NAME, grievanceEmail } from '../../lib/legal.js';
 
 export default function Privacy() {
   const gEmail = grievanceEmail();
@@ -14,7 +14,7 @@ export default function Privacy() {
         <h2>Who we are</h2>
         <p>
           {LEGAL_PRODUCT_NAME}
-          {LEGAL_ENTITY_NAME ? `, operated by ${LEGAL_ENTITY_NAME},` : ''} connects students with campus print shops.
+          {LEGAL_ENTITY_DESCRIPTION ? `, operated by ${LEGAL_ENTITY_DESCRIPTION},` : ''} connects students with campus print shops.
           This page explains how we handle personal information when you use the app.
         </p>
       </section>

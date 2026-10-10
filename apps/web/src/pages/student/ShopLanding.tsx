@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, getToken, rememberShop } from '../../api.js';
+import { ApiError, api, getToken, rememberShop } from '../../api.js';
+import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
+import { useResource } from '../../lib/useResource.js';
 import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
@@ -21,6 +23,13 @@ interface PublicShop {
   options: { papers: Paper[]; bindings: { id: string; label: string }[]; duplexEnabled: boolean };
 }
 
+function isShopResponse(value: unknown): value is { shop: PublicShop } {
+  const shop = (value as { shop?: Partial<PublicShop> } | null)?.shop;
+  return Boolean(shop && typeof shop.name === 'string' && typeof shop.slug === 'string' && shop.options && Array.isArray(shop.options.papers) && Array.isArray(shop.options.bindings) && shop.rating);
+}
+
+const FILE_FAILED_FALLBACK = "We couldn't prepare that file. Please try again.";
+
 /** Redirects to the specs page once `fileId` finishes converting (socket, with a polling fallback). */
 function useFileConversionRedirect(
   slug: string,
@@ -39,7 +48,7 @@ function useFileConversionRedirect(
     const onFailed = (p: { fileId: string; error: string }) => {
       if (p.fileId === fileId) {
         onDone();
-        onError(`Couldn't process that: ${p.error}`);
+        onError(p.error || FILE_FAILED_FALLBACK);
       }
     };
     socket?.on('file:ready', onReady);
@@ -52,7 +61,7 @@ function useFileConversionRedirect(
         if (file.status === 'ready') navigate(`/s/${slug}/file/${fileId}`);
         if (file.status === 'failed') {
           onDone();
-          onError(`Couldn't process that: ${file.error ?? ''}`);
+          onError(file.error || FILE_FAILED_FALLBACK);
         }
       } catch {
         /* keep polling */
@@ -90,7 +99,7 @@ function NotifyWhenOpen({ slug }: { slug: string }) {
 
 export default function ShopLanding() {
   const { slug = '' } = useParams();
-  const [shop, setShop] = useState<PublicShop | null>(null);
+  const validSlug = /^[a-z0-9][a-z0-9-]{0,79}$/i.test(slug);
   const [loggedIn, setLoggedIn] = useState(Boolean(getToken('student')));
   const [uploading, setUploading] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
@@ -99,14 +108,16 @@ export default function ShopLanding() {
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
 
+  const shopResource = useResource<{ shop: PublicShop }>(
+    (signal) => api<{ shop: PublicShop }>(`/api/public/shops/${encodeURIComponent(slug)}`, { signal }),
+    [slug],
+    { enabled: validSlug, validate: isShopResponse },
+  );
+  const shop = shopResource.data?.shop ?? null;
+
   useEffect(() => {
-    api<{ shop: PublicShop }>(`/api/public/shops/${slug}`)
-      .then((r) => {
-        setShop(r.shop);
-        if (getToken('student')) rememberShop(slug);
-      })
-      .catch(() => setError('This shop link is not valid.'));
-  }, [slug]);
+    if (shop && getToken('student')) rememberShop(slug);
+  }, [shop, slug]);
 
   useFileConversionRedirect(slug, loggedIn, converting, () => setConverting(null), setError);
 
@@ -141,11 +152,28 @@ export default function ShopLanding() {
     }
   }
 
-  if (error && !shop) {
+  const notFound = !validSlug || (shopResource.status === 'error' && shopResource.error instanceof ApiError && shopResource.error.status === 404);
+  if (notFound) {
+    // Never a dead end: a bad/unpublished link offers the directory and home.
     return (
       <div className="page">
         <Topbar />
-        <p className="error">{error}</p>
+        <div className="empty-state invalid-shop" role="alert">
+          <strong>This shop link is not valid.</strong>
+          <p>The link may be old, mistyped, or the shop is not taking orders on PrintQs yet.</p>
+          <div className="row" style={{ justifyContent: 'center', marginTop: 8 }}>
+            <Link to="/shops" className="button-link">Find a shop</Link>
+            <Link to="/home" className="button-link secondary">Go home</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (!shop && shopResource.status === 'error') {
+    return (
+      <div className="page">
+        <Topbar />
+        <ErrorState onRetry={shopResource.retry} title="Could not load this shop" />
       </div>
     );
   }
@@ -153,7 +181,7 @@ export default function ShopLanding() {
     return (
       <div className="page">
         <Topbar />
-        <p className="dim">Loading…</p>
+        <LoadingState status={shopResource.status} rows={2} />
       </div>
     );
   }

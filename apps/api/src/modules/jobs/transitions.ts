@@ -29,17 +29,17 @@ export async function applyTransition(
   const to = transition(from, event); // throws InvalidTransitionError on bad input
 
   return prisma.$transaction(async (tx) => {
-    const result = await tx.job.updateMany({
+    // One conditional UPDATE ... RETURNING (a single round trip) both enforces
+    // the expected status and returns the new row.
+    const [updated] = await tx.job.updateManyAndReturn({
       where: { id: jobId, status: from, ...(guard ?? {}) },
-      data: { ...extraData, status: to },
+      data: { ...(extraData as Prisma.JobUncheckedUpdateManyInput), status: to },
     });
-    if (result.count === 0) {
+    if (!updated) {
       // someone else transitioned first — caller decides whether that matters
       logger.warn({ jobId, from, event }, 'transition_lost_race');
       return null;
     }
-    const updated = await tx.job.findUnique({ where: { id: jobId } });
-    if (!updated) throw new Error('Transitioned job disappeared before audit write');
     const jobEvent = await tx.jobEvent.create({
       data: {
         jobId,

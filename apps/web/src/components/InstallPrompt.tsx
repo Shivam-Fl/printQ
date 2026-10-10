@@ -1,3 +1,4 @@
+import { safeStorage } from '../lib/safeStorage.js';
 import { useEffect, useState } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -10,7 +11,7 @@ const DISMISSED_KEY = 'printq:installPromptDismissed';
 /** Turns the bare browser install affordance into a visible, dismissible banner. */
 export default function InstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === '1');
+  const [dismissed, setDismissed] = useState(() => safeStorage.get(DISMISSED_KEY) === '1');
 
   useEffect(() => {
     const onPrompt = (e: Event) => {
@@ -24,7 +25,7 @@ export default function InstallPrompt() {
   if (!deferred || dismissed) return null;
 
   function dismiss() {
-    localStorage.setItem(DISMISSED_KEY, '1');
+    safeStorage.set(DISMISSED_KEY, '1');
     setDismissed(true);
   }
 

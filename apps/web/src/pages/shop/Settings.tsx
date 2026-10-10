@@ -1,25 +1,62 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, getShopRole, getToken } from '../../api.js';
+import { MAX_BINDING_PRICE_PAISE, MAX_PAGE_PRICE_PAISE } from '@printq/shared';
+import { api, ApiError, getShopRole, getToken } from '../../api.js';
 import { useNavigate } from 'react-router-dom';
 import QueueSettings from '../../components/QueueSettings.js';
 import ShopNav from '../../components/ShopNav.js';
 import ShopLocationPicker from '../../components/ShopLocationPicker.js';
+import {
+  buildSettingsPatch,
+  coordinateWarning,
+  formatRupeesField,
+  parseRupees,
+  priceText,
+  typePrice,
+  type OptionsDraft,
+  type SettingsDraft,
+} from './settingsForm.js';
 
-interface Paper {
+/** Price inputs hold TEXT while editing; paise is derived on save (OWN-3). */
+interface PaperRow {
   id: string;
   label: string;
-  bwPaise: number;
-  colorPaise: number | null;
+  bw: string;
+  color: string;
 }
-interface Binding {
+interface BindingRow {
   id: string;
   label: string;
-  paise: number;
+  price: string;
 }
 interface Options {
-  papers: Paper[];
-  bindings: Binding[];
+  papers: PaperRow[];
+  bindings: BindingRow[];
   duplexEnabled: boolean;
+}
+type StoredOptions = OptionsDraft;
+
+const toRows = (stored: StoredOptions): Options => ({
+  duplexEnabled: stored.duplexEnabled,
+  papers: stored.papers.map((p) => ({ id: p.id, label: p.label, bw: priceText(p.bwPaise), color: priceText(p.colorPaise) })),
+  bindings: stored.bindings.map((b) => ({ id: b.id, label: b.label, price: priceText(b.paise) })),
+});
+
+interface RowErrors {
+  bw?: string;
+  color?: string;
+  price?: string;
+}
+function paperErrors(row: PaperRow): RowErrors {
+  const bw = parseRupees(row.bw, { required: true, maxPaise: MAX_PAGE_PRICE_PAISE });
+  const color = parseRupees(row.color, { required: false, maxPaise: MAX_PAGE_PRICE_PAISE });
+  const errors: RowErrors = { bw: bw.error, color: color.error };
+  if (!errors.bw && !errors.color && color.paise != null && bw.paise != null && color.paise < bw.paise) {
+    errors.color = 'Colour price should not be lower than the B/W price';
+  }
+  return errors;
+}
+function bindingErrors(row: BindingRow): RowErrors {
+  return { price: parseRupees(row.price, { required: true, maxPaise: MAX_BINDING_PRICE_PAISE }).error };
 }
 interface ShopProfile {
   name: string;
@@ -53,8 +90,14 @@ interface LocationSearchResult {
 
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || `opt-${Date.now()}`;
-const rupees = (paise: number | null) => (paise == null ? '' : (paise / 100).toFixed(2));
-const toPaise = (v: string) => (v.trim() === '' ? null : Math.max(0, Math.round(Number(v) * 100)));
+/** A fresh id from the label that does not collide with ids already used. */
+function uniqueId(label: string, taken: Set<string>): string {
+  const base = slug(label);
+  let id = base;
+  for (let n = 2; taken.has(id.toLowerCase()); n++) id = `${base.slice(0, 36)}-${n}`;
+  taken.add(id.toLowerCase());
+  return id;
+}
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -72,6 +115,10 @@ export default function Settings() {
   const [locationSearchBusy, setLocationSearchBusy] = useState(false);
   const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
   const [campuses, setCampuses] = useState<Campus[]>([]);
+  // What the server last told us — saves send only the difference from this.
+  const [baseline, setBaseline] = useState<{ draft: SettingsDraft; menuVersion: number } | null>(null);
+  const [conflict, setConflict] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     if (!getToken('shop')) {
@@ -79,11 +126,30 @@ export default function Settings() {
       return;
     }
     Promise.all([
-      api<{ shop: ShopProfile & { printOptions: Options; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
+      api<{ shop: ShopProfile & { printOptions: StoredOptions; printOptionsVersion: number; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
       api<{ campuses: Campus[] }>('/api/public/campuses'),
     ])
       .then(([r, campusResult]) => {
-        setOpts(r.shop.printOptions);
+        setOpts(toRows(r.shop.printOptions));
+        setBaseline({
+          menuVersion: r.shop.printOptionsVersion,
+          draft: {
+            name: r.shop.name,
+            address: r.shop.address,
+            campusId: r.shop.campusId,
+            latitude: r.shop.latitude,
+            longitude: r.shop.longitude,
+            checkInRadiusM: r.shop.checkInRadiusM,
+            counterCapacity: r.shop.counterCapacity,
+            revealGraceSeconds: r.shop.revealGraceSeconds,
+            autoAssignEnabled: r.shop.autoAssignEnabled,
+            counterUpiVpa: r.shop.counterUpiVpa,
+            counterUpiPayeeName: r.shop.counterUpiPayeeName,
+            printOptions: r.shop.printOptions,
+          },
+        });
+        setConflict(false);
+        setError('');
         setCampuses(campusResult.campuses);
         setProfile({
           name: r.shop.name,
@@ -106,7 +172,7 @@ export default function Settings() {
         setAutoAssign(r.shop.autoAssignEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
-  }, [navigate]);
+  }, [navigate, reloadTick]);
 
   if (!opts) {
     return (
@@ -117,10 +183,13 @@ export default function Settings() {
     );
   }
 
-  const setPaper = (i: number, patch: Partial<Paper>) =>
+  const setPaper = (i: number, patch: Partial<PaperRow>) =>
     setOpts({ ...opts, papers: opts.papers.map((p, idx) => (idx === i ? { ...p, ...patch } : p)) });
-  const setBinding = (i: number, patch: Partial<Binding>) =>
+  const setBinding = (i: number, patch: Partial<BindingRow>) =>
     setOpts({ ...opts, bindings: opts.bindings.map((b, idx) => (idx === i ? { ...b, ...patch } : b)) });
+  const priceErrorsPresent = opts.papers.some((p) => p.label.trim() && Object.values(paperErrors(p)).some(Boolean))
+    || opts.bindings.some((b) => b.label.trim() && Object.values(bindingErrors(b)).some(Boolean));
+  const locationHint = profile ? coordinateWarning(profile.latitude, profile.longitude) : null;
 
   function captureShopLocation() {
     if (!navigator.geolocation) {
@@ -224,40 +293,66 @@ export default function Settings() {
       setError('Enter both latitude and longitude, or choose the entrance on the map.');
       return;
     }
-    // clean up: drop empty-label rows, ensure ids
-    const papers = opts.papers
-      .filter((p) => p.label.trim())
-      .map((p) => ({ ...p, id: p.id || slug(p.label), bwPaise: p.bwPaise || 0 }));
-    const bindings = opts.bindings.filter((b) => b.label.trim()).map((b) => ({ ...b, id: b.id || slug(b.label) }));
-    if (papers.length === 0) {
+    if (!baseline) return;
+    // clean up: drop empty-label rows, give new rows unique ids, convert text -> paise
+    const labelled = opts.papers.filter((p) => p.label.trim());
+    if (labelled.length === 0) {
       setError('Add at least one paper type.');
       return;
     }
+    if (priceErrorsPresent) {
+      setError('Fix the highlighted prices before saving.');
+      return;
+    }
+    // "none" is reserved: it is always offered implicitly as no binding.
+    const taken = new Set(['none', ...labelled.map((p) => p.id), ...opts.bindings.filter((b) => b.label.trim()).map((b) => b.id)]
+      .filter(Boolean).map((id) => id.toLowerCase()));
+    const papers = labelled.map((p) => ({
+      id: p.id || uniqueId(p.label, taken),
+      label: p.label.trim(),
+      bwPaise: parseRupees(p.bw, { required: true }).paise ?? 0,
+      colorPaise: parseRupees(p.color, { required: false }).paise ?? null,
+    }));
+    const bindings = opts.bindings.filter((b) => b.label.trim()).map((b) => ({
+      id: b.id || uniqueId(b.label, taken),
+      label: b.label.trim(),
+      paise: parseRupees(b.price, { required: true }).paise ?? 0,
+    }));
+    const draft: SettingsDraft = {
+      name: profile.name,
+      address: profile.address,
+      campusId: profile.campusId,
+      latitude: profile.latitude,
+      longitude: profile.longitude,
+      checkInRadiusM: profile.checkInRadiusM,
+      counterCapacity: profile.counterCapacity,
+      revealGraceSeconds: profile.revealGraceSeconds,
+      autoAssignEnabled: autoAssign,
+      counterUpiVpa: profile.counterUpiVpa,
+      counterUpiPayeeName: profile.counterUpiPayeeName,
+      printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
+    };
+    // Only what changed: re-sending untouched fields would unpublish a verified
+    // shop and let a stale tab overwrite another tab's edits.
+    const patch = buildSettingsPatch(baseline.draft, draft, baseline.menuVersion);
     setSaving(true);
     setError('');
     try {
-      await api('/api/shop/me', {
-        method: 'PATCH',
-        role: 'shop',
-        body: {
-          name: profile.name,
-          address: profile.address,
-          campusId: profile.campusId,
-          latitude: profile.latitude,
-          longitude: profile.longitude,
-          checkInRadiusM: profile.checkInRadiusM,
-          counterCapacity: profile.counterCapacity,
-          revealGraceSeconds: profile.revealGraceSeconds,
-          printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
-          autoAssignEnabled: autoAssign,
-          counterUpiVpa: profile.counterUpiVpa,
-          counterUpiPayeeName: profile.counterUpiPayeeName,
-        },
-      });
-      setOpts({ papers, bindings, duplexEnabled: opts.duplexEnabled });
+      if (Object.keys(patch).length > 0) {
+        const response = await api<{ shop: { printOptionsVersion: number } }>('/api/shop/me', {
+          method: 'PATCH',
+          role: 'shop',
+          body: patch,
+        });
+        setBaseline({ draft, menuVersion: response.shop.printOptionsVersion });
+      }
+      setOpts(toRows(draft.printOptions));
       setSaved(true);
       setTimeout(() => setSaved(false), 1600);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && (err.body as { code?: string } | undefined)?.code === 'SETTINGS_CHANGED_ELSEWHERE') {
+        setConflict(true);
+      }
       setError(err instanceof Error ? err.message : 'Only the owner can change settings');
     } finally {
       setSaving(false);
@@ -420,6 +515,7 @@ export default function Settings() {
                 <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
               </>
             )}
+            {locationHint && <p className="warn-note" role="status">{locationHint}</p>}
             <details className="location-coordinates">
               <summary>Enter coordinates manually</summary>
               <p className="dim">Optional fallback: paste a latitude and longitude from Google Maps.</p>
@@ -486,35 +582,68 @@ export default function Settings() {
       <div className="settings-surface">
         <div className="row between">
           <h2 style={{ margin: 0 }}>Paper types &amp; price</h2>
-          <button className="small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bwPaise: 200, colorPaise: null }] })}>+ Add paper</button>
+          <button className="small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bw: '2.00', color: '' }] })}>+ Add paper</button>
         </div>
         <p className="dim" style={{ marginTop: 4 }}>Leave the colour price blank if that paper is black &amp; white only.</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto', gap: 10, fontSize: '0.72rem', color: 'var(--pencil)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 8 }}>
           <span>Name</span><span>₹ B/W / page</span><span>₹ Colour / page</span><span></span>
         </div>
-        {opts.papers.map((p, i) => (
-          <div key={i} className="opt-row">
-            <input type="text" placeholder="e.g. College sheet" value={p.label} onChange={(e) => setPaper(i, { label: e.target.value })} />
-            <input type="number" min={0} step={0.5} value={rupees(p.bwPaise)} onChange={(e) => setPaper(i, { bwPaise: toPaise(e.target.value) ?? 0 })} />
-            <input type="number" min={0} step={0.5} placeholder="—" value={rupees(p.colorPaise)} onChange={(e) => setPaper(i, { colorPaise: toPaise(e.target.value) })} />
-            <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, papers: opts.papers.filter((_, idx) => idx !== i) })}>×</button>
-          </div>
-        ))}
+        {opts.papers.map((p, i) => {
+          const errors = paperErrors(p);
+          return (
+            <div key={i} className="opt-row">
+              <input type="text" aria-label="Paper name" placeholder="e.g. College sheet" value={p.label} onChange={(e) => setPaper(i, { label: e.target.value })} />
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label={`B/W price per page for ${p.label || 'paper'}`}
+                aria-invalid={Boolean(errors.bw)}
+                value={p.bw}
+                onChange={(e) => setPaper(i, { bw: typePrice(p.bw, e.target.value) })}
+                onBlur={() => setPaper(i, { bw: formatRupeesField(p.bw) })}
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label={`Colour price per page for ${p.label || 'paper'}`}
+                aria-invalid={Boolean(errors.color)}
+                placeholder="—"
+                value={p.color}
+                onChange={(e) => setPaper(i, { color: typePrice(p.color, e.target.value) })}
+                onBlur={() => setPaper(i, { color: formatRupeesField(p.color) })}
+              />
+              <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, papers: opts.papers.filter((_, idx) => idx !== i) })}>×</button>
+              {(errors.bw || errors.color) && <p className="opt-error" role="alert">{errors.bw ?? errors.color}</p>}
+            </div>
+          );
+        })}
       </div>
 
       <div className="settings-surface">
         <div className="row between">
           <h2 style={{ margin: 0 }}>Binding &amp; finishing</h2>
-          <button className="small" onClick={() => setOpts({ ...opts, bindings: [...opts.bindings, { id: '', label: '', paise: 0 }] })}>+ Add binding</button>
+          <button className="small" onClick={() => setOpts({ ...opts, bindings: [...opts.bindings, { id: '', label: '', price: '0.00' }] })}>+ Add binding</button>
         </div>
         <p className="dim" style={{ marginTop: 4 }}>"None" is always offered. Add extras like stapling or spiral.</p>
-        {opts.bindings.map((b, i) => (
-          <div key={i} className="opt-row" style={{ gridTemplateColumns: '1.4fr 1fr auto' }}>
-            <input type="text" placeholder="e.g. Spiral binding" value={b.label} onChange={(e) => setBinding(i, { label: e.target.value })} />
-            <input type="number" min={0} step={1} value={rupees(b.paise)} onChange={(e) => setBinding(i, { paise: toPaise(e.target.value) ?? 0 })} />
-            <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, bindings: opts.bindings.filter((_, idx) => idx !== i) })}>×</button>
-          </div>
-        ))}
+        {opts.bindings.map((b, i) => {
+          const errors = bindingErrors(b);
+          return (
+            <div key={i} className="opt-row" style={{ gridTemplateColumns: '1.4fr 1fr auto' }}>
+              <input type="text" aria-label="Binding name" placeholder="e.g. Spiral binding" value={b.label} onChange={(e) => setBinding(i, { label: e.target.value })} />
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label={`Price for ${b.label || 'binding'}`}
+                aria-invalid={Boolean(errors.price)}
+                value={b.price}
+                onChange={(e) => setBinding(i, { price: typePrice(b.price, e.target.value) })}
+                onBlur={() => setBinding(i, { price: formatRupeesField(b.price) })}
+              />
+              <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, bindings: opts.bindings.filter((_, idx) => idx !== i) })}>×</button>
+              {errors.price && <p className="opt-error" role="alert">{errors.price}</p>}
+            </div>
+          );
+        })}
       </div>
 
       <div className="settings-surface row between">
@@ -526,10 +655,16 @@ export default function Settings() {
       </div>
 
       <div className="row" style={{ marginTop: 8 }}>
-        <button disabled={saving || !profile?.name.trim() || !profile.address.trim()} onClick={save}>{saving ? 'Saving…' : 'Save all changes'}</button>
+        <button disabled={saving || priceErrorsPresent || !profile?.name.trim() || !profile.address.trim()} onClick={save}>{saving ? 'Saving…' : 'Save all changes'}</button>
         {saved && <span className="stamp green">saved ✓</span>}
       </div>
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      {conflict && (
+        <div className="row" style={{ marginTop: 6 }}>
+          <button className="secondary small" onClick={() => setReloadTick((n) => n + 1)}>Reload latest settings</button>
+          <span className="dim">Your unsaved edits on this page will be replaced.</span>
+        </div>
+      )}
       <p className="dim" style={{ marginTop: 8 }}>Note: a paper/binding only appears to students if a printer that's marked online has it loaded (set that on the Printers page).</p>
 
       {getShopRole() === 'owner' && <StaffSection />}

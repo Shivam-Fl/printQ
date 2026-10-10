@@ -11,6 +11,7 @@ import { loginLimiter, otpRequestLimiter, otpVerifyLimiter } from '../../middlew
 import { validateBody } from '../../middleware/validate.js';
 import { emailProvider } from '../../providers/email/index.js';
 import { logger } from '../../lib/logger.js';
+import { invalidatePublicCaches } from '../public/cache.js';
 
 export const adminRouter = Router();
 
@@ -325,6 +326,7 @@ adminRouter.post(
       await tx.adminAuditEvent.create({ data: audit(req.admin!.id, 'shop.rejected', 'shop', id) });
       return updated;
     });
+    invalidatePublicCaches();
     res.json({ shop: rejected });
   }),
 );
@@ -348,6 +350,7 @@ adminRouter.post(
       await tx.adminAuditEvent.create({ data: audit(req.admin!.id, 'shop.published', 'shop', id) });
       return updated;
     });
+    invalidatePublicCaches();
     res.json({ shop: published });
   }),
 );
@@ -368,6 +371,7 @@ adminRouter.post(
       await tx.adminAuditEvent.create({ data: audit(req.admin!.id, 'shop.unpublished', 'shop', id) });
       return updated;
     });
+    invalidatePublicCaches();
     res.json({ shop: unpublished });
   }),
 );

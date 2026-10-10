@@ -21,10 +21,13 @@ import { scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { distanceMeters, isWithinRadius, type Coordinates } from '../../lib/geo.js';
 import { reachablePrinterIds } from '../shops/availability.js';
 import { isCounterCodeAvailable } from './visibility.js';
-import { loadShopQueue, syncShopQueue } from './bands.js';
+import { loadShopQueue, reconcileShopQueue, syncShopQueue, type ShopQueue } from './bands.js';
+import { runInBackground } from '../../lib/background.js';
 
 const leadMs = () => env.SCHEDULE_LEAD_MINUTES * 60_000;
 const MAX_LOCATION_AGE_MS = 90_000;
+export const FUTURE_LOCATION_MESSAGE =
+  'Your phone’s clock or location time looks wrong (it is in the future). Fix the date and time in your phone settings, then check in again.';
 const MAX_LOCATION_ACCURACY_M = 100;
 
 export interface ArrivalProof extends Coordinates {
@@ -54,12 +57,18 @@ export interface JobLiveMetrics {
 }
 
 const NOT_IN_LINE: JobLiveMetrics = { position: null, etaMinutes: null, band: null, revealDeadlineAt: null };
+/** Fallback when the post-commit queue read failed: the client refetches position/band. */
+const NOT_IN_LINE_QUEUED = NOT_IN_LINE;
 
 /** Current student-facing queue position/ETA/band, also used as a socket fallback. */
 export async function getJobLiveMetrics(jobId: string): Promise<JobLiveMetrics> {
   const target = await prisma.job.findUnique({ where: { id: jobId }, select: { shopId: true, status: true } });
   if (!target || !ACTIVE_QUEUE_STATUSES.includes(target.status as JobStatus)) return NOT_IN_LINE;
-  const queue = await loadShopQueue(prisma, target.shopId);
+  return liveMetricsFromQueue(await loadShopQueue(prisma, target.shopId), jobId);
+}
+
+/** A job's position/ETA/band from an already-loaded shop queue (no extra queries). */
+export function liveMetricsFromQueue(queue: ShopQueue, jobId: string): JobLiveMetrics {
   const entry = queue.entries.find((e) => e.job.id === jobId);
   if (!entry) return NOT_IN_LINE;
   return {
@@ -87,6 +96,7 @@ export async function recommendPrinter(
         status: { in: ACTIVE_QUEUE_STATUSES as JobStatus[] },
         ...(excludeJobId ? { id: { not: excludeJobId } } : {}),
       },
+      select: { id: true, assignedPrinterId: true, pagesPerCopy: true, specs: true },
     }),
     reachablePrinterIds(shopId),
   ]);
@@ -110,9 +120,13 @@ export async function recommendPrinter(
  * authenticated job endpoint, which only returns it in the revealed band.
  */
 export async function emitQueueUpdate(shopId: string): Promise<void> {
-  await syncShopQueue(shopId);
-  const queue = await loadShopQueue(prisma, shopId);
+  const reconciled = await reconcileShopQueue(shopId);
+  await reconciled.dispatched;
+  publishQueueSnapshots(shopId, reconciled.queue);
+}
 
+/** Fan a loaded queue out to the shop dashboard and every queued student (socket only, no I/O wait). */
+function publishQueueSnapshots(shopId: string, queue: ShopQueue): void {
   const snapshot = queue.entries.map(({ job, position, band, etaMinutes }) => ({
     jobId: job.id,
     status: job.status,
@@ -243,10 +257,21 @@ export async function advancePrinterQueue(printerId: string, shopId: string): Pr
  * Join the physical walk-in line. Repeated taps are idempotent, and printer
  * eligibility is checked at arrival rather than hours earlier at upload time.
  */
-export async function checkInJob(jobId: string, studentId: string, arrival: ArrivalProof): Promise<Job> {
-  const job = await prisma.job.findFirst({ where: { id: jobId, studentId } });
+export async function checkInJob(
+  jobId: string,
+  studentId: string,
+  arrival: ArrivalProof,
+): Promise<Job & { live: JobLiveMetrics }> {
+  // One round trip: the job (ownership in the WHERE clause) and the shop's
+  // check-in geometry come back together via a JOIN.
+  const job = await prisma.job.findFirst({
+    where: { id: jobId, studentId },
+    include: { shop: { select: { latitude: true, longitude: true, checkInRadiusM: true } } },
+    relationLoadStrategy: 'join',
+  });
   if (!job) throw notFound();
-  if (job.status === 'queued') return job;
+  const { shop, ...jobRow } = job;
+  if (job.status === 'queued') return { ...jobRow, live: await getJobLiveMetrics(job.id) };
   if (job.status !== 'awaiting_arrival' && job.status !== 'no_show' && job.status !== 'requeued') {
     throw conflict('This order cannot join the live line in its current state');
   }
@@ -257,20 +282,19 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
   if (!paymentReady) throw conflict('This order is not prepared for counter payment yet');
 
   const locationAge = Date.now() - arrival.measuredAt.getTime();
-  if (locationAge < -10_000 || locationAge > MAX_LOCATION_AGE_MS) {
+  if (locationAge < -10_000) {
+    throw conflict(FUTURE_LOCATION_MESSAGE);
+  }
+  if (locationAge > MAX_LOCATION_AGE_MS) {
     throw conflict('Your location reading is stale. Check your location again at the shop entrance.');
   }
-  const shop = await prisma.shop.findUnique({
-    where: { id: job.shopId },
-    select: { latitude: true, longitude: true, checkInRadiusM: true },
-  });
   if (shop?.latitude == null || shop.longitude == null) {
     throw conflict('This shop has not enabled secure arrival check-in. Show your counter code to staff.');
   }
   const requiredAccuracyM = Math.min(MAX_LOCATION_ACCURACY_M, shop.checkInRadiusM);
   if (arrival.accuracyM > requiredAccuracyM) {
     throw conflict(
-      `Your phone location is accurate to about ${Math.round(arrival.accuracyM)} m, but this shop uses a ${shop.checkInRadiusM} m check-in zone. Enable precise location near the entrance and retry.`,
+      `Your phone location is accurate to about ${Math.round(arrival.accuracyM)} m, but check-in needs ${requiredAccuracyM} m or better (this shop’s check-in zone is ${shop.checkInRadiusM} m). Enable precise location near the entrance and retry.`,
     );
   }
   const arrivalDistanceM = distanceMeters(arrival, {
@@ -328,19 +352,39 @@ export async function checkInJob(jobId: string, studentId: string, arrival: Arri
   );
   if (!updated) {
     const current = await prisma.job.findUnique({ where: { id: job.id } });
-    if (current?.status === 'queued') return current;
+    if (current?.status === 'queued') return { ...current, live: await getJobLiveMetrics(current.id) };
     throw conflict('Order state changed, refresh and try again');
   }
 
-  await notifyStudent(job.studentId, {
-    title: 'Checked in at the shop ✓',
-    body: 'You are in the live walk-in line. We will tell you when it is your turn at the counter.',
-    url: `/jobs/${job.id}`,
-    eventKey: `checked-in:${job.id}:${job.checkInCount + 1}`,
+  // Everything below the commit that is not needed to answer the student runs
+  // after the response: FCM / Web Push delivery is network I/O that used to
+  // hold the request for seconds. The transition above (won by exactly one
+  // caller) is the single trigger, and eventKeys keep delivery idempotent.
+  runInBackground('check-in-notify', async () => {
+    publishEvent(`shop:${job.shopId}`, 'queue:arrival', { jobId: job.id });
+    await notifyStudent(job.studentId, {
+      title: 'Checked in at the shop ✓',
+      body: 'You are in the live walk-in line. We will tell you when it is your turn at the counter.',
+      url: `/jobs/${job.id}`,
+      eventKey: `checked-in:${job.id}:${job.checkInCount + 1}`,
+    });
   });
-  publishEvent(`shop:${job.shopId}`, 'queue:arrival', { jobId: job.id });
-  await emitQueueUpdate(job.shopId);
-  return updated;
+
+  // The check-in is COMMITTED. From here nothing may turn it into an error:
+  // the reveal pass is best-effort (coalesced per shop, long tx timeouts) and
+  // the 10 s sweeper is the backstop if it fails.
+  try {
+    // Wins any reveal (short advisory lock) and reads the queue so the
+    // response carries the new place; notifications are dispatched by the pass
+    // itself, in the background, exactly once.
+    const reconciled = await reconcileShopQueue(job.shopId);
+    runInBackground('check-in-queue-fanout', async () => publishQueueSnapshots(job.shopId, reconciled.queue));
+    return { ...updated, live: liveMetricsFromQueue(reconciled.queue, job.id) };
+  } catch (err) {
+    logger.error({ err, jobId: job.id, shopId: job.shopId }, 'check_in_post_commit_sync_failed');
+    runInBackground('check-in-queue-retry', () => emitQueueUpdate(job.shopId));
+    return { ...updated, live: NOT_IN_LINE_QUEUED };
+  }
 }
 
 export type AbsentReason = 'staff' | 'grace_expired';

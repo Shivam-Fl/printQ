@@ -9,7 +9,7 @@ import Topbar from '../../components/Topbar.js';
 import { StudentBandPanel, useNow } from '../../components/QueueBand.js';
 import type { QueueBand } from '@printq/shared';
 
-interface JobDetail {
+export interface JobDetail {
   id: string;
   status: string;
   mode: 'instant' | 'scheduled';
@@ -44,6 +44,32 @@ interface JobDetail {
     counterUpi: { vpa: string; payeeName: string } | null;
   };
   file: { originalName: string; pages: number | null };
+}
+
+/** Shape of POST /api/jobs/:id/check-in (live queue metrics included). */
+export interface CheckInResult {
+  id: string;
+  status: string;
+  position: number | null;
+  etaMinutes: number | null;
+  band: QueueBand | null;
+  revealDeadlineAt: string | null;
+}
+
+/** Optimistic job state straight from the check-in response. */
+export function applyCheckInResult(job: JobDetail, r: CheckInResult): JobDetail {
+  return {
+    ...job,
+    status: r.status,
+    position: r.position,
+    etaMinutes: r.etaMinutes,
+    band: r.band,
+    revealDeadlineAt: r.revealDeadlineAt,
+    absent: false,
+    canCheckIn: false,
+    arrivedAt: job.arrivedAt ?? new Date().toISOString(),
+    checkInCount: job.status === 'queued' ? job.checkInCount : job.checkInCount + 1,
+  };
 }
 
 type PaymentStatus = JobDetail['paymentStatus'];
@@ -203,7 +229,7 @@ export default function JobStatus() {
     setError('');
     try {
       const position = await currentLocation();
-      await api(`/api/jobs/${id}/check-in`, {
+      const res = await api<{ job: CheckInResult }>(`/api/jobs/${id}/check-in`, {
         method: 'POST',
         role: 'student',
         body: {
@@ -214,7 +240,12 @@ export default function JobStatus() {
         },
       });
       setConfirmingArrival(false);
-      await refresh();
+      // The server already answered with the new place: show it immediately and
+      // let the follow-up fetch / socket events reconcile (e.g. the counter code).
+      setJob((prev) => (prev ? applyCheckInResult(prev, res.job) : prev));
+      setPosition(res.job.position);
+      setEta(res.job.etaMinutes);
+      void refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not join the live line');
     } finally {
@@ -293,7 +324,10 @@ export default function JobStatus() {
           <div className="ticket">
             <div className="eyebrow">planned arrival</div>
             <div className="ticket-num" style={{ fontSize: '2rem' }}>{slotLabel(job.scheduledTime!)}</div>
-            <div className="sub">Your order is prepared. Check-in opens shortly before this time, after you reach the shop.</div>
+            <div className="sub">
+              Your order is prepared. <strong>Check-in opens at {slotLabel(job.checkInOpensAt ?? job.scheduledTime!)}</strong>
+              {' '}— tap it once you reach the shop.
+            </div>
           </div>
         )}
         {job.absent && (

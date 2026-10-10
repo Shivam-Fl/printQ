@@ -1,9 +1,10 @@
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
 
 export default function Login() {
   const navigate = useNavigate();
+  const notice = (useLocation().state as { notice?: string } | null)?.notice;
   return (
     <main className="auth-page">
       <div className="auth-page-main">
@@ -12,6 +13,7 @@ export default function Login() {
           <h1>Your print queue,<br />in your pocket.</h1>
           <p>Sign in once to prepare orders remotely, check in on arrival and keep one stable counter code.</p>
         </div>
+        {notice && <p className="auth-notice" role="status">{notice}</p>}
         <PhoneLogin onDone={() => navigate('/home', { replace: true })} />
       </div>
       <aside className="auth-aside">

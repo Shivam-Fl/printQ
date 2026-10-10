@@ -1,7 +1,16 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Topbar from '../../components/Topbar.js';
 
 export default function NotFound() {
+  // SPA soft-404: tell crawlers not to index whatever URL landed here.
+  useEffect(() => {
+    const meta = document.createElement('meta');
+    meta.name = 'robots';
+    meta.content = 'noindex';
+    document.head.appendChild(meta);
+    return () => meta.remove();
+  }, []);
   return (
     <main className="page legal-page">
       <Topbar />
