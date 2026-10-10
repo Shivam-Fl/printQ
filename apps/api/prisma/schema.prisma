@@ -190,7 +190,11 @@ model Shop {
   /// nearby discovery; students' coordinates are never persisted.
   latitude          Float?
   longitude         Float?
-  checkInRadiusM    Int      @default(50)
+  checkInRadiusM    Int      @default(200)
+  /// How many students the counter can serve at once (1-20). Drives queue bands.
+  counterCapacity   Int      @default(5)
+  /// Seconds a revealed student has to reach the counter (30/60/120).
+  revealGraceSeconds Int     @default(60)
   locationUpdatedAt DateTime?
   payoutSchedule    PayoutSchedule @default(daily)
   razorpayLinkedAccountId String?  @unique
@@ -592,8 +596,19 @@ model Job {
   releaseCodeEncrypted   String?
   releaseCodeGeneratedAt DateTime?
 
-  /// set once when the "almost your turn" alert has been sent
+  /// Retired by queue bands (kept for old rows; migration backfills revealedAt from it).
   nearFrontNotifiedAt DateTime?
+  /// Entered the REVEALED band (code visible). Reveals are never undone while
+  /// the job stays in line; cleared on absent / fresh check-in.
+  revealedAt          DateTime?
+  /// revealedAt + shop grace. Null = no absent timer (not revealed, or staff
+  /// has the job in hand via counter-code lookup).
+  revealDeadlineAt    DateTime?
+  /// Set once per entry into the ARRIVING band (de-duplicates the heads-up).
+  arrivingNotifiedAt  DateTime?
+  /// Marked absent (grace expired or staff). Cleared by the next check-in.
+  absentAt            DateTime?
+  absentReason        String?
 
   noShowCount Int       @default(0)
   noShowAt    DateTime?
@@ -634,6 +649,7 @@ model Job {
   @@index([assignedPrinterId, status, queuedAt])
   @@index([studentId, createdAt])
   @@index([status, otpExpiresAt])
+  @@index([status, revealDeadlineAt])
 }
 
 /// Append-only audit log of every state transition.
