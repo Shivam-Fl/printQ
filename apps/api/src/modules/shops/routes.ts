@@ -804,22 +804,21 @@ shopRouter.post(
       return;
     }
     if (result.job!.counterPaymentConfirmedAt && result.job!.counterPaymentMethod) {
-      await prisma.paymentEvent.upsert({
-        where: { providerEventId: `counter_payment_${result.job!.id}` },
-        create: {
-          provider: 'pay_at_shop',
-          providerEventId: `counter_payment_${result.job!.id}`,
-          jobId: result.job!.id,
-          payload: {
-            method: result.job!.counterPaymentMethod,
-            amountPaise: result.job!.counterPaymentAmountPaise ?? result.job!.totalPaise,
-            confirmedByShopUserId: result.job!.counterPaymentConfirmedById,
-            confirmedAt: result.job!.counterPaymentConfirmedAt.toISOString(),
-            reference: result.job!.counterPaymentReference,
-          },
-        },
-        update: {},
-      });
+      // ONE statement, idempotent on the unique providerEventId (Prisma's
+      // upsert/createMany would add BEGIN/COMMIT and extra reads). Tagged
+      // template: every value is a bound parameter.
+      const counterPaymentPayload = {
+        method: result.job!.counterPaymentMethod,
+        amountPaise: result.job!.counterPaymentAmountPaise ?? result.job!.totalPaise,
+        confirmedByShopUserId: result.job!.counterPaymentConfirmedById,
+        confirmedAt: result.job!.counterPaymentConfirmedAt.toISOString(),
+        reference: result.job!.counterPaymentReference,
+      };
+      await prisma.$executeRaw`
+        INSERT INTO "PaymentEvent" ("id", "provider", "providerEventId", "jobId", "payload")
+        VALUES (${randomUUID()}, 'pay_at_shop', ${`counter_payment_${result.job!.id}`}, ${result.job!.id},
+                CAST(${JSON.stringify(counterPaymentPayload)} AS jsonb))
+        ON CONFLICT ("providerEventId") DO NOTHING`;
     }
     res.json({ ok: true, job: { id: result.job!.id, status: result.job!.status } });
   }),

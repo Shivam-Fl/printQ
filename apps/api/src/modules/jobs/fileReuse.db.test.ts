@@ -148,11 +148,13 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     expect(b.res.status).toBe(201);
 
     expect((await call(`/api/jobs/${a.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const afterFirst = await fileRow(file.id);
     expect(afterFirst.deletionScheduledAt).toBeNull();
     expect(afterFirst.deleteAfter!.getTime()).toBeGreaterThan(Date.now() + 23 * 3_600_000);
 
     expect((await call(`/api/jobs/${b.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const afterLast = await fileRow(file.id);
     expect(afterLast.deletionScheduledAt).not.toBeNull();
     const msLeft = afterLast.deleteAfter!.getTime() - Date.now();
@@ -175,6 +177,7 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
 
     // ...and once the remaining job ends, the same call starts the 10-minute clock
     expect((await call(`/api/jobs/${other.body.job!.id}/cancel`, { method: 'POST' })).status).toBe(200);
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     expect((await fileRow(file.id)).deletionScheduledAt).not.toBeNull();
   });
 
@@ -194,6 +197,7 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     const file = await newFile();
     const only = await orderOn(file.id);
     await call(`/api/jobs/${only.body.job!.id}/cancel`, { method: 'POST' });
+    await drainBackground(); // cancel follow-ups (file clock, refund, queue sync) run after the response
     const again = await orderOn(file.id);
     expect(again.res.status).toBe(409);
     expect(again.body.error).toMatch(/about to be deleted/i);

@@ -292,6 +292,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       sent.notes.length = 0;
       const out = await releaseFor(line[0]!.jobId, await code(line[0]!.jobId));
       expect(out.ok).toBe(true);
+      await drainBackground(); // release re-syncs the line after responding
       expect((await getJobLiveMetrics(line[2]!.jobId)).band).toBe('revealed');
       expect(notesFor(line[2]!.studentId, 'your turn')).toHaveLength(1);
       expect((await row(line[2]!.jobId)).revealDeadlineAt).not.toBeNull();
@@ -306,6 +307,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       for (let i = 0; i < 3; i += 1) line.push(await joined());
       const res = await api(`/api/jobs/${line[1]!.jobId}/cancel`, line[1]!.token, { method: 'POST' });
       expect(res.status).toBe(200);
+      await drainBackground(); // cancel re-syncs the line after responding
       expect((await getJobLiveMetrics(line[2]!.jobId)).band).toBe('revealed');
       expect(notesFor(line[2]!.studentId, 'your turn')).toHaveLength(1);
     });
@@ -319,6 +321,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       sent.notes.length = 0;
       const res = await api(`/api/shop/jobs/${line[0]!.jobId}/no-show`, staffToken, { method: 'POST' });
       expect(res.status).toBe(200);
+      await drainBackground(); // notification + line re-sync run after the response
       const job = await row(line[0]!.jobId);
       expect(job).toMatchObject({
         status: 'awaiting_arrival', queuedAt: null, revealedAt: null, revealDeadlineAt: null,
@@ -389,6 +392,7 @@ describe.runIf(dbReady)('queue bands, grace and absent (database)', () => {
       sent.events.length = 0;
       const prompt = await releaseByOtp(shopId, await code(a.jobId), ownerId);
       expect(prompt.requiresPaymentConfirmation).toBe(true);
+      await drainBackground();
       // The dashboard and the student must stop showing the stale countdown.
       const pushed = sent.events.filter((e) => e.room === `shop:${shopId}` && e.event === 'queue:update');
       expect(pushed.length).toBeGreaterThan(0);

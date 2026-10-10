@@ -1,12 +1,28 @@
-import type { CounterPaymentMethod, Job } from '@prisma/client';
+import type { CounterPaymentMethod, Job, Prisma } from '@prisma/client';
 import type { JobSpecs, JobStatus } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { digestReleaseCode, verifyOtpHash } from '../../lib/otp.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
-import { dispatchJob, emitQueueUpdate, getJobLiveMetrics, recommendPrinter } from './engine.js';
+import { runInBackground } from '../../lib/background.js';
+import { ACTIVE_QUEUE_JOBS, buildShopQueue } from './bands.js';
+import { dispatchJob, emitQueueUpdate, liveMetricsFromQueue, rankFromSnapshot } from './engine.js';
 import { isNormalCounterRelease } from './visibility.js';
+
+/** What the release decision needs about the shop, loaded in the same statement as the job. */
+const RELEASE_SHOP_SELECT = {
+  id: true,
+  autoAssignEnabled: true,
+  counterUpiVpa: true,
+  counterUpiVerifiedAt: true,
+  counterCapacity: true,
+  revealGraceSeconds: true,
+  printers: true,
+  agents: { where: { status: 'online' as const }, select: { id: true, connectedPrinterIds: true } },
+  jobs: ACTIVE_QUEUE_JOBS,
+} satisfies Prisma.ShopSelect;
+type ReleaseShop = Prisma.ShopGetPayload<{ select: typeof RELEASE_SHOP_SELECT }>;
 
 export interface ReleaseResult {
   ok: boolean;
@@ -60,14 +76,10 @@ export async function releaseByOtp(
   overrideQueue = false,
   paymentConfirmation?: { method: CounterPaymentMethod; reference?: string },
 ): Promise<ReleaseResult> {
-  const shop = await prisma.shop.findUnique({
-    where: { id: shopId },
-    select: { id: true, autoAssignEnabled: true, counterUpiVpa: true, counterUpiVerifiedAt: true },
-  });
-  if (!shop) throw notFound();
-
   const digest = digestReleaseCode(shopId, otp);
-  let matched: Job | null = await prisma.job.findFirst({
+  // ONE statement: the matched job plus everything the decision needs about
+  // its shop (settings, printers, online agents, the current line) via a JOIN.
+  const found = await prisma.job.findFirst({
     where: {
       shopId,
       releaseCodeDigest: digest,
@@ -82,7 +94,16 @@ export async function releaseByOtp(
       },
     },
     orderBy: { createdAt: 'desc' },
+    include: { shop: { select: RELEASE_SHOP_SELECT } },
+    relationLoadStrategy: 'join',
   });
+  let matched: Job | null = null;
+  let shop: ReleaseShop | null = null;
+  if (found) {
+    const { shop: joined, ...row } = found;
+    matched = row;
+    shop = joined;
+  }
 
   // Rolling-deploy compatibility for old jobs whose temporary OTP was argon2
   // hashed before stable release codes existed.
@@ -96,8 +117,10 @@ export async function releaseByOtp(
         break;
       }
     }
+    if (matched) shop = await prisma.shop.findUnique({ where: { id: shopId }, select: RELEASE_SHOP_SELECT });
   }
   if (!matched) throw badRequest('Invalid OTP', 'OTP_INVALID');
+  if (!shop) throw notFound();
   if (!matched.releaseCodeDigest && matched.otpExpiresAt && matched.otpExpiresAt.getTime() < Date.now()) {
     throw conflict('This OTP has expired');
   }
@@ -108,27 +131,29 @@ export async function releaseByOtp(
     throw conflict('This order is already printed and ready for pickup');
   }
 
-  // Counter-code lookup means the student is physically present: disarm the
-  // absent timer. This single conditional UPDATE races the expiry sweeper's
-  // guarded transition; exactly one wins. If the sweeper won, re-read so the
-  // release continues from the job's true state (awaiting_arrival, which
-  // counter release supports and which asks staff to confirm the override).
-  if (matched.status === 'queued' || matched.status === 'notified') {
+  // Counter-code lookup means the student is physically present. When this
+  // call cannot finish the release (staff must still confirm payment, a
+  // printer, or serving out of turn) disarm the absent timer so the student
+  // is not marked absent while staff are mid-flow. A COMPLETING release needs
+  // no separate write: its transition changes the status, which the expiry
+  // sweeper's guarded UPDATE can never beat (exactly one of them wins).
+  const matchedJob = matched;
+  const disarmAbsentTimer = async (): Promise<void> => {
+    if (matchedJob.status !== 'queued' && matchedJob.status !== 'notified') return;
+    if (matchedJob.revealDeadlineAt === null) return;
     const disarmed = await prisma.job.updateMany({
-      where: { id: matched.id, shopId, status: { in: ['queued', 'notified'] } },
+      where: { id: matchedJob.id, shopId, status: { in: ['queued', 'notified'] } },
       data: { revealDeadlineAt: null },
     });
-    if (disarmed.count === 0) {
-      matched = (await prisma.job.findFirst({ where: { id: matched.id, shopId } })) ?? matched;
-    } else if (matched.revealDeadlineAt !== null) {
-      // Tell the dashboard and the student so the stale countdown disappears.
-      await emitQueueUpdate(shopId);
-    }
-  }
+    // Tell the dashboard and the student so the stale countdown disappears.
+    if (disarmed.count > 0) runInBackground('release-disarm-fanout', () => emitQueueUpdate(shopId));
+  };
 
-  const live = await getJobLiveMetrics(matched.id);
+  const queue = buildShopQueue(shop, shop.printers, shop.jobs);
+  const live = liveMetricsFromQueue(queue, matched.id);
   const inNormalReleaseWindow = isNormalCounterRelease(matched.status, live.band);
   if (!inNormalReleaseWindow && !overrideQueue) {
+    await disarmAbsentTimer();
     return {
       ok: false,
       requiresQueueOverride: true,
@@ -142,7 +167,7 @@ export async function releaseByOtp(
 
   // Final printer choice. The provisional assignment from queue time is
   // re-validated — printers can go offline/jam while the student walks over.
-  const { eligible, recommended } = await recommendPrinter(shopId, specs, matched.pagesPerCopy, matched.id);
+  const { eligible, recommended } = rankFromSnapshot(shop.printers, shop.agents, shop.jobs, specs, matched.pagesPerCopy, matched.id);
   let printerId = manualPrinterId ?? null;
   if (!printerId) {
     const stillEligible = eligible.some((e) => e.printerId === matched!.assignedPrinterId);
@@ -151,6 +176,7 @@ export async function releaseByOtp(
     if (!printerId || (!shop.autoAssignEnabled && !manualPrinterId)) {
       // manual mode always confirms via dropdown; auto mode falls back to it
       // when nothing is eligible (never fail silently — printQ.md §5.4)
+      await disarmAbsentTimer();
       return {
         ok: false,
         requiresManualAssignment: true,
@@ -172,6 +198,7 @@ export async function releaseByOtp(
   const isCounterDue = matched.paymentProvider === 'pay_at_shop' && matched.paymentStatus === 'counter_due';
   const isLegacyCashDue = matched.paymentProvider === 'cash' && matched.paymentStatus === 'cash_due';
   if ((isCounterDue || isLegacyCashDue) && !paymentConfirmation) {
+    await disarmAbsentTimer();
     return {
       ok: false,
       requiresPaymentConfirmation: true,
@@ -226,13 +253,24 @@ export async function releaseByOtp(
     },
     !inNormalReleaseWindow ? 'COUNTER_QUEUE_OVERRIDE_RELEASE' : undefined,
   );
-  if (!updated) throw conflict('Job state changed, try again');
+  if (!updated) {
+    // Lost the race (e.g. the absent timer moved the job to awaiting_arrival a
+    // moment ago). Re-read so staff get the true state: a recoverable job asks
+    // them to confirm serving it out of turn, anything else is a plain conflict.
+    const current = await prisma.job.findFirst({ where: { id: matched.id, shopId } });
+    if (current && isDirectCounterReleaseRecoverable(current.status as JobStatus) && current.status !== matched.status) {
+      return { ok: false, requiresQueueOverride: true, position: null, queueStatus: current.status, job: current };
+    }
+    throw conflict('Job state changed, try again');
+  }
 
-  await dispatchJob(updated, { type: 'shop', id: shopUserId });
+  await dispatchJob(updated, { type: 'shop', id: shopUserId }, shop.agents);
   publishEvent(`student:${updated.studentId}`, 'job:update', {
     jobId: updated.id,
     status: updated.status,
   });
-  await emitQueueUpdate(shopId);
+  // Re-syncing the line (frees the counter slot, reveals the next student) is a
+  // follow-up: the release is already committed and dispatched.
+  runInBackground('release-queue-sync', () => emitQueueUpdate(shopId));
   return { ok: true, job: updated };
 }

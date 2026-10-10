@@ -25,7 +25,7 @@ export function isWithinRadius(distanceM: number, radiusM: number): boolean {
 
 /** PrintQs is India-only (INR, +91, Razorpay). Generous box incl. Andaman/Nicobar and Lakshadweep. */
 export const INDIA_BOUNDS = { minLat: 6.0, maxLat: 37.5, minLng: 68.0, maxLng: 98.0 } as const;
-export const OUTSIDE_INDIA_MESSAGE = 'That location is outside India — check latitude/longitude';
+export const OUTSIDE_INDIA_MESSAGE = 'That location is outside India â€” check latitude/longitude';
 
 export function isWithinIndia(latitude: number, longitude: number): boolean {
   return latitude >= INDIA_BOUNDS.minLat && latitude <= INDIA_BOUNDS.maxLat
