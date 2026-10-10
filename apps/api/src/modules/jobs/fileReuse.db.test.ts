@@ -178,6 +178,29 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     expect((await fileRow(file.id)).deletionScheduledAt).not.toBeNull();
   });
 
+  it('D3: one file never backs two live orders (concurrent creates -> exactly one), so a printed file is gone at T+10', async () => {
+    const file = await newFile();
+    const results = await Promise.all([orderOn(file.id), orderOn(file.id), orderOn(file.id)]);
+    expect(results.filter((r) => r.res.status === 201)).toHaveLength(1);
+    expect(await prisma.job.count({ where: { fileId: file.id } })).toBe(1);
+    const winner = results.find((r) => r.res.status === 201)!;
+    // print it: nothing else references the file, so the 10-minute clock starts immediately
+    await prisma.job.update({ where: { id: winner.body.job!.id }, data: { printConfirmedAt: new Date(), status: 'ready_for_pickup' } });
+    await scheduleVerifiedPrintFileDeletion(file.id, new Date());
+    const msLeft = (await fileRow(file.id)).deleteAfter!.getTime() - Date.now();
+    expect(msLeft).toBeLessThanOrEqual(10 * 60_000);
+  });
+
+  it('D3: a legacy requeued/no_show order still counts as a live order on the file', async () => {
+    const file = await newFile();
+    const first = await orderOn(file.id);
+    await prisma.job.update({ where: { id: first.body.job!.id }, data: { status: 'requeued' } });
+    const again = await orderOn(file.id);
+    expect(again.res.status).toBe(409);
+    await scheduleFileDeletion(file.id, new Date());
+    expect((await fileRow(file.id)).deletionScheduledAt).toBeNull();
+  });
+
   it('refuses a new job on a file that already printed, with a clear message', async () => {
     const file = await newFile();
     const first = await orderOn(file.id);

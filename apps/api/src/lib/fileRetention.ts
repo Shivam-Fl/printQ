@@ -49,6 +49,9 @@ export const ACTIVE_FILE_JOB_STATUSES = [
   'notified',
   'otp_verified',
   'printing',
+  // retired timed-OTP states: still recoverable (the student can check in again)
+  'no_show',
+  'requeued',
 ] as const;
 
 /** True while some job still needs the file's content. */

@@ -185,6 +185,22 @@ jobsRouter.post(
         paymentProvider: 'pay_at_shop',
       },
     });
+    // Retention is per printed job, so one file must never back two live
+    // orders. The lock above normally guarantees it; if it ever lapsed and two
+    // creations raced, the later-created row (id breaks ties) withdraws itself.
+    const rival = await prisma.job.findFirst({
+      where: {
+        fileId: file.id,
+        id: { not: job.id },
+        status: { in: [...ACTIVE_FILE_JOB_STATUSES] },
+        OR: [{ createdAt: { lt: job.createdAt } }, { createdAt: job.createdAt, id: { lt: job.id } }],
+      },
+      select: { id: true },
+    });
+    if (rival) {
+      await prisma.job.delete({ where: { id: job.id } });
+      throw conflict(DUPLICATE_ORDER_MESSAGE);
+    }
     if (resolvedCouponCode) await redeemCoupon(resolvedCouponCode);
 
     await preparePayAtShopOrder(job.id);
