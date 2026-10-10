@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import SessionGuard from './components/SessionGuard.js';
 import Toasts from './components/Toasts.js';
 import EnvironmentBanner from './components/EnvironmentBanner.js';
 import Welcome from './pages/student/Welcome.js';
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="/contact" element={<Navigate to="/support" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      <SessionGuard />
       <Toasts />
     </>
   );

@@ -1059,6 +1059,7 @@ tr:last-child td { border-bottom: none; }
 .auth-copy { max-width: 590px; padding: 64px 0 28px; }
 .auth-copy h1 { margin: 0 0 16px; font-size: clamp(2.7rem, 5vw, 4.7rem); line-height: .98; letter-spacing: -.055em; }
 .auth-copy p { max-width: 520px; margin: 0; color: var(--pencil); font-size: 1.04rem; }
+.auth-notice { margin: 0 0 14px; padding: 12px 16px; border: 1px solid var(--rule); border-left: 4px solid var(--highlight); border-radius: 12px; background: var(--highlight-soft); color: var(--ink); font-weight: 600; }
 .auth-card {
   max-width: 540px;
   padding: 28px;

@@ -55,6 +55,21 @@ export function getShopRole(): 'owner' | 'staff' | null {
   return localStorage.getItem('printq:shop:role') as 'owner' | 'staff' | null;
 }
 
+export const STUDENT_SESSION_EXPIRED_EVENT = 'printq:student-session-expired';
+export const STUDENT_SESSION_EXPIRED_MESSAGE = 'Please sign in again.';
+
+/**
+ * Central 401 handling for every student route: after one silent renewal
+ * attempt has failed, tell the app shell (SessionGuard) to go to /login.
+ */
+function expireStudentSession(): void {
+  try {
+    window.dispatchEvent(new Event(STUDENT_SESSION_EXPIRED_EVENT));
+  } catch {
+    /* non-browser environment */
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -130,6 +145,11 @@ async function requestJson<T>(
       if (token) return requestJson<T>(path, options, false);
     }
     if (res.status === 401 && options.role) clearToken(options.role);
+    if (res.status === 401 && options.role === 'student') {
+      // Renewal already failed (or was not possible): the student must sign in again.
+      expireStudentSession();
+      throw new ApiError(401, STUDENT_SESSION_EXPIRED_MESSAGE, data);
+    }
     throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`, data);
   }
   return data as T;
@@ -159,7 +179,10 @@ export async function downloadFile(path: string, role: Role, filename: string): 
       });
     }
   }
-  if (res.status === 401) clearToken(role);
+  if (res.status === 401) {
+    clearToken(role);
+    if (role === 'student') expireStudentSession();
+  }
   if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

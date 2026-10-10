@@ -88,6 +88,48 @@ describe('student session renewal', () => {
     await expect(apiModule.api('/api/jobs', { role: 'student' })).rejects.toMatchObject({ status: 401 });
     expect(storage.has('printq:student:token')).toBe(false);
   });
+
+  it('signals session expiry once renewal fails, with a friendly message instead of "Unauthorized"', async () => {
+    storage.set('printq:student:token', 'garbage');
+    resumeFirebasePhoneSession.mockResolvedValue(null);
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    dispatch.mockClear();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    );
+
+    await expect(apiModule.api('/api/auth/student/me', { role: 'student' })).rejects.toMatchObject({
+      status: 401,
+      message: 'Please sign in again.',
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect((dispatch.mock.calls[0]![0] as unknown as { type: string }).type).toBe(
+      apiModule.STUDENT_SESSION_EXPIRED_EVENT,
+    );
+  });
+
+  it('does not signal expiry when silent renewal succeeds', async () => {
+    storage.set('printq:student:token', 'expired');
+    resumeFirebasePhoneSession.mockResolvedValue('fb');
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    dispatch.mockClear();
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('{}', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'new' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+    await apiModule.api('/api/jobs', { role: 'student' });
+    const types = dispatch.mock.calls.map((c) => (c[0] as unknown as { type: string }).type);
+    expect(types).not.toContain(apiModule.STUDENT_SESSION_EXPIRED_EVENT);
+  });
+
+  it('does not clear or signal for non-student roles', async () => {
+    storage.set('printq:shop:token', 'x');
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    dispatch.mockClear();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 401 }));
+    await expect(apiModule.api('/api/shop/me', { role: 'shop' })).rejects.toMatchObject({ status: 401 });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 });
 
 describe('API base URL configuration', () => {
