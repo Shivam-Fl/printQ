@@ -582,7 +582,13 @@ async function main() {
   assert(skipped.status === 200 && skipped.data.job?.status === 'awaiting_arrival', 'shop removes an absent student without cancelling the prepared order');
   const afterSkipA = await request(`/api/jobs/${missedJobId}`, { token: studentToken });
   const afterSkipB = await request(`/api/jobs/${waitingJobId}`, { token: studentToken });
-  assert(afterSkipA.data.job.position === null && afterSkipA.data.job.otpCode === beforeSkipA.data.job.otpCode, 'skipped order keeps its stable counter code outside the line');
+  // Absent students lose their place AND the on-screen code (only the revealed band sees it);
+  // the stable code itself is unchanged and still finds the order at the counter below.
+  assert(
+    afterSkipA.data.job.position === null && afterSkipA.data.job.otpCode === null
+      && afterSkipA.data.job.absent === true && afterSkipA.data.job.band === null,
+    'absent order leaves the line, hides its code and tells the student to check in again',
+  );
   assert(afterSkipB.data.job.position === 1, 'remaining physical line closes the gap immediately');
 
   const outOfOrderRelease = await request('/api/shop/release', {

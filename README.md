@@ -47,8 +47,7 @@ Everything is in-app first:
 - A stable six-digit **counter code** appears after payment. It is encrypted at rest,
   remains the same through check-in/removal/re-check-in, and lets staff find the paid
   job without making queue order a printer lock.
-- An **"almost your turn" alert** fires when ≤ `NEAR_FRONT_THRESHOLD` (default 5)
-  people are ahead.
+- **Queue bands**: each shop sets a counter capacity (default 5). The first N checked-in students are told to be at the counter (code revealed, grace timer starts), the next N get a "your turn is coming up" heads-up, the rest see their position. Students who miss their grace window are marked absent and re-check-in at the back.
 - **Web Push** reaches the installed PWA even when closed. Enabled out of the box in
   dev (VAPID keys in `.env`); for a fresh setup run `npx web-push generate-vapid-keys`.
 - Login codes print to the API console in dev; wire an SMS provider into

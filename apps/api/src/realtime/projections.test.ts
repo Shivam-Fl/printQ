@@ -7,20 +7,27 @@ const job = {
   status: 'queued',
   assignedPrinterId: 'printer-1',
   updatedAt: new Date('2026-09-18T12:00:00.000Z'),
-  nearFrontNotifiedAt: null,
+  revealedAt: new Date('2026-09-18T11:59:00.000Z'),
   student: { firebaseUid: 'firebase-user-1' },
 } as const;
 
 describe('Firebase realtime projections', () => {
   it('contains queue state only and never exposes document, location, phone, or money fields', () => {
-    const payload = projectionPayload(job, { position: 2, etaMinutes: 4 });
+    const payload = projectionPayload(job, { position: 2, etaMinutes: 4, band: 'revealed' });
     expect(payload.student).toMatchObject({
-      jobId: 'job-1', status: 'queued', position: 2, etaMinutes: 4, counterCodeAvailable: true,
+      jobId: 'job-1', status: 'queued', position: 2, etaMinutes: 4, band: 'revealed', counterCodeAvailable: true,
     });
     expect(payload.shop).toEqual({
-      jobId: 'job-1', status: 'queued', printerId: 'printer-1', position: 2, updatedAt: '2026-09-18T12:00:00.000Z',
+      jobId: 'job-1', status: 'queued', printerId: 'printer-1', position: 2, band: 'revealed', updatedAt: '2026-09-18T12:00:00.000Z',
     });
     expect(JSON.stringify(payload)).not.toMatch(/price|paise|phone|location|latitude|longitude|filename|originalKey/i);
+  });
+
+  it('never signals a code outside the revealed band, even with a stale revealedAt', () => {
+    const arriving = projectionPayload(job, { position: 7, etaMinutes: 4, band: 'arriving' });
+    expect(arriving.student).toMatchObject({ band: 'arriving', counterCodeAvailable: false });
+    const unrevealed = projectionPayload({ ...job, revealedAt: null }, { position: 1, etaMinutes: 0, band: 'revealed' });
+    expect(unrevealed.student).toMatchObject({ counterCodeAvailable: false });
   });
 
   it('writes each projection to a scoped deterministic document path', async () => {

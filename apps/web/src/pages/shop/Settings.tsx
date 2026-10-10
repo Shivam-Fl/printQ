@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getShopRole, getToken } from '../../api.js';
 import { useNavigate } from 'react-router-dom';
+import QueueSettings from '../../components/QueueSettings.js';
 import ShopNav from '../../components/ShopNav.js';
 import ShopLocationPicker from '../../components/ShopLocationPicker.js';
 
@@ -30,6 +31,8 @@ interface ShopProfile {
   latitude: number | null;
   longitude: number | null;
   checkInRadiusM: number;
+  counterCapacity: number;
+  revealGraceSeconds: number;
   locationUpdatedAt: string | null;
   counterUpiVpa: string | null;
   counterUpiPayeeName: string | null;
@@ -92,6 +95,8 @@ export default function Settings() {
           latitude: r.shop.latitude,
           longitude: r.shop.longitude,
           checkInRadiusM: r.shop.checkInRadiusM,
+          counterCapacity: r.shop.counterCapacity,
+          revealGraceSeconds: r.shop.revealGraceSeconds,
           locationUpdatedAt: r.shop.locationUpdatedAt,
           counterUpiVpa: r.shop.counterUpiVpa,
           counterUpiPayeeName: r.shop.counterUpiPayeeName,
@@ -241,6 +246,8 @@ export default function Settings() {
           latitude: profile.latitude,
           longitude: profile.longitude,
           checkInRadiusM: profile.checkInRadiusM,
+          counterCapacity: profile.counterCapacity,
+          revealGraceSeconds: profile.revealGraceSeconds,
           printOptions: { papers, bindings, duplexEnabled: opts.duplexEnabled },
           autoAssignEnabled: autoAssign,
           counterUpiVpa: profile.counterUpiVpa,
@@ -318,8 +325,22 @@ export default function Settings() {
       {profile && (
         <section className="settings-section">
           <div className="settings-section-copy">
+            <h2>Counter queue</h2>
+            <p>Decide how many students are called to the counter at once and how long they get to arrive.</p>
+          </div>
+          <QueueSettings
+            capacity={profile.counterCapacity}
+            graceSeconds={profile.revealGraceSeconds}
+            onChange={(next) => setProfile({ ...profile, ...next })}
+          />
+        </section>
+      )}
+
+      {profile && (
+        <section className="settings-section">
+          <div className="settings-section-copy">
             <h2>Secure arrival check-in</h2>
-            <p>Set the exact shop entrance once. Students must be inside this radius before joining the live line.</p>
+            <p>Set the exact shop entrance once. Students must be inside this radius before joining the live line. 200 m lets someone in the next building or across the road check in.</p>
           </div>
           <div className="settings-surface stack">
             <div className="row between">
@@ -339,12 +360,13 @@ export default function Settings() {
                   value={profile.checkInRadiusM}
                   onChange={(event) => setProfile({ ...profile, checkInRadiusM: Number(event.target.value) })}
                 >
-                  {![20, 50, 100].includes(profile.checkInRadiusM) && (
+                  {![20, 50, 100, 200].includes(profile.checkInRadiusM) && (
                     <option value={profile.checkInRadiusM}>{profile.checkInRadiusM} m · current setting</option>
                   )}
                   <option value={20}>20 m · strict, best near an entrance</option>
-                  <option value={50}>50 m · recommended</option>
+                  <option value={50}>50 m · only at the shop</option>
                   <option value={100}>100 m · indoor GPS fallback</option>
+                  <option value={200}>200 m · recommended, next building or across the road</option>
                 </select>
                 <span className="field-help">Smaller zones reduce remote check-ins but need a more accurate phone location.</span>
               </div>
