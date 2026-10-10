@@ -16,7 +16,7 @@ import {
   deleteExpiredFileById,
   reconcileFileDeletionSchedules,
 } from './conversion.js';
-import { expireStalePreparedOrders, handleGraceExpiry, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
+import { expireReveal, expireStalePreparedOrders, handleGraceExpiry, sweepExpiredReveals, handleNoShowCheck, handleScheduledDue } from '../modules/queue/engine.js';
 import { reconcileVerifiedPrintCommissions } from '../modules/commission/service.js';
 import { freezeCompletedWeeklyStatements } from '../modules/commission/statementService.js';
 import { runsConversionWorker, runsMaintenanceWorkers, type WorkerRole } from './roles.js';
@@ -65,6 +65,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
         if (job.name === 'noShowCheck') await handleNoShowCheck(jobId);
         else if (job.name === 'graceExpiry') await handleGraceExpiry(jobId);
         else if (job.name === 'scheduledDue') await handleScheduledDue(jobId);
+        else if (job.name === 'revealExpiry') await expireReveal(jobId);
       },
       { connection: bullConnection(), concurrency: 5 },
     ));
@@ -105,6 +106,7 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
           await cleanupExpiredFiles();
         }
         else if (job.name === 'staleAgents') await detectStaleAgents();
+        else if (job.name === 'revealExpirySweep') await sweepExpiredReveals();
         else if (job.name === 'weeklyStatements') await freezeCompletedWeeklyStatements();
         else if (job.name === 'firebaseProjections') await publishPendingRealtimeProjections();
         else if (job.name === 'firebaseNotifications') await publishPendingFirebaseNotifications();
@@ -116,6 +118,9 @@ export async function startWorkers(role: WorkerRole = env.WORKER_ROLE): Promise<
     // Exact deadlines live in PostgreSQL; this one-minute sweeper repairs
     // scheduler/outage gaps and guarantees no old hourly retention behaviour.
     await maintenanceQueue.upsertJobScheduler('file-retention-minute', { every: 60_000 }, { name: 'fileRetention' });
+    // Durable backstop for the per-reveal delayed absent timers (Redis may be
+    // memory-only): overdue reveals are expired from PostgreSQL every 10 s.
+    await maintenanceQueue.upsertJobScheduler('reveal-expiry-sweep', { every: 10_000 }, { name: 'revealExpirySweep' });
     await maintenanceQueue.upsertJobScheduler('stale-agents', { every: 60_000 }, { name: 'staleAgents' });
     // The unique shop/week constraint makes the hourly trigger safe; it only
     // freezes the prior completed IST week and cannot debit or notify anyone.

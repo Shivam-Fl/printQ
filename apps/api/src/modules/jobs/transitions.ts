@@ -19,12 +19,18 @@ export async function applyTransition(
   extraData: Prisma.JobUncheckedUpdateInput = {},
   /** Optional immutable audit label when one state transition has extra significance. */
   auditEvent?: string,
+  /**
+   * Extra conditions evaluated in the SAME conditional UPDATE as the status
+   * check (e.g. an absent timer's overdue deadline), so a concurrent change
+   * to those fields makes this transition lose instead of overwriting it.
+   */
+  guard?: Prisma.JobWhereInput,
 ): Promise<Job | null> {
   const to = transition(from, event); // throws InvalidTransitionError on bad input
 
   return prisma.$transaction(async (tx) => {
     const result = await tx.job.updateMany({
-      where: { id: jobId, status: from },
+      where: { id: jobId, status: from, ...(guard ?? {}) },
       data: { ...extraData, status: to },
     });
     if (result.count === 0) {

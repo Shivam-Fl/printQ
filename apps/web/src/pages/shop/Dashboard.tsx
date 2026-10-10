@@ -4,6 +4,8 @@ import { api, getToken, rupees } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import { flashTitle, playChime } from '../../newOrderAlert.js';
 import ShopNav from '../../components/ShopNav.js';
+import { BandPill, useNow } from '../../components/QueueBand.js';
+import type { QueueBand } from '@printq/shared';
 
 interface QueueJob {
   id: string;
@@ -35,6 +37,13 @@ interface QueueJob {
   queuedAt: string | null;
   arrivedAt: string | null;
   checkInCount: number;
+  /** Server-computed: 1-based place in the live line and its counter band. */
+  position: number | null;
+  band: QueueBand | null;
+  /** Revealed students must reach the counter by this time (null = no timer). */
+  revealDeadlineAt: string | null;
+  /** Marked absent earlier; must check in again to rejoin. */
+  absent: boolean;
   createdAt: string;
   student: { name: string | null; phoneMasked: string };
   file: { originalName: string; pages: number | null };
@@ -78,6 +87,7 @@ const slotLabel = (iso: string) =>
 export default function Dashboard() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<QueueJob[]>([]);
+  const [capacity, setCapacity] = useState<number | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [otp, setOtp] = useState('');
   const [manual, setManual] = useState<ManualAssign | null>(null);
@@ -93,11 +103,12 @@ export default function Dashboard() {
   const refresh = useCallback(async () => {
     try {
       const [queueRes, printersRes, setupRes] = await Promise.all([
-        api<{ jobs: QueueJob[] }>('/api/shop/queue', { role: 'shop' }),
+        api<{ jobs: QueueJob[]; counterCapacity: number }>('/api/shop/queue', { role: 'shop' }),
         api<{ printers: Printer[] }>('/api/shop/printers', { role: 'shop' }),
         api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' }),
       ]);
       setJobs(queueRes.jobs);
+      setCapacity(queueRes.counterCapacity);
       setPrinters(printersRes.printers);
       setSetup(setupRes.setup);
     } catch (err) {
@@ -227,7 +238,7 @@ export default function Dashboard() {
   }
 
   async function jobAction(id: string, action: 'no-show' | 'handover') {
-    if (action === 'no-show' && !confirm('Remove this student from the live line? Their prepared order stays available by counter code, but a later check-in will place them at the end.')) return;
+    if (action === 'no-show' && !confirm('Mark this student absent? They lose their place and must check in again (at the back of the line). Their order and counter code stay valid, and the next student is called.')) return;
     setError('');
     try {
       await api(`/api/shop/jobs/${id}/${action}`, { method: 'POST', role: 'shop' });
@@ -317,6 +328,10 @@ export default function Dashboard() {
     `${j.specs.binding ? ` · ${j.specs.binding.replace('_', ' ')}` : ''}` +
     `${j.specs.pageRange ? ` · p${j.specs.pageRange}` : ''} · ${j.pagesPerCopy}pp`;
 
+  const waiting0 = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
+  const nowMs = useNow(waiting0.some((j) => j.revealDeadlineAt));
+  const atCounter = waiting0.filter((j) => j.band === 'revealed').length;
+  const comingUp = waiting0.filter((j) => j.band === 'arriving').length;
   const prepared = jobs.filter((j) => j.status === 'awaiting_arrival');
   const waiting = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
   const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'finishing', 'ready_for_pickup'].includes(j.status));
@@ -332,7 +347,9 @@ export default function Dashboard() {
           <p>Queue positions organize students; the six-digit code always controls which prepared order prints.</p>
         </div>
         <div className="queue-summary">
-          <span><strong>{waiting.length}</strong> waiting</span>
+          <span><strong>{atCounter}</strong> at counter{capacity ? ` (of ${capacity})` : ''}</span>
+          <span><strong>{comingUp}</strong> coming up</span>
+          <span><strong>{waiting.length - atCounter - comingUp}</strong> waiting</span>
           <span><strong>{prepared.length}</strong> prepared remotely</span>
           <span><strong>{inFlight.length}</strong> printing / pickup</span>
           {setup && (
@@ -361,7 +378,7 @@ export default function Dashboard() {
           <span className="eyebrow-label">Counter action</span>
           <h2>Find order by counter code</h2>
           <p>
-            Enter the student’s six-digit code to find the correct document. Codes unlock automatically near the front; staff can explicitly override the advisory line when a real counter situation requires it.
+            Enter the student’s six-digit code to find the correct document. Students see their code only when it is their turn at the counter; staff can still serve anyone present by overriding the line. Looking up a code stops that student’s absent timer.
           </p>
         </div>
         <div className="release-controls">
@@ -388,7 +405,7 @@ export default function Dashboard() {
         </div>
         {queueOverride && (
           <div className="manual-picker queue-override-panel" role="alert">
-            <strong>This student is not currently called</strong>
+            <strong>This student is not at the counter yet</strong>
             <p>
               {queueOverride.position !== null
                 ? `Their live position is #${queueOverride.position}. Printing now will serve them out of turn.`
@@ -449,7 +466,7 @@ export default function Dashboard() {
         {error && <div className="error-box">{error}</div>}
       </div>
 
-      <div className="section-heading"><div><h2>Physically checked in</h2><p>One shop-wide walk-in line, ordered by arrival. Serve the student who is actually at the counter.</p></div><span className="summary-pill">{waiting.length}</span></div>
+      <div className="section-heading"><div><h2>Physically checked in</h2><p>One shop-wide walk-in line, ordered by arrival. The first {capacity ?? 'few'} are called to the counter; if they do not arrive in time they are marked absent automatically.</p></div><span className="summary-pill">{waiting.length}</span></div>
       <div className="table-shell">
         <table>
           <thead>
@@ -462,8 +479,8 @@ export default function Dashboard() {
               <tr><td colSpan={8}><div className="table-empty"><strong>No one is checked in</strong><span>Remote uploads stay out of this line until a student confirms arrival.</span></div></td></tr>
             )}
             {waiting.map((j, index) => (
-              <tr key={j.id}>
-                <td><strong>{index + 1}</strong></td>
+              <tr key={j.id} className={j.band ? `row-${j.band}` : undefined}>
+                <td><strong>{j.position ?? index + 1}</strong></td>
                 <td>{j.student.name ?? j.student.phoneMasked}</td>
                 <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {j.file.originalName}
@@ -474,14 +491,14 @@ export default function Dashboard() {
                   {!j.assignedPrinterId && <span className="stamp yellow">assign</span>}
                 </td>
                 <td>
-                  <span className="stamp blue">checked in</span>
+                  <BandPill band={j.band} deadline={j.revealDeadlineAt} nowMs={nowMs} />
                   {j.paymentStatus === 'cash_due' && <span className="stamp yellow" style={{ marginLeft: 6 }}>cash due</span>}
                 </td>
                 <td className="mono">{rupees(j.totalPaise)}</td>
                 <td>
                   <span className="row" style={{ flexWrap: 'nowrap' }}>
-                    <button className="ghost small" onClick={() => jobAction(j.id, 'no-show')}>
-                      Remove from line
+                    <button className="ghost small danger-text" onClick={() => jobAction(j.id, 'no-show')}>
+                      Mark absent
                     </button>
                     {!j.assignedPrinterId && (
                       <AssignButton jobId={j.id} printers={printers} onDone={refresh} />
@@ -515,7 +532,9 @@ export default function Dashboard() {
                       </td>
                       <td>{specsText(j)}</td>
                       <td>
-                        <span className="stamp yellow">awaiting arrival</span>
+                        {j.absent
+                          ? <span className="stamp red">absent — must check in again</span>
+                          : <span className="stamp yellow">awaiting arrival</span>}
                         {(j.paymentStatus === 'counter_due' || j.paymentStatus === 'cash_due') && <span className="stamp yellow" style={{ marginLeft: 6 }}>pay at shop</span>}
                       </td>
                     </tr>

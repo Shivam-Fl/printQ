@@ -108,8 +108,26 @@ export async function releaseByOtp(
     throw conflict('This order is already printed and ready for pickup');
   }
 
+  // Counter-code lookup means the student is physically present: disarm the
+  // absent timer. This single conditional UPDATE races the expiry sweeper's
+  // guarded transition; exactly one wins. If the sweeper won, re-read so the
+  // release continues from the job's true state (awaiting_arrival, which
+  // counter release supports and which asks staff to confirm the override).
+  if (matched.status === 'queued' || matched.status === 'notified') {
+    const disarmed = await prisma.job.updateMany({
+      where: { id: matched.id, shopId, status: { in: ['queued', 'notified'] } },
+      data: { revealDeadlineAt: null },
+    });
+    if (disarmed.count === 0) {
+      matched = (await prisma.job.findFirst({ where: { id: matched.id, shopId } })) ?? matched;
+    } else if (matched.revealDeadlineAt !== null) {
+      // Tell the dashboard and the student so the stale countdown disappears.
+      await emitQueueUpdate(shopId);
+    }
+  }
+
   const live = await getJobLiveMetrics(matched.id);
-  const inNormalReleaseWindow = isNormalCounterRelease(matched.status, live.position);
+  const inNormalReleaseWindow = isNormalCounterRelease(matched.status, live.band);
   if (!inNormalReleaseWindow && !overrideQueue) {
     return {
       ok: false,

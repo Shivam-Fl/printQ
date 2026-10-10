@@ -183,3 +183,42 @@ turn OTPs. The implemented launch model intentionally supersedes that design:
 
 See `README.md`, `SECURITY.md`, the shared state machine and the 55-assertion simulator
 for the authoritative launch behavior.
+
+## Queue bands, reveal grace and absent handling (October 2026)
+
+Supersedes the old `NEAR_FRONT_THRESHOLD` code reveal.
+
+- **Capacity** (`Shop.counterCapacity`, 1–20, default 5): how many students the counter serves
+  at once. Among the shop's active checked-in jobs (queue order), positions `1..cap` are
+  **revealed** (stable counter code visible, go now), `cap+1..2cap` are **arriving** ("Your turn
+  is coming up — please head to the shop"), the rest **waiting** (position only). The pure
+  function lives in `packages/shared/src/queueBands.ts`; the server computes bands and returns
+  them in student/shop DTOs, socket events and the Firebase projection. The code is decrypted
+  only in the revealed band (or `ready_for_pickup`); it is never in a socket/push payload.
+- **Reveal** (`syncShopQueue`, runs on every `emitQueueUpdate`, owner settings change and a 10 s
+  sweeper): under a per-shop advisory lock, free slots (`cap - revealedCount`) go to the earliest
+  unrevealed jobs. A reveal sets `revealedAt` and `revealDeadlineAt = now + Shop.revealGraceSeconds`,
+  schedules a BullMQ delayed timer `absent-<jobId>-<revealedAtEpochMs>` and calls `notifyStudent`
+  ("It's your turn — please be at the counter"). Entering ARRIVING notifies once per entry
+  (`arrivingNotifiedAt`, reset by a fresh check-in). Every transition is a conditional UPDATE.
+- **Grace** (`revealGraceSeconds` ∈ 30/60/120, default 60): the clock starts at the reveal moment
+  (also immediately at check-in when a slot is free).
+- **Never un-reveal**: revealed students keep their code and deadline whatever the owner does.
+  Lowering capacity only stops new reveals until enough revealed jobs leave; raising it reveals
+  extra students immediately (with notifications and deadlines); grace changes apply to future
+  reveals only.
+- **Absent**: when the deadline passes (timer or DB sweeper `sweepExpiredReveals`, every 10 s,
+  the durable backstop because production Redis is memory-only) or staff taps "Mark absent"
+  (`POST /api/shop/jobs/:id/no-show`, shop-scoped, 404 otherwise), both go through the same
+  `markAbsent()` → `applyTransition(QUEUE_SKIPPED)` → `awaiting_arrival`. The paid job and stable
+  code stay valid; `queuedAt`/reveal state are cleared and `absentAt` set, so the student must
+  submit a FRESH proximity check-in and lands at the back. Location-free requeue stays rejected.
+  The gap closes, bands recompute, the next student is revealed + notified, and the absent student
+  is told to check in again.
+- **Present**: looking the job up by counter code (`releaseByOtp`) clears `revealDeadlineAt`.
+  The sweeper's expiry is a single guarded `applyTransition` (`revealDeadlineAt <= now` in the same
+  conditional UPDATE) so a simultaneous release and expiry produce exactly one outcome.
+- **Staff release**: any revealed student is served without the out-of-order warning; arriving,
+  waiting, absent or not-checked-in jobs still need the explicit override.
+- **Check-in zone** is 200 m by default (migration moved every shop to 200; owners may still pick
+  20/50/100/200).

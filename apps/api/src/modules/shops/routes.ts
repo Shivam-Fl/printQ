@@ -3,6 +3,8 @@ import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  COUNTER_CAPACITY_MAX,
+  COUNTER_CAPACITY_MIN,
   createStaffSchema,
   printOptionsSchema,
   printerInputSchema,
@@ -20,6 +22,7 @@ import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { releaseByOtp } from '../queue/release.js';
+import { loadShopQueue } from '../queue/bands.js';
 import {
   advancePrinterQueue,
   advanceShopQueues,
@@ -65,6 +68,8 @@ shopRouter.get(
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
+        counterCapacity: true,
+        revealGraceSeconds: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
         cashPaymentsEnabled: true,
@@ -170,7 +175,11 @@ const shopPatchSchema = z.object({
   campusId: z.string().uuid().nullable().optional(),
   latitude: z.number().finite().min(-90).max(90).nullable().optional(),
   longitude: z.number().finite().min(-180).max(180).nullable().optional(),
-  checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100)]).optional(),
+  checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100), z.literal(200)]).optional(),
+  // How many students the counter serves at once (drives queue bands).
+  counterCapacity: z.number().int().min(COUNTER_CAPACITY_MIN).max(COUNTER_CAPACITY_MAX).optional(),
+  // Seconds a revealed student has to reach the counter before being marked absent.
+  revealGraceSeconds: z.union([z.literal(30), z.literal(60), z.literal(120)]).optional(),
   autoAssignEnabled: z.boolean().optional(),
   cashPaymentsEnabled: z.boolean().optional(),
   counterUpiVpa: z.string().trim().toLowerCase().max(120).regex(/^[a-z0-9._-]{2,100}@[a-z][a-z0-9.-]{1,63}$/, 'Enter a valid merchant UPI VPA').nullable().optional(),
@@ -249,6 +258,8 @@ shopRouter.patch(
         latitude: true,
         longitude: true,
         checkInRadiusM: true,
+        counterCapacity: true,
+        revealGraceSeconds: true,
         locationUpdatedAt: true,
         autoAssignEnabled: true,
         cashPaymentsEnabled: true,
@@ -259,6 +270,9 @@ shopRouter.patch(
         printOptions: true,
       },
     });
+    // Capacity rises reveal extra students immediately; decreases and grace
+    // changes only affect FUTURE reveals (revealed students are never undone).
+    if ('counterCapacity' in body) await emitQueueUpdate(req.shopUser!.shopId);
     res.json({ shop: { ...shop, printOptions: shopOptions(shop) } });
   }),
 );
@@ -631,16 +645,32 @@ shopRouter.get(
         queuedAt: true,
         arrivedAt: true,
         checkInCount: true,
+        revealedAt: true,
+        revealDeadlineAt: true,
+        absentAt: true,
         createdAt: true,
         student: { select: { name: true, phone: true } },
         file: { select: { originalName: true, pages: true } },
       },
     });
+    // Bands are computed server-side; the dashboard never derives them.
+    const queue = await loadShopQueue(prisma, shopId);
+    const bands = new Map(queue.entries.map((e) => [e.job.id, e]));
     res.json({
-      jobs: jobs.map((j) => ({
-        ...j,
-        student: { name: j.student.name, phoneMasked: maskPhone(j.student.phone) },
-      })),
+      counterCapacity: queue.counterCapacity,
+      revealGraceSeconds: queue.revealGraceSeconds,
+      jobs: jobs.map((j) => {
+        const live = bands.get(j.id);
+        const { revealedAt, revealDeadlineAt, absentAt, ...rest } = j;
+        return {
+          ...rest,
+          position: live?.position ?? null,
+          band: live?.band ?? null,
+          revealDeadlineAt: live?.band === 'revealed' ? revealDeadlineAt : null,
+          absent: absentAt !== null && j.status === 'awaiting_arrival',
+          student: { name: j.student.name, phoneMasked: maskPhone(j.student.phone) },
+        };
+      }),
     });
   }),
 );
@@ -705,7 +735,11 @@ shopRouter.post(
   }),
 );
 
-/** Remove an absent student from the advisory line; their paid order remains usable. */
+/**
+ * Mark a student absent (staff button). They lose their place; the paid order
+ * and counter code stay valid and they must check in again. Job ownership is
+ * enforced by shopId in the WHERE clause (404 when missing or not ours).
+ */
 shopRouter.post(
   '/jobs/:id/no-show',
   requireShopUser,

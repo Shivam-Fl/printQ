@@ -6,7 +6,7 @@ import { logger } from '../lib/logger.js';
 import { getFirebaseAdminApp } from '../providers/firebaseAdmin/index.js';
 import { getJobLiveMetrics } from '../modules/queue/engine.js';
 import { isCounterCodeAvailable } from '../modules/queue/visibility.js';
-import { ACTIVE_QUEUE_STATUSES, type JobStatus } from '@printq/shared';
+import { ACTIVE_QUEUE_STATUSES, type JobStatus, type QueueBand } from '@printq/shared';
 
 interface ProjectionDocument {
   set(data: Record<string, unknown>): Promise<unknown>;
@@ -16,9 +16,16 @@ export interface ProjectionFirestore {
   doc(path: string): ProjectionDocument;
 }
 
+export interface ProjectionMetrics {
+  position: number | null;
+  etaMinutes: number | null;
+  band?: QueueBand | null;
+  revealDeadlineAt?: Date | null;
+}
+
 export type ProjectionJob = Pick<
   Job,
-  'id' | 'shopId' | 'status' | 'assignedPrinterId' | 'updatedAt' | 'nearFrontNotifiedAt'
+  'id' | 'shopId' | 'status' | 'assignedPrinterId' | 'updatedAt' | 'revealedAt'
 > & { student: { firebaseUid: string | null } };
 
 /**
@@ -36,14 +43,11 @@ export function projectionTargets(eventJob: ProjectionJob, activeJobs: Projectio
 
 export function projectionPayload(
   job: ProjectionJob,
-  metrics: { position: number | null; etaMinutes: number | null },
+  metrics: ProjectionMetrics,
 ): { student: Record<string, unknown>; shop: Record<string, unknown> } {
-  const counterCodeAvailable = isCounterCodeAvailable(
-    job.status as JobStatus,
-    metrics.position,
-    env.NEAR_FRONT_THRESHOLD,
-    job.nearFrontNotifiedAt !== null,
-  );
+  // Never project the code itself, only whether the revealed band shows it.
+  const counterCodeAvailable = isCounterCodeAvailable(job.status as JobStatus, job.revealedAt)
+    && (job.status === 'ready_for_pickup' || metrics.band === 'revealed');
   const timestamp = job.updatedAt.toISOString();
   // Deliberately minimal: no filename/content URL, location proof, phone,
   // price, commission, or financial split enters Firebase.
@@ -54,6 +58,8 @@ export function projectionPayload(
       status: job.status,
       position: metrics.position,
       etaMinutes: metrics.etaMinutes,
+      band: metrics.band ?? null,
+      revealDeadlineAt: metrics.revealDeadlineAt?.toISOString() ?? null,
       counterCodeAvailable,
       updatedAt: timestamp,
     },
@@ -62,6 +68,7 @@ export function projectionPayload(
       status: job.status,
       printerId: job.assignedPrinterId,
       position: metrics.position,
+      band: metrics.band ?? null,
       updatedAt: timestamp,
     },
   };
@@ -70,7 +77,7 @@ export function projectionPayload(
 export class FirebaseProjectionWriter {
   constructor(private readonly firestore: ProjectionFirestore = getFirestore(getFirebaseAdminApp())) {}
 
-  async write(job: ProjectionJob, metrics: { position: number | null; etaMinutes: number | null }): Promise<void> {
+  async write(job: ProjectionJob, metrics: ProjectionMetrics): Promise<void> {
     const payload = projectionPayload(job, metrics);
     const writes: Promise<unknown>[] = [
       this.firestore.doc(`shopProjections/${job.shopId}/jobs/${job.id}`).set(payload.shop),

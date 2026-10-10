@@ -6,6 +6,8 @@ import { enablePush, pushPermission } from '../../push.js';
 import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
+import { StudentBandPanel, useNow } from '../../components/QueueBand.js';
+import type { QueueBand } from '@printq/shared';
 
 interface JobDetail {
   id: string;
@@ -17,7 +19,12 @@ interface JobDetail {
   createdAt: string;
   otpCode: string | null;
   counterCodeAvailable: boolean;
-  counterCodeThreshold: number;
+  /** Server-computed counter band (revealed / arriving / waiting) or null outside the line. */
+  band: QueueBand | null;
+  /** When a revealed student must be at the counter; null = no timer running. */
+  revealDeadlineAt: string | null;
+  /** Missed their turn: back in prepared state, must check in again. */
+  absent: boolean;
   otpExpiresAt: string | null;
   noShowCount: number;
   paymentStatus: 'pending' | 'counter_due' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
@@ -132,6 +139,7 @@ export default function JobStatus() {
   const [error, setError] = useState('');
   const [confirmingArrival, setConfirmingArrival] = useState(false);
   const [checkingIn, setCheckingIn] = useState(false);
+  const nowMs = useNow(Boolean(job?.revealDeadlineAt));
 
   const refresh = useCallback(async () => {
     try {
@@ -159,6 +167,14 @@ export default function JobStatus() {
     const poll = setInterval(() => void refresh(), 10_000);
     return () => clearInterval(poll);
   }, [job?.status, refresh]);
+
+  const deadlineAt = job?.revealDeadlineAt ?? null;
+  useEffect(() => {
+    if (!deadlineAt) return;
+    const wait = Math.max(0, new Date(deadlineAt).getTime() - Date.now()) + 1_500;
+    const timer = setTimeout(() => void refresh(), wait);
+    return () => clearTimeout(timer);
+  }, [deadlineAt, refresh]);
 
   useEffect(() => {
     const socket = getStudentSocket();
@@ -280,7 +296,17 @@ export default function JobStatus() {
             <div className="sub">Your order is prepared. Check-in opens shortly before this time, after you reach the shop.</div>
           </div>
         )}
-        {['awaiting_arrival', 'requeued'].includes(job.status) && !pendingSlot && (
+        {job.absent && (
+          <div className="absent-card" role="alert">
+            <div>
+              <span className="eyebrow-label">Missed your turn</span>
+              <h2>You were not at the counter in time</h2>
+              <p>Your place went to the next student. Your order is still prepared and your counter code has not changed. Check in again at the shop to get a new place at the end of the line.</p>
+            </div>
+            <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Checking location…' : 'I’m at the shop — check in again'}</button>
+          </div>
+        )}
+        {['awaiting_arrival', 'requeued'].includes(job.status) && !pendingSlot && !job.absent && (
           <div className="arrival-card">
             <div>
               <span className="eyebrow-label">Order prepared</span>
@@ -304,25 +330,16 @@ export default function JobStatus() {
           </div>
         )}
         {['queued', 'notified'].includes(job.status) && !pendingSlot && (
-          <div className="ticket">
-            <div className="eyebrow">live walk-in position</div>
-            <div className="ticket-num">{position === null ? '·' : `#${position}`}</div>
-            <div className="sub">{eta !== null ? `roughly ${eta} min · stay near the counter` : 'position is advisory · stay near the counter'}</div>
-          </div>
+          <StudentBandPanel
+            nowMs={nowMs}
+            job={{ status: job.status, position, etaMinutes: eta, band: job.band, revealDeadlineAt: job.revealDeadlineAt, otpCode: otp }}
+          />
         )}
-        {['queued', 'notified'].includes(job.status) && !otp && (
-          <div className="card code-wait-card">
-            <strong>Counter code unlocks automatically near your turn</strong>
-            <p style={{ margin: 0 }}>
-              It will appear here when you enter the first {job.counterCodeThreshold}. Keep watching your live position—there is nothing else to tap.
-            </p>
-          </div>
-        )}
-        {otp && ['awaiting_arrival', 'queued', 'notified', 'no_show', 'requeued', 'ready_for_pickup'].includes(job.status) && (
+        {otp && job.status === 'ready_for_pickup' && (
           <div className="ticket turn">
-            <div className="eyebrow">your permanent counter code</div>
+            <div className="eyebrow">your counter code</div>
             <div className="otp-band">{otp}</div>
-            <div className="sub">Tell this code to staff when you are at the counter. They can find and print your order even if your queue position was skipped.</div>
+            <div className="sub">Tell this code to staff when you collect your prints.</div>
           </div>
         )}
         {job.status === 'ready_for_pickup' && (
