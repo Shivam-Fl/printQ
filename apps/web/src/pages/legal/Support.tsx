@@ -29,6 +29,8 @@ export default function Support() {
           <dd>At the shop, by cash or the shop's own UPI. There is no online payment in the app.</dd>
           <dt>Is my document safe?</dt>
           <dd>It sits in private storage and is deleted about 10 minutes after printing. Read the <Link to="/privacy">privacy policy</Link>.</dd>
+          <dt>I run a shop. How do I pay my PrintQs fee?</dt>
+          <dd>Open Earnings in your dashboard and choose Pay now. Fees are due 7 days after each weekly statement; unpaid fees temporarily pause new orders until you pay. Your receipt is saved there.</dd>
           <dt>I did not get the sign-in code.</dt>
           <dd>Check the number, wait a minute, then request a new code. If it still fails, contact us below.</dd>
           <dt>I want my account or data deleted.</dt>

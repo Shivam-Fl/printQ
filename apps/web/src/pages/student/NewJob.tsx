@@ -49,7 +49,7 @@ export default function NewJob() {
   const [mode, setMode] = useState<'instant' | 'scheduled'>('instant');
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
   const [pages, setPages] = useState<number | null>(null);
-  const [quoted, setQuoted] = useState<{ key: string; quote: Quote } | null>(null);
+  const [quoted, setQuoted] = useState<{ key: string; quote: Quote; unsupported?: { code: string; message: string }[] } | null>(null);
   const [quoteErrorKey, setQuoteErrorKey] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -70,6 +70,8 @@ export default function NewJob() {
   const quoteCurrent = quoted !== null && quoted.key === quoteKey;
   const quoteFailed = quoteErrorKey !== null && quoteErrorKey === quoteKey;
   const quote = quoteCurrent ? quoted.quote : null;
+  // The shop cannot produce these options (e.g. colour on a B/W-only shop): say so now, not at the counter.
+  const unsupported = quoteCurrent ? (quoted.unsupported ?? []) : [];
   const latestQuote = useRef(createLatestRequest());
   const submitting = useRef(false);
   const idemKey = useRef(crypto.randomUUID());
@@ -100,7 +102,7 @@ export default function NewJob() {
     const guard = latestQuote.current;
     const t = setTimeout(() => {
       const ticket = guard.begin();
-      api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
+      api<{ quote: Quote; pages: number; unsupported?: { code: string; message: string }[] }>('/api/jobs/quote', {
         method: 'POST',
         role: 'student',
         signal: ticket.signal,
@@ -108,7 +110,7 @@ export default function NewJob() {
       })
         .then((res) => {
           if (!ticket.isCurrent()) return;
-          setQuoted({ key, quote: res.quote });
+          setQuoted({ key, quote: res.quote, unsupported: res.unsupported });
           setQuoteErrorKey(null);
           setPages(res.pages);
           setError('');
@@ -130,13 +132,13 @@ export default function NewJob() {
     if (!specs || !couponInput.trim()) return;
     setCouponError('');
     try {
-      const res = await api<{ quote: Quote; pages: number }>('/api/jobs/quote', {
+      const res = await api<{ quote: Quote; pages: number; unsupported?: { code: string; message: string }[] }>('/api/jobs/quote', {
         method: 'POST',
         role: 'student',
         body: { fileId, specs, couponCode: couponInput.trim() },
       });
       const code = couponInput.trim();
-      setQuoted({ key: JSON.stringify([specs, code]), quote: res.quote });
+      setQuoted({ key: JSON.stringify([specs, code]), quote: res.quote, unsupported: res.unsupported });
       setAppliedCoupon(code);
     } catch (err) {
       setCouponError(err instanceof Error ? err.message : 'Invalid coupon');
@@ -356,6 +358,11 @@ export default function NewJob() {
               </div>
             </div>
 
+            {unsupported.length > 0 && (
+              <div className="error-box" role="alert" data-testid="unsupported-options" style={{ marginTop: 12 }}>
+                {unsupported.map((u) => <p key={u.code} style={{ margin: 0 }}>{u.message}</p>)}
+              </div>
+            )}
             {appliedCoupon ? (
               <p style={{ margin: '12px 0 0', color: '#b9c2d2', fontSize: '.82rem' }}>Coupon <strong className="mono">{appliedCoupon}</strong> applied. <button className="text-button" onClick={() => { setAppliedCoupon(null); setCouponInput(''); }}>Remove</button></p>
             ) : (
@@ -365,7 +372,7 @@ export default function NewJob() {
               </div>
             )}
             {couponError && <p className="error" style={{ marginBottom: 0 }}>{couponError}</p>}
-            <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError} onClick={payAndQueue}>
+            <button className="full-button" style={{ marginTop: 16 }} disabled={!quote || busy || !!rangeError || unsupported.length > 0} onClick={payAndQueue}>
               {busy
                 ? 'Preparing order…'
                 : !quote && !quoteFailed ? 'Updating total…'

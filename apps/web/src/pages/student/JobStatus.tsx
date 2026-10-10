@@ -384,7 +384,7 @@ export default function JobStatus() {
         )}
         {job.status === 'otp_verified' && job.printError && (
           <div className="notice setup-notice">
-            <div><strong>The printer needs attention</strong><p>The shop has your verified order and can retry it without another OTP. You don’t need to rejoin the queue.</p></div>
+            <div><strong>{job.printError}</strong><p>The shop has your verified order and can retry it without another OTP. You don’t need to rejoin the queue.</p></div>
           </div>
         )}
         {job.status === 'finishing' && (

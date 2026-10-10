@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { verifyPreviewToken, verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { resolveShopSession } from '../lib/shopSession.js';
-import { unauthorized } from '../lib/errors.js';
+import { forbidden, unauthorized } from '../lib/errors.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -73,7 +73,7 @@ export async function requireShopUser(req: Request, _res: Response, next: NextFu
 export function requireShopOwner(req: Request, res: Response, next: NextFunction): void {
   requireShopUser(req, res, (err?: unknown) => {
     if (err) return next(err as Error);
-    if (req.shopUser?.role !== 'owner') return next(unauthorized('Owner access required'));
+    if (req.shopUser?.role !== 'owner') return next(forbidden('Owner access required'));
     next();
   });
 }

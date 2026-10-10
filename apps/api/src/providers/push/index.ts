@@ -45,3 +45,33 @@ export async function sendPush(studentId: string, message: PushMessage): Promise
     }),
   );
 }
+
+/**
+ * Web Push to shop-owner devices (fee reminders). Returns how many devices
+ * accepted the message; never throws.
+ */
+export async function sendPushToShopUsers(shopUserIds: string[], message: PushMessage): Promise<number> {
+  if (!pushEnabled || shopUserIds.length === 0) return 0;
+  const subs = await prisma.shopPushSubscription.findMany({ where: { shopUserId: { in: shopUserIds } } });
+  let delivered = 0;
+  await Promise.all(
+    subs.map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          JSON.stringify(message),
+          { TTL: 86_400 },
+        );
+        delivered += 1;
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          await prisma.shopPushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+        } else {
+          logger.warn({ err }, 'shop_push_send_failed');
+        }
+      }
+    }),
+  );
+  return delivered;
+}

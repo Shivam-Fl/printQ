@@ -1,9 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
-import { env } from '../../config/env.js';
-import { conflict } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
-import { debitGateReason, deriveStatementAmounts, hasUnappliedCredit, PRE_DEBIT_NOTICE_MS, UPI_PRE_DEBIT_NOTICE_MS } from './statements.js';
+import { applyPrepaidToStatement } from '../fees/account.js';
+import { dueAtFor, feePaymentsEnabled } from '../fees/feeConfig.js';
+import { deriveStatementAmounts, hasUnappliedCredit } from './statements.js';
 
 export interface StatementPeriod {
   start: Date;
@@ -19,7 +18,9 @@ function assertPeriod(period: StatementPeriod): void {
 /**
  * Freeze unstatemented immutable commission entries for a weekly period.
  * A shop row lock plus unique period key prevents two workers from freezing
- * overlapping amounts when they race.
+ * overlapping amounts when they race. The statement becomes payable: dueAt is
+ * frozenAt + FEE_PAYMENT_TERMS_DAYS (left null while fee payments are off, and
+ * set when enforcement adopts it), and earlier overpayment is applied to it.
  */
 export async function freezeWeeklyCommissionStatement(shopId: string, period: StatementPeriod, now = new Date()) {
   assertPeriod(period);
@@ -34,7 +35,7 @@ export async function freezeWeeklyCommissionStatement(shopId: string, period: St
     const entries = await tx.shopCommissionEntry.findMany({
       where: {
         shopId,
-        // Include older, unstatemented credits so they reduce a later debit.
+        // Include older, unstatemented credits so they reduce a later amount due.
         createdAt: { lt: period.end },
         type: { in: ['print_commission', 'refund_credit', 'manual_credit'] },
         statementLines: { none: {} },
@@ -46,46 +47,29 @@ export async function freezeWeeklyCommissionStatement(shopId: string, period: St
     const amounts = deriveStatementAmounts(entries);
     // A surplus credit must remain available for a future statement.
     if (hasUnappliedCredit(amounts)) return null;
-    // Freeze is immutable: bind only a currently valid mandate from this
-    // isolated TEST environment. Production live collection remains disabled
-    // until its separately approved adapter and release gates exist.
-    const testCollectionEnabled = env.SHOP_COLLECTION_MODE === 'test'
-      && env.PRINTQ_ENVIRONMENT !== 'production';
-    const mandate = amounts.amountDuePaise > 0 && testCollectionEnabled
-      ? await tx.shopCollectionMandate.findFirst({
-        where: {
-          shopId,
-          provider: 'razorpay',
-          environment: 'test',
-          status: 'active',
-          frequency: 'weekly',
-          maxAmountPaise: { gte: amounts.amountDuePaise },
-          validFrom: { lte: now },
-          validUntil: { gt: now },
-          cancellationTermsAcceptedAt: { not: null },
-          providerCustomerId: { not: null },
-          providerMandateId: { not: null },
-          providerTokenId: { not: null },
-          ownerDebitEmail: { not: null },
-          ownerDebitContactE164: { not: null },
-        },
-        orderBy: [{ activatedAt: 'desc' }, { id: 'asc' }],
-        select: { id: true },
-      })
-      : null;
-    return tx.shopCommissionStatement.create({
+
+    const statement = await tx.shopCommissionStatement.create({
       data: {
         shopId,
-        mandateId: mandate?.id ?? null,
         periodStart: period.start,
         periodEnd: period.end,
         ...amounts,
         status: amounts.amountDuePaise === 0 ? 'settled' : 'frozen',
         frozenAt: now,
+        dueAt: amounts.amountDuePaise > 0 && feePaymentsEnabled() ? dueAtFor(now) : null,
+        settledAt: amounts.amountDuePaise === 0 ? now : null,
         lines: {
           create: entries.map((entry) => ({ entryId: entry.id, amountPaise: entry.amountPaise })),
         },
       },
+      include: { lines: true },
+    });
+    const prepaid = await applyPrepaidToStatement(tx, shopId, statement.id, amounts.amountDuePaise);
+    if (prepaid === 0) return statement;
+    const fullyPaid = prepaid >= amounts.amountDuePaise;
+    return tx.shopCommissionStatement.update({
+      where: { id: statement.id },
+      data: { paidPaise: prepaid, ...(fullyPaid ? { status: 'settled', settledAt: now } : {}) },
       include: { lines: true },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -102,8 +86,8 @@ export function lastCompletedWeeklyPeriodInIndia(now = new Date()): StatementPer
 }
 
 /**
- * Idempotent maintenance action. It freezes no empty statements and never
- * sends notices or calls a collection provider.
+ * Idempotent maintenance action. It freezes no empty statements; notices and
+ * blocking are handled by the fee maintenance job (modules/fees/enforcement).
  */
 export async function freezeCompletedWeeklyStatements(now = new Date()): Promise<number> {
   const period = lastCompletedWeeklyPeriodInIndia(now);
@@ -114,81 +98,4 @@ export async function freezeCompletedWeeklyStatements(now = new Date()): Promise
     if (statement) frozen += 1;
   }
   return frozen;
-}
-
-/**
- * Only call after the required notice has actually been delivered through the
- * configured owner channel. This records the immutable timing gate, not a
- * pretend notification.
- */
-export async function recordPreDebitNoticeDelivered(statementId: string, deliveredAt = new Date()) {
-  const statement = await prisma.shopCommissionStatement.findUnique({
-    where: { id: statementId },
-    select: { mandate: { select: { method: true } } },
-  });
-  if (!statement?.mandate) throw conflict('Statement has no collection mandate');
-  const noticeMs = statement.mandate.method === 'upi_autopay'
-    ? UPI_PRE_DEBIT_NOTICE_MS
-    : PRE_DEBIT_NOTICE_MS;
-  const updated = await prisma.shopCommissionStatement.updateMany({
-    where: { id: statementId, status: 'frozen', preDebitNoticeSentAt: null },
-    data: {
-      status: 'notice_sent',
-      preDebitNoticeSentAt: deliveredAt,
-      debitNotBefore: new Date(deliveredAt.getTime() + noticeMs),
-    },
-  });
-  if (updated.count !== 1) throw conflict('Statement is not awaiting its first pre-debit notice');
-}
-
-/**
- * Reserve a TEST collection attempt after all mandate and notice gates. This
- * creates no provider call; the Razorpay adapter uses this idempotency key in
- * a later, explicitly configured TEST-only dispatch step.
- */
-export async function reserveTestCollectionAttempt(statementId: string, pilotCapPaise: number, now = new Date()) {
-  const { env } = await import('../../config/env.js');
-  if (env.SHOP_COLLECTION_MODE !== 'test' || env.PRINTQ_ENVIRONMENT === 'production') {
-    throw conflict('TEST collection is disabled in this environment');
-  }
-  return prisma.$transaction(async (tx) => {
-    const statement = await tx.shopCommissionStatement.findUnique({
-      where: { id: statementId },
-      include: { mandate: true },
-    });
-    if (!statement) throw conflict('Statement not found');
-    if (!statement.mandate || statement.mandate.environment !== 'test') {
-      throw conflict('A TEST mandate is required before a collection attempt can be reserved');
-    }
-    const reason = debitGateReason({
-      statementStatus: statement.status,
-      amountDuePaise: statement.amountDuePaise,
-      noticeSentAt: statement.preDebitNoticeSentAt,
-      debitNotBefore: statement.debitNotBefore,
-      mandateStatus: statement.mandate.status,
-      mandateMaxAmountPaise: statement.mandate.maxAmountPaise,
-      mandateValidFrom: statement.mandate.validFrom,
-      mandateValidUntil: statement.mandate.validUntil,
-      mandateTermsAcceptedAt: statement.mandate.cancellationTermsAcceptedAt,
-      pilotCapPaise: Math.min(pilotCapPaise, env.SHOP_COLLECTION_PILOT_CAP_PAISE),
-      now,
-    });
-    if (reason) throw conflict(reason);
-    const existing = await tx.shopCommissionCollectionAttempt.findFirst({
-      where: { statementId, status: { in: ['pending', 'submitted'] } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (existing) return existing;
-
-    const attempt = await tx.shopCommissionCollectionAttempt.create({
-      data: {
-        statementId,
-        amountPaise: statement.amountDuePaise,
-        provider: 'razorpay_test',
-        idempotencyKey: randomUUID(),
-      },
-    });
-    await tx.shopCommissionStatement.update({ where: { id: statementId }, data: { status: 'debit_pending' } });
-    return attempt;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

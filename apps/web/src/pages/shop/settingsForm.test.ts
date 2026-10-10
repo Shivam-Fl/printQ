@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSettingsPatch,
   coordinateWarning,
+  locationChangeNeedsReview,
   formatRupeesField,
   parseRupees,
   typePrice,
@@ -140,7 +141,22 @@ describe('coordinate sanity warning (OWN-10, UI only)', () => {
     expect(coordinateWarning(28.6139, 77.209)).toBeNull();
     expect(coordinateWarning(null, null)).toBeNull();
   });
-  it('does not claim a non-Indian location is wrong', () => {
-    expect(coordinateWarning(51.5, -0.12)).toBeNull();
+  it('warns for a location outside India', () => {
+    expect(coordinateWarning(51.5, -0.12)).toMatch(/outside India/);
+  });
+});
+
+describe('locationChangeNeedsReview', () => {
+  const at = (latitude: number | null, longitude: number | null) => ({ ...base, latitude, longitude });
+  it('is false for a ~100 m re-capture and for no change', () => {
+    expect(locationChangeNeedsReview(at(28.6139, 77.209), at(28.6148, 77.209))).toBe(false);
+    expect(locationChangeNeedsReview(at(28.6139, 77.209), at(28.6139, 77.209))).toBe(false);
+  });
+  it('is true for a ~200 m move or clearing the pin', () => {
+    expect(locationChangeNeedsReview(at(28.6139, 77.209), at(28.6157, 77.209))).toBe(true);
+    expect(locationChangeNeedsReview(at(28.6139, 77.209), at(null, null))).toBe(true);
+  });
+  it('is false when there was no pin before', () => {
+    expect(locationChangeNeedsReview(at(null, null), at(28.6, 77.2))).toBe(false);
   });
 });

@@ -6,3 +6,4 @@ export * from './assignment.js';
 export * from './queueing.js';
 export * from './schemas.js';
 export * from './queueBands.js';
+export * from './capability.js';
