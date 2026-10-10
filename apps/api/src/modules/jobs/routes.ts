@@ -20,7 +20,7 @@ import { refundIfPaid } from '../payments/refund.js';
 import { renderReceipt } from '../../lib/receipt.js';
 import { resolveCoupon, redeemCoupon } from './coupons.js';
 import { applyTransition } from './transitions.js';
-import { scheduleFileDeletion } from '../../lib/fileRetention.js';
+import { assertFileCanBackNewJob, scheduleFileDeletion } from '../../lib/fileRetention.js';
 import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
@@ -85,6 +85,8 @@ jobsRouter.post(
       include: { shop: true },
     });
     if (!file || file.pages == null) throw notFound('File not ready');
+    // reference-counted file semantics: see fileRetention.ts
+    await assertFileCanBackNewJob(file);
 
     if (!(await isShopOperational(file.shopId))) {
       throw conflict('This shop has paused new orders or has no connected printer. Try again when it reopens.');
@@ -243,6 +245,11 @@ jobsRouter.get(
       include: { shop: true, student: true, file: true },
     });
     if (!job) throw notFound();
+    // A receipt is proof of payment: never issue one while the order is merely
+    // prepared (counter_due) or unpaid. Staff confirming payment flips this.
+    if (job.paymentStatus !== 'paid') {
+      throw conflict('Your receipt is available once the shop confirms your payment.');
+    }
 
     const pdf = await renderReceipt({
       jobId: job.id,

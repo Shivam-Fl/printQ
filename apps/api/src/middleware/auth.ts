@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
-import { verifyToken } from '../lib/tokens.js';
+import { verifyPreviewToken, verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { unauthorized } from '../lib/errors.js';
 
@@ -33,18 +33,24 @@ export function requireStudent(req: Request, _res: Response, next: NextFunction)
 }
 
 /**
- * Same as requireStudent but also accepts ?token= — needed only for the PDF
- * preview iframe, where the browser can't attach an Authorization header.
+ * Student session (Authorization header) OR a short-lived, single-file preview
+ * token in `?pt=` — for the "open full PDF" link, where a browser navigation
+ * cannot attach a header. The long-lived session token is never accepted in a
+ * URL. Requires the route to have an `:id` file param.
  */
-export function requireStudentAllowQueryToken(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): void {
-  const token = bearer(req) ?? (typeof req.query.token === 'string' ? req.query.token : null);
-  const claims = token ? verifyToken(token) : null;
-  if (!claims || claims.typ !== 'student') return next(unauthorized());
-  req.student = { id: claims.sub };
+export function requireStudentOrPreviewToken(req: Request, _res: Response, next: NextFunction): void {
+  const header = bearer(req);
+  if (header) {
+    const claims = verifyToken(header);
+    if (!claims || claims.typ !== 'student') return next(unauthorized());
+    req.student = { id: claims.sub };
+    return next();
+  }
+  const fileId = typeof req.params.id === 'string' ? req.params.id : '';
+  const preview = typeof req.query.pt === 'string' ? req.query.pt : '';
+  const studentId = preview && fileId ? verifyPreviewToken(preview, fileId) : null;
+  if (!studentId) return next(unauthorized());
+  req.student = { id: studentId };
   next();
 }
 

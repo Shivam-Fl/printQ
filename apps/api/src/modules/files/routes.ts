@@ -6,7 +6,8 @@ import { fileTypeFromBuffer } from 'file-type';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
-import { requireStudent, requireStudentAllowQueryToken } from '../../middleware/auth.js';
+import { requireStudent, requireStudentOrPreviewToken } from '../../middleware/auth.js';
+import { PREVIEW_TOKEN_TTL_SECONDS, signPreviewToken } from '../../lib/tokens.js';
 import { uploadLimiter } from '../../middleware/rateLimit.js';
 import { storage } from '../../providers/storage/index.js';
 import { fileRetentionDeadline } from '../../lib/fileRetention.js';
@@ -215,15 +216,68 @@ filesRouter.get(
  * streams through the API; object-store drivers redirect to a short-lived
  * signed URL.
  */
+/** Headers for any response that may be reached through a tokenised URL. */
+function setPrivateNoReferrer(res: Pick<import('express').Response, 'setHeader'>): void {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cache-Control', 'private, no-store');
+}
+
+/**
+ * Mint a short-lived, single-file link for the "Open full PDF" fallback (a
+ * navigation cannot carry an Authorization header). Ownership is in the WHERE
+ * clause; missing and foreign files are both 404.
+ */
+filesRouter.post(
+  '/:id/preview-link',
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const id = param(req, 'id');
+    const file = await prisma.uploadedFile.findFirst({
+      where: { id, studentId: req.student!.id, status: 'ready', convertedKey: { not: null } },
+      select: { id: true },
+    });
+    if (!file) throw notFound();
+    setPrivateNoReferrer(res);
+    res.json({
+      url: `/api/files/${file.id}/preview?pt=${encodeURIComponent(signPreviewToken(req.student!.id, file.id))}`,
+      expiresInSeconds: PREVIEW_TOKEN_TTL_SECONDS,
+    });
+  }),
+);
+
+/**
+ * The print-ready PDF bytes for the in-page (pdf.js) preview. Always streamed
+ * through the API, with header auth only, so no credential ever sits in a URL
+ * and the object store needs no CORS configuration.
+ */
+filesRouter.get(
+  '/:id/preview/data',
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const file = await prisma.uploadedFile.findFirst({
+      where: { id: param(req, 'id'), studentId: req.student!.id, status: 'ready' },
+      select: { convertedKey: true },
+    });
+    if (!file?.convertedKey) throw notFound();
+    const bytes = await storage.get(file.convertedKey);
+    setPrivateNoReferrer(res);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(bytes);
+  }),
+);
+
 filesRouter.get(
   '/:id/preview',
-  requireStudentAllowQueryToken,
+  requireStudentOrPreviewToken,
   asyncHandler(async (req, res) => {
     const file = await prisma.uploadedFile.findFirst({
       where: { id: param(req, 'id'), studentId: req.student!.id },
     });
     if (!file || !file.convertedKey || file.status !== 'ready') throw notFound();
 
+    setPrivateNoReferrer(res);
     const signed = await storage.getSignedUrl(file.convertedKey, 300);
     if (signed) {
       res.redirect(302, signed);

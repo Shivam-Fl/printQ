@@ -120,7 +120,7 @@ export async function renewStudentSession(): Promise<string | null> {
 
 async function requestJson<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData },
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal },
   allowStudentRenewal: boolean,
 ): Promise<T> {
   const headers: Record<string, string> = {};
@@ -137,7 +137,12 @@ async function requestJson<T>(
     body = JSON.stringify(options.body);
   }
 
-  const res = await fetch(`${API_URL}${path}`, { method: options.method ?? 'GET', headers, body });
+  const res = await fetch(`${API_URL}${path}`, {
+    method: options.method ?? 'GET',
+    headers,
+    body,
+    signal: options.signal,
+  });
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
     if (res.status === 401 && options.role === 'student' && allowStudentRenewal) {
@@ -157,7 +162,7 @@ async function requestJson<T>(
 
 export async function api<T>(
   path: string,
-  options: { method?: string; body?: unknown; role?: Role; formData?: FormData } = {},
+  options: { method?: string; body?: unknown; role?: Role; formData?: FormData; signal?: AbortSignal } = {},
 ): Promise<T> {
   return requestJson<T>(path, options, true);
 }

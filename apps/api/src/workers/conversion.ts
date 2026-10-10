@@ -13,6 +13,7 @@ import { env } from '../config/env.js';
 import { storage } from '../providers/storage/index.js';
 import { publishEvent } from '../realtime/events.js';
 import {
+  ACTIVE_FILE_JOB_STATUSES,
   ensureFileDeletionJob,
   scheduleFileDeletion,
   scheduleVerifiedPrintFileDeletion,
@@ -180,14 +181,8 @@ export async function convertFile(fileId: string): Promise<void> {
   }
 }
 
-const RECOVERABLE_CONTENT_STATUSES = new Set([
-  'pending_payment',
-  'awaiting_arrival',
-  'queued',
-  'notified',
-  'otp_verified',
-  'printing',
-]);
+/** Same set the scheduling side uses: see the reference-count notes in fileRetention.ts. */
+const RECOVERABLE_CONTENT_STATUSES = new Set<string>(ACTIVE_FILE_JOB_STATUSES);
 
 export function keysForDeletion(file: {
   id: string;
