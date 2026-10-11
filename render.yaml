@@ -8,17 +8,19 @@
 # Splitting API/conversion workers is still required before unrestricted launch.
 
 services:
-  - name: printq-redis
+  - name: printq-redis-sg
     type: keyvalue
     plan: free
+    region: singapore
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere (tighten once you're off the free plan)
 
-  - name: printq-web
+  - name: printq-web-sg
     type: web
     runtime: docker
     plan: free
+    region: singapore
     # Promote only a CI- and development-QA-verified SHA with
     # `render deploys create <service-id> --commit <sha> --wait`.
     autoDeployTrigger: off
@@ -49,7 +51,7 @@ services:
         value: postgres
       - key: REDIS_URL
         fromService:
-          name: printq-redis
+          name: printq-redis-sg
           type: keyvalue
           property: connectionString
 
