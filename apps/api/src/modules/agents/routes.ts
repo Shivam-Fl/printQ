@@ -41,9 +41,9 @@ const heartbeatSchema = z
   .object({
     // Ids of the jobs this process is working on right now (claimed, not yet
     // handed to the spooler). Omitted by older agents.
-    inFlightJobIds: z.array(z.string().uuid()).max(100).optional(),
+    inFlightJobIds: z.array(z.uuid()).max(100).optional(),
   })
-  .passthrough()
+  .loose()
   .default({});
 
 /** Liveness ping — the dashboard shows agents red after missed heartbeats. */
@@ -69,7 +69,7 @@ agentRouter.post(
 
 const detectedPrintersSchema = z.object({
   printers: z
-    .array(z.object({ name: z.string().trim().min(1).max(200), paperSizes: z.array(z.string()).default([]) }))
+    .array(z.object({ name: z.string().trim().min(1).max(200), paperSizes: z.array(z.string()).max(50).default([]) }))
     .max(50),
 });
 
@@ -231,8 +231,8 @@ const completePrintSchema = z.object({
 });
 
 const printerTestResultSchema = z.object({
-  testId: z.string().uuid(),
-  printerId: z.string().uuid(),
+  testId: z.uuid(),
+  printerId: z.uuid(),
   status: z.enum(['spool_accepted', 'failed']),
   error: z.string().trim().max(200).optional(),
 });
