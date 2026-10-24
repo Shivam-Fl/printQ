@@ -36,15 +36,15 @@ const ADMIN_RESET_RESEND_MS = 60_000;
 const ADMIN_RESET_DAILY_LIMIT = 10;
 const ADMIN_RESET_MAX_ATTEMPTS = 5;
 const coordinatesSchema = z.object({
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const campusInputSchema = z.object({
@@ -58,15 +58,15 @@ const campusPatchSchema = z.object({
   address: z.string().trim().min(3).max(300).optional(),
   slug: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
