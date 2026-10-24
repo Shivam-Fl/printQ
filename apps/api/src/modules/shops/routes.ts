@@ -102,7 +102,7 @@ shopRouter.get(
 // account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
 const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
 const optionalCoord = (v: unknown, max: number): number | undefined => {
-  if (typeof v !== 'string' || v.trim() === '') return undefined;
+  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d{1,10})?$/.test(v.trim())) return undefined;
   const n = Number(v);
   return Number.isFinite(n) && Math.abs(n) <= max ? n : undefined;
 };
@@ -119,7 +119,7 @@ const geocodeSearch = asyncHandler(async (req, res) => {
 
 shopRouter.get('/geocode', geocodeLimiter, geocodeSearch);
 // Deprecated alias kept so shipped clients keep working.
-shopRouter.get('/location-search', geocodeLimiter, geocodeSearch);
+shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeSearch);
 
 /** Pin to address label for prefilling the address. label is null when unknown or the provider is down. */
 shopRouter.get(
@@ -128,7 +128,7 @@ shopRouter.get(
   asyncHandler(async (req, res) => {
     const lat = optionalCoord(req.query.lat, 90);
     const lng = optionalCoord(req.query.lng, 180);
-    if (lat === undefined || lng === undefined) throw badRequest('lat and lng are required');
+    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) throw badRequest('A valid lat and lng are required');
     res.json({ label: await reverseLocation(lat, lng) });
   }),
 );

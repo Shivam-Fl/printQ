@@ -43,10 +43,8 @@ describe('geocode routes (public, no auth)', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
-  it('keeps the deprecated /location-search alias working', async () => {
-    const res = await fetch(`${base}/api/shop/location-search?q=corner+print`);
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { results: unknown[] }).results).toHaveLength(1);
+  it('keeps the deprecated /location-search alias owner-only', async () => {
+    expect((await fetch(`${base}/api/shop/location-search?q=corner+print`)).status).toBe(401);
   });
 
   it('reverse returns a label, null, and 400 without valid coordinates', async () => {
@@ -56,6 +54,8 @@ describe('geocode routes (public, no auth)', () => {
     expect(await (await fetch(`${base}/api/shop/geocode/reverse?lat=18.5&lng=73.8`)).json()).toEqual({ label: null });
     expect((await fetch(`${base}/api/shop/geocode/reverse?lat=18.5`)).status).toBe(400);
     expect((await fetch(`${base}/api/shop/geocode/reverse?lat=200&lng=73.8`)).status).toBe(400);
+    expect((await fetch(`${base}/api/shop/geocode/reverse?lat=0&lng=0`)).status).toBe(400);
+    expect((await fetch(`${base}/api/shop/geocode/reverse?lat=0x10&lng=1e1`)).status).toBe(400);
   });
 
   it('rate limits with 429 after the per-IP budget is spent', async () => {
