@@ -4,14 +4,15 @@ import { distanceMeters, type Coordinates } from '../../lib/geo.js';
 export const publishedShopWhere = {
   verificationStatus: 'verified' as const,
   publishedAt: { not: null },
-  campus: { is: { isActive: true } },
+  // A campus is optional; a shop on a campus must have it active.
+  OR: [{ campusId: null }, { campus: { is: { isActive: true } } }],
 };
 
 export interface NearbyCandidate {
   slug: string;
   name: string;
   address: string;
-  campusName: string;
+  campusName: string | null;
   latitude: number | null;
   longitude: number | null;
   open: boolean;
@@ -21,7 +22,7 @@ export interface NearbyShop {
   slug: string;
   name: string;
   address: string;
-  campusName: string;
+  campusName: string | null;
   open: boolean;
   /** Rounded so discovery never discloses the student's exact GPS relationship. */
   distanceM: number;

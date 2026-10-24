@@ -264,16 +264,14 @@ describe.runIf(dbReady)('shop settings + session revocation (database)', () => {
       });
       expect(res.status).toBe(400);
     });
-    it('rejects swapped lat/lng (77.5, 28.6) and other non-India pins without touching the shop', async () => {
-      const { shop, token } = await makeShop('coords-swapped');
-      for (const body of [{ latitude: 77.5, longitude: 28.6 }, { latitude: 51.5, longitude: -0.12 }]) {
-        const res = await patch(token, body);
-        expect(res.status).toBe(400);
-        expect(JSON.stringify(await res.json())).toContain('outside India');
+    it('rejects out-of-range pins (lat 100, lng 200) but accepts valid pins anywhere in the world', async () => {
+      const { shop, token } = await makeShop('coords-world');
+      for (const body of [{ latitude: 100, longitude: 28.6 }, { latitude: 28.6, longitude: 200 }]) {
+        expect((await patch(token, body)).status).toBe(400);
       }
-      const after = await reload(shop.id);
-      expect(after.verificationStatus).toBe('verified');
-      expect(after.latitude).toBeCloseTo(28.613939, 5);
+      expect((await reload(shop.id)).latitude).toBeCloseTo(28.613939, 5);
+      expect((await patch(token, { latitude: 51.5072, longitude: -0.1276 })).status).toBe(200);
+      expect((await reload(shop.id)).latitude).toBeCloseTo(51.5072, 4);
     });
     it('accepts island extremes of India', async () => {
       const { token } = await makeShop('coords-islands');
@@ -366,6 +364,46 @@ describe.runIf(dbReady)('shop settings + session revocation (database)', () => {
       expect(login.status).toBe(200);
       const { token: fresh } = (await login.json()) as { token: string };
       expect((await call('/api/shop/me', fresh)).status).toBe(200);
+    });
+  });
+
+  describe('campus optional, worldwide pin (onboarding for any shop)', () => {
+    it('registers with no campus, saves a pin-only location outside India, and stays live through edits', async () => {
+      const email = `qa-nocampus-${randomUUID().slice(0, 8)}@example.test`;
+      emails.push(email);
+      const reg = await call('/api/auth/shop/register', null, {
+        method: 'POST',
+        body: { shopName: 'Corner Print London', ownerName: 'Ann', email, password: 'correct-horse-1', address: 'Pinned location' },
+      });
+      expect(reg.status).toBe(201);
+      const { token, user } = (await reg.json()) as { token: string; user: { id: string; shopId: string } };
+      userIds.push(user.id);
+      shopIds.push(user.shopId);
+      const created = await reload(user.shopId);
+      expect(created.campusId).toBeNull();
+      expect(created.autoLive).toBe(true);
+
+      // Pin only: no search, free-text address 'Pinned location', outside India.
+      const pin = await patch(token, { latitude: 51.5072, longitude: -0.1276, address: 'Pinned location' });
+      expect(pin.status).toBe(200);
+      const status = (await (await call('/api/shop/setup-status', token)).json()) as {
+        setup: { profileReady: boolean; locationReady: boolean; verification: { canSubmit: boolean } };
+      };
+      expect(status.setup.profileReady).toBe(true);
+      expect(status.setup.locationReady).toBe(true);
+
+      // Auto-live shops are not unpublished by edits.
+      await prisma.shop.update({ where: { id: user.shopId }, data: { verificationStatus: 'verified', verifiedAt: new Date(), publishedAt: new Date() } });
+      expect((await patch(token, { name: 'Corner Print Soho' })).status).toBe(200);
+      expect((await reload(user.shopId)).publishedAt).not.toBeNull();
+    });
+
+    it('verification/submit no longer demands a campus (it asks only for location, printer, agent, menu)', async () => {
+      const { shop, token } = await makeShop('nocampus-submit');
+      await prisma.shop.update({ where: { id: shop.id }, data: { campusId: null, verificationStatus: 'draft', publishedAt: null, verifiedAt: null } });
+      const res = await call('/api/shop/verification/submit', token, { method: 'POST' });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).not.toMatch(/campus/i);
     });
   });
 });

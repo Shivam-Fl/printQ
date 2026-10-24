@@ -16,6 +16,7 @@ import {
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
+import { publishIfReady } from './autoLive.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
 import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
@@ -43,7 +44,7 @@ import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
-import { distanceMeters, isWithinIndia, MATERIAL_MOVE_M, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
+import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { searchIndianLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
@@ -125,6 +126,11 @@ shopRouter.get(
       prisma.agent.findMany({ where: { shopId } }),
     ]);
     if (!shop) throw notFound();
+    // New (autoLive) shops go live by themselves once everything is in place.
+    if (await publishIfReady(shopId)) {
+      const fresh = await prisma.shop.findUnique({ where: { id: shopId } });
+      if (fresh) Object.assign(shop, fresh);
+    }
 
     const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
     const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
@@ -138,7 +144,7 @@ shopRouter.get(
 
     res.json({
       setup: {
-        profileReady: Boolean(shop.name.trim() && shop.address.trim() && shop.campusId),
+        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
         locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
@@ -158,7 +164,6 @@ shopRouter.get(
             && pricingReady
             && readyPrinters.length > 0
             && agentReady
-            && Boolean(shop.campusId)
             && shop.verificationStatus !== 'submitted'
             && shop.verificationStatus !== 'verified',
         },
@@ -197,11 +202,7 @@ const shopPatchSchema = z.object({
   /** printOptionsVersion the client last loaded; a stale one cannot overwrite a newer menu. */
   expectedPrintOptionsVersion: z.number().int().min(0).optional(),
 }).superRefine((value, context) => {
-  if (typeof value.latitude === 'number' && typeof value.longitude === 'number'
-    && !(value.latitude === 0 && value.longitude === 0)
-    && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
-  }
+  // Worldwide: no country restriction on the pin (range is already enforced above).
   if (value.latitude === 0 && value.longitude === 0) {
     // "Null Island": the classic unset/geolocation-failed default, never a real counter.
     context.addIssue({
@@ -256,6 +257,7 @@ shopRouter.patch(
         address: true,
         campusId: true,
         campusName: true,
+        autoLive: true,
         latitude: true,
         longitude: true,
         printOptions: true,
@@ -288,7 +290,8 @@ shopRouter.patch(
         delete body.longitude;
       }
     }
-    const verificationReset = nameChanged || addressChanged || campusChanged || locationChanged;
+    // Auto-live shops stay live through edits; manually verified shops are re-reviewed as before.
+    const verificationReset = !current.autoLive && (nameChanged || addressChanged || campusChanged || locationChanged);
 
     let menuChanged = false;
     if ('printOptions' in body) {
@@ -335,6 +338,7 @@ shopRouter.patch(
         'SETTINGS_CHANGED_ELSEWHERE',
       );
     }
+    await publishIfReady(shopId);
     const shop = await prisma.shop.findUniqueOrThrow({
       where: { id: shopId },
       select: {
@@ -467,8 +471,14 @@ shopRouter.post(
     const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
     const hasAgent = shop.agents.length > 0;
     const hasMenu = shopOptions(shop).papers.length > 0;
-    if (!shop.campus || !shop.campus.isActive || !hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
-      throw badRequest('Complete campus, location, printer, agent, and print-menu setup before requesting verification');
+    if (!hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
+      throw badRequest('Complete location, printer, agent, and print-menu setup before requesting verification');
+    }
+    // A campus is optional. Auto-live shops publish themselves as soon as the agent is online.
+    if (await publishIfReady(shop.id)) {
+      const live = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id }, select: { verificationStatus: true, verificationSubmittedAt: true } });
+      res.json({ verification: { status: live.verificationStatus, submittedAt: live.verificationSubmittedAt } });
+      return;
     }
     if (shop.verificationStatus === 'verified') {
       res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });

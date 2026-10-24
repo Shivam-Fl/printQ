@@ -395,8 +395,8 @@ adminRouter.post(
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
     if (shop.verificationStatus !== 'submitted') throw conflict('Only submitted shops can be verified');
-    if (!shop.campus?.isActive || shop.latitude == null || shop.longitude == null) {
-      throw conflict('The shop no longer has an active campus and complete location');
+    if ((shop.campus && !shop.campus.isActive) || shop.latitude == null || shop.longitude == null) {
+      throw conflict('The shop is on an inactive campus or has no complete location');
     }
     const verified = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
@@ -442,8 +442,8 @@ adminRouter.post(
     const id = param(req, 'id');
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
-    if (shop.verificationStatus !== 'verified' || !shop.campus?.isActive) {
-      throw conflict('Only verified shops on active campuses can be published');
+    if (shop.verificationStatus !== 'verified' || (shop.campus && !shop.campus.isActive)) {
+      throw conflict('Only verified shops that are not on an inactive campus can be published');
     }
     const published = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
