@@ -35,7 +35,7 @@ describe.runIf(dbReady)('agent heartbeat publishes a ready auto-live shop (datab
   let base = '';
   const shopIds: string[] = [];
 
-  async function makeShop(verificationStatus: 'draft' | 'rejected', autoLive = true) {
+  async function makeShop(verificationStatus: 'draft' | 'rejected' | 'verified', autoLive = true) {
     const shop = await prisma.shop.create({
       data: {
         slug: `pub-${randomUUID().slice(0, 8)}`,
@@ -103,5 +103,14 @@ describe.runIf(dbReady)('agent heartbeat publishes a ready auto-live shop (datab
     const { shop, token } = await makeShop('draft', false);
     expect((await heartbeat(token)).status).toBe(200);
     expect((await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).publishedAt).toBeNull();
+  });
+
+  it('keeps an admin-unpublished auto-live shop (verified, publishedAt null) hidden after heartbeats', async () => {
+    const { shop, token } = await makeShop('verified');
+    expect((await heartbeat(token)).status).toBe(200);
+    expect((await heartbeat(token)).status).toBe(200);
+    const after = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } });
+    expect(after.publishedAt).toBeNull();
+    expect(after.verificationStatus).toBe('verified');
   });
 });
