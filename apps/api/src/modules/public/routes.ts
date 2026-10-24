@@ -98,8 +98,8 @@ publicRouter.get(
 publicRouter.post(
   '/shops/nearby',
   validateBody(z.object({
-    latitude: z.number().finite().min(-90).max(90),
-    longitude: z.number().finite().min(-180).max(180),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
     maxDistanceM: z.number().int().min(100).max(20_000).default(5_000),
   })),
   asyncHandler(async (req, res) => {
