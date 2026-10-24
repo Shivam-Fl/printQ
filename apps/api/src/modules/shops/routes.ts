@@ -1175,6 +1175,7 @@ shopRouter.post(
     });
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }
@@ -1208,6 +1209,7 @@ shopRouter.patch(
     // its PC is reachable from here — auto-add without a manual chip-pick.
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }

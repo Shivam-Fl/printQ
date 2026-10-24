@@ -11,6 +11,13 @@ import { invalidatePublicCaches } from '../public/cache.js';
  * Returns true when the shop was published by this call.
  */
 export async function publishIfReady(shopId: string): Promise<boolean> {
+  // Cheap gate for hot callers (agent heartbeats): live, rejected and legacy shops pay one small read.
+  const gate = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { autoLive: true, publishedAt: true, verificationStatus: true },
+  });
+  if (!gate || !gate.autoLive || gate.publishedAt || (gate.verificationStatus !== 'draft' && gate.verificationStatus !== 'submitted')) return false;
+
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     include: { printers: true, agents: true },
