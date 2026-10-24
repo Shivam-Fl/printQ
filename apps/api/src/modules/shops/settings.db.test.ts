@@ -398,6 +398,14 @@ describe.runIf(dbReady)('shop settings + session revocation (database)', () => {
       expect((await reload(user.shopId)).publishedAt).not.toBeNull();
     });
 
+    it('an admin-rejected autoLive shop cannot resubmit itself back to live', async () => {
+      const { shop, token } = await makeShop('rejected-resubmit');
+      await prisma.shop.update({ where: { id: shop.id }, data: { autoLive: true, verificationStatus: 'rejected', publishedAt: null, verifiedAt: null } });
+      const res = await call('/api/shop/verification/submit', token, { method: 'POST' });
+      expect(res.status).toBe(409);
+      expect((await reload(shop.id)).verificationStatus).toBe('rejected');
+    });
+
     it('verification/submit no longer demands a campus (it asks only for location, printer, agent, menu)', async () => {
       const { shop, token } = await makeShop('nocampus-submit');
       await prisma.shop.update({ where: { id: shop.id }, data: { campusId: null, verificationStatus: 'draft', publishedAt: null, verifiedAt: null } });

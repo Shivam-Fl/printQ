@@ -471,6 +471,10 @@ shopRouter.post(
       include: { campus: true, printers: true, agents: true },
     });
     if (!shop) throw notFound();
+    if (shop.autoLive && shop.verificationStatus === 'rejected') {
+      // An admin rejection is final for auto-live shops: resubmitting must not skip the admin.
+      throw conflict('This shop was rejected by PrintQs review. Contact support to have it reviewed again.');
+    }
     const hasCoordinates = shop.latitude != null && shop.longitude != null;
     const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
     const hasAgent = shop.agents.length > 0;
