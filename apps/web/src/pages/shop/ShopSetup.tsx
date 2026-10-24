@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
+import { reverseLabel } from '../../lib/geocode.js';
 import ShopNav from '../../components/ShopNav.js';
+import ShopLocationEditor from '../../components/ShopLocationEditor.js';
+import { addressAfterReverse, buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
 
 interface SetupStatus {
   profileReady: boolean;
@@ -25,49 +28,44 @@ interface SetupStatus {
     verifiedAt: string | null;
     publishedAt: string | null;
     canSubmit: boolean;
+    /** New shops publish themselves once everything is in place; only an explicit false means legacy manual review. */
+    autoLive?: boolean;
   };
 }
 
-const STEPS = [
+/** Signed-out visits (the desktop tray link) come back here after login. */
+const LOGIN_THEN_SETUP = '/dashboard/login?next=/dashboard/setup';
+
+type StepKey = 'locationReady' | 'pricingReady' | 'agentReady' | 'ready';
+
+const STEPS: Array<{ key: StepKey; number: string; title: string; body: string; to?: string; action?: string }> = [
   {
-    key: 'profileReady' as const,
+    key: 'locationReady',
     number: '01',
-    title: 'Confirm shop details',
-    body: 'Check the shop name, campus and counter address students will see.',
-    to: '/dashboard/settings',
-    action: 'Review profile',
+    title: 'Confirm your location',
+    body: 'We try to find you automatically. Check the pin and address, then save.',
   },
   {
-    key: 'locationReady' as const,
+    key: 'pricingReady',
     number: '02',
-    title: 'Secure the arrival zone',
-    body: 'While at the counter, capture its location so remote users cannot take live queue positions.',
+    title: 'Check your prices',
+    body: 'Sensible defaults are already filled in. Keep them or change paper, colour and binding prices.',
     to: '/dashboard/settings',
-    action: 'Set counter location',
+    action: 'Review prices',
   },
   {
-    key: 'pricingReady' as const,
+    key: 'agentReady',
     number: '03',
-    title: 'Set services and prices',
-    body: 'Configure paper, colour, duplex and binding prices once. Orders arrive fully specified.',
-    to: '/dashboard/settings',
-    action: 'Configure pricing',
-  },
-  {
-    key: 'agentReady' as const,
-    number: '04',
-    title: 'Connect a shop computer',
-    body: 'Run the PrintQ agent on the Windows PC that can already print to your devices.',
+    title: 'Connect your shop PC',
+    body: 'Install the PrintQ app on the computer next to your printer. It finds your printers by itself.',
     to: '/dashboard/agents',
     action: 'Connect computer',
   },
   {
-    key: 'printerReady' as const,
-    number: '05',
-    title: 'Review printer capabilities',
-    body: 'Confirm loaded paper, colour support, finishing and speed so routing stays accurate.',
-    to: '/dashboard/printers',
-    action: 'Review printers',
+    key: 'ready',
+    number: '04',
+    title: 'You are live',
+    body: 'As soon as your PC is connected, students nearby can find your shop and send jobs.',
   },
 ];
 
@@ -78,23 +76,44 @@ export default function ShopSetup() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [submittingVerification, setSubmittingVerification] = useState(false);
+  const [pin, setPin] = useState<{ latitude: number | null; longitude: number | null }>({ latitude: null, longitude: null });
+  const [address, setAddress] = useState('');
+  const [shopLoaded, setShopLoaded] = useState(false);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const [editingLocation, setEditingLocation] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const result = await api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' });
       setSetup(result.setup);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
+      if ((err as { status?: number }).status === 401) navigate(LOGIN_THEN_SETUP);
       else setError(err instanceof Error ? err.message : 'Could not load setup');
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(LOGIN_THEN_SETUP);
       return;
     }
     void refresh();
+    api<{ shop: { address: string; latitude: number | null; longitude: number | null } }>('/api/shop/me', { role: 'shop' })
+      .then((r) => {
+        // A pin found during register wins over an empty shop, so the owner is not asked for location twice.
+        const fromRegister = r.shop.latitude == null || r.shop.longitude == null ? takeRegisterPin() : null;
+        setPin(fromRegister ?? { latitude: r.shop.latitude, longitude: r.shop.longitude });
+        setAddress(r.shop.address);
+        if (fromRegister) {
+          // The register pin skipped the editor's lookup: fill the address now unless the owner already has text.
+          void reverseLabel(fromRegister.latitude, fromRegister.longitude)
+            .then((label) => setAddress((current) => addressAfterReverse(current, label)))
+            .catch(() => { /* keep the saved address */ });
+        }
+      })
+      .catch(() => { /* the editor still works without the saved values */ })
+      .finally(() => setShopLoaded(true));
   }, [navigate, refresh]);
 
   useEffect(() => {
@@ -119,6 +138,33 @@ export default function ShopSetup() {
     setTimeout(() => setCopied(false), 1600);
   }
 
+  const onPin = useCallback((latitude: number, longitude: number) => setPin({ latitude, longitude }), []);
+
+  async function saveLocation() {
+    const body = buildLocationSave(pin, address);
+    if (!body) return;
+    // Legacy (manually verified) shops are re-reviewed when the pin moves; auto-live shops are not.
+    if (setup?.verification.autoLive === false && setup.locationReady && setup.verification.status !== 'draft'
+      && !confirm('Changing your counter location sends your shop for re-review and hides it from students until approved. Continue?')) {
+      return;
+    }
+    setSavingLocation(true);
+    setLocationError('');
+    try {
+      await api('/api/shop/me', {
+        method: 'PATCH',
+        role: 'shop',
+        body,
+      });
+      setEditingLocation(false);
+      await refresh();
+    } catch (err) {
+      setLocationError(err instanceof Error ? err.message : 'Could not save the location. Try again.');
+    } finally {
+      setSavingLocation(false);
+    }
+  }
+
   async function submitVerification() {
     setSubmittingVerification(true);
     setError('');
@@ -139,7 +185,7 @@ export default function ShopSetup() {
         <div>
           <span className="eyebrow-label">Launch checklist</span>
           <h1>Get your counter ready</h1>
-          <p>Five practical steps. Most shops finish this in under ten minutes.</p>
+          <p>Four short steps, about three minutes. No campus needed.</p>
         </div>
         <div className="setup-score" aria-label={`${completeCount} of ${STEPS.length} setup steps complete`}>
           <strong>{completeCount}/{STEPS.length}</strong>
@@ -156,8 +202,8 @@ export default function ShopSetup() {
       {setup?.ready && (
         <div className="notice success-notice">
           <div>
-            <strong>Your shop is verified and published.</strong>
-            <p>Keep the agent running on the counter PC and share your student link.</p>
+            <strong>Your shop is live.</strong>
+            <p>Students nearby can find it now. Keep PrintQ running on the counter PC and share your student link.</p>
           </div>
           <Link className="button-link" to="/dashboard">Open live queue</Link>
         </div>
@@ -174,13 +220,43 @@ export default function ShopSetup() {
               </div>
               <h2>{step.title}</h2>
               <p>{step.body}</p>
-              <Link to={step.to}>{done ? 'Review' : step.action} →</Link>
+              {step.key === 'locationReady' && setup && shopLoaded && (!done || editingLocation) && (
+                <>
+                  <ShopLocationEditor
+                    latitude={pin.latitude}
+                    longitude={pin.longitude}
+                    address={address}
+                    onPin={onPin}
+                    onAddress={setAddress}
+                    autoDetect={!done}
+                  />
+                  <button onClick={saveLocation} disabled={savingLocation || pin.latitude == null}>
+                    {savingLocation ? 'Saving…' : 'Save location'}
+                  </button>
+                  {pin.latitude == null && <p className="dim">Use my location, search, or click the map to place the pin. You can always type the address yourself.</p>}
+                  {locationError && <div className="error-box" role="alert">{locationError}</div>}
+                </>
+              )}
+              {step.key === 'locationReady' && done && !editingLocation && (
+                <button type="button" className="ghost small" onClick={() => setEditingLocation(true)}>Review location →</button>
+              )}
+              {step.to && <Link to={step.to}>{done ? 'Review' : step.action} →</Link>}
             </section>
           );
         })}
       </div>
 
-      {setup && !setup.ready && (
+      {setup && !setup.ready && setup.verification.autoLive !== false && (
+        <section className="share-panel">
+          <div className="share-copy">
+            <span className="eyebrow-label">Going live</span>
+            <h2>Your shop goes live by itself</h2>
+            <p>There is nothing to submit and no review to wait for. Once your location is saved, prices are set and your PC is connected to a printer, students nearby can find you.</p>
+          </div>
+        </section>
+      )}
+
+      {setup && !setup.ready && setup.verification.autoLive === false && (
         <section className="share-panel">
           <div className="share-copy">
             <span className="eyebrow-label">Independent verification</span>
@@ -190,7 +266,7 @@ export default function ShopSetup() {
             ) : setup.verification.status === 'verified' ? (
               <p>Your counter is verified. A platform administrator still needs to publish it before it is visible to students.</p>
             ) : (
-              <p>After the five practical setup steps are complete, submit the counter for a platform review. This prevents unverified locations appearing to students.</p>
+              <p>After the setup steps are complete, submit the counter for a platform review.</p>
             )}
             {setup.verification.canSubmit && (
               <button className="button-link" onClick={submitVerification} disabled={submittingVerification}>

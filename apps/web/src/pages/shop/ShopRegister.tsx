@@ -1,23 +1,54 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setShopRole, setToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
+import { reverseLabel } from '../../lib/geocode.js';
+import { stashRegisterPin } from '../../lib/locationFlow.js';
 
 export default function ShopRegister() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
     shopName: '',
     address: '',
-    campusName: '',
     ownerName: '',
     email: '',
     password: '',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [locating, setLocating] = useState(false);
+  const [locateNote, setLocateNote] = useState('');
+  /** Coordinates from "Fill from my location", handed to the pin step so it does not ask again. */
+  const coords = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [key]: e.target.value });
+
+  /** Optional convenience: fill the address from this device's location (asks permission on click only). */
+  function fillAddressFromDevice() {
+    if (!navigator.geolocation) {
+      setLocateNote('This device cannot share its location. Type the address instead.');
+      return;
+    }
+    setLocating(true);
+    setLocateNote('');
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        coords.current = { latitude, longitude };
+        const label = await reverseLabel(latitude, longitude);
+        if (label) setForm((current) => ({ ...current, address: label }));
+        else setLocateNote('Could not find an address here. Type it in; you will pin the exact spot next.');
+        setLocating(false);
+      },
+      () => {
+        setLocateNote('Location is off. Type the address instead; you will pin the exact spot next.');
+        setLocating(false);
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+    );
+  }
 
   async function register() {
     setBusy(true);
@@ -25,10 +56,11 @@ export default function ShopRegister() {
     try {
       const res = await api<{ token: string; shop: { slug: string } }>('/api/auth/shop/register', {
         method: 'POST',
-        body: { ...form, campusName: form.campusName || undefined },
+        body: form,
       });
       setToken('shop', res.token);
       setShopRole('owner');
+      if (coords.current) stashRegisterPin(coords.current.latitude, coords.current.longitude);
       navigate('/dashboard/setup', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
@@ -44,7 +76,7 @@ export default function ShopRegister() {
         <div className="auth-copy">
           <span className="eyebrow-label">Get your counter online</span>
           <h1>Set up your shop.</h1>
-          <p>Create the owner account now. A guided checklist will help you connect and test a printer next.</p>
+          <p>Five fields and about three minutes. Any shop can join, on a campus or not.</p>
         </div>
         <div className="auth-card register-card stack">
           <div className="auth-form-grid">
@@ -52,13 +84,15 @@ export default function ShopRegister() {
               <label htmlFor="shopName">Shop name</label>
               <input id="shopName" type="text" placeholder="Sharma Xerox & Prints" value={form.shopName} onChange={set('shopName')} autoComplete="organization" autoFocus />
             </div>
-            <div className="field grow">
-              <label htmlFor="campus">Campus <span className="optional-label">optional</span></label>
-              <input id="campus" type="text" placeholder="ABC Engineering College" value={form.campusName} onChange={set('campusName')} />
-            </div>
             <div className="field full-field">
               <label htmlFor="address">Counter address</label>
-              <input id="address" type="text" placeholder="Gate 2, College Road" value={form.address} onChange={set('address')} autoComplete="street-address" />
+              <input id="address" type="text" placeholder="12 Market Road, near the bus stand" value={form.address} onChange={set('address')} autoComplete="street-address" />
+              <span className="field-help">
+                <button type="button" className="ghost small" onClick={fillAddressFromDevice} disabled={locating}>
+                  {locating ? 'Finding your address…' : 'Fill from my location'}
+                </button>
+                {locateNote && <span role="status"> {locateNote}</span>}
+              </span>
             </div>
             <div className="field grow">
               <label htmlFor="ownerName">Owner name</label>
@@ -87,11 +121,12 @@ export default function ShopRegister() {
       <aside className="auth-aside shop-auth-aside">
         <div className="auth-proof">
           <span className="eyebrow-label">Launch checklist</span>
-          <h2>You can test the entire setup without a physical printer.</h2>
+          <h2>Live in four steps.</h2>
           <ol>
-            <li><span>1</span><div><strong>Set your prices</strong><p>Choose paper, colour and finishing options.</p></div></li>
-            <li><span>2</span><div><strong>Connect the counter PC</strong><p>Paste one secure command on the computer near your printer.</p></div></li>
-            <li><span>3</span><div><strong>Run a simulation</strong><p>Prove arrival check-in, counter-code dispatch and printer recovery before going live.</p></div></li>
+            <li><span>1</span><div><strong>Confirm your location</strong><p>We find it for you; drag the pin to your entrance.</p></div></li>
+            <li><span>2</span><div><strong>Check your prices</strong><p>Sensible defaults are already filled in.</p></div></li>
+            <li><span>3</span><div><strong>Connect the counter PC</strong><p>Paste one secure command, or use the PrintQ desktop app.</p></div></li>
+            <li><span>4</span><div><strong>You are live</strong><p>Students nearby can find you as soon as your PC is connected.</p></div></li>
           </ol>
         </div>
       </aside>

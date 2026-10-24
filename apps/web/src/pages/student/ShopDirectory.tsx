@@ -103,10 +103,10 @@ export default function ShopDirectory() {
   return (
     <main className="page">
       <Topbar />
-      <div className="directory-heading"><span className="eyebrow-label">Campus print counters</span><h1>Find a shop</h1><p>Choose a connected shop now, or scan the QR displayed at your usual counter.</p></div>
-      <div className="search-field"><span aria-hidden>⌕</span><input type="search" placeholder="Search shop or campus" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus /></div>
+      <div className="directory-heading"><span className="eyebrow-label">Print counters near you</span><h1>Find a shop</h1><p>Choose a connected shop now, or scan the QR displayed at your usual counter.</p></div>
+      <div className="search-field"><span aria-hidden>⌕</span><input type="search" placeholder="Search shop, area or campus" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus /></div>
       <div className="row between" style={{ margin: '10px 0 18px' }}>
-        <span className="dim">{locationMessage || 'Only verified campus counters are listed.'}</span>
+        <span className="dim">{locationMessage || 'Only live counters are listed.'}</span>
         <button className="ghost small" onClick={findNearby} disabled={locating}>⌖ Near me</button>
       </div>
       {loading ? (
