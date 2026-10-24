@@ -69,6 +69,7 @@ shopRouter.get(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
@@ -156,6 +157,7 @@ shopRouter.get(
           && shop.verificationStatus === 'verified'
           && shop.publishedAt != null,
         verification: {
+          autoLive: shop.autoLive,
           status: shop.verificationStatus,
           submittedAt: shop.verificationSubmittedAt,
           verifiedAt: shop.verifiedAt,
@@ -349,6 +351,7 @@ shopRouter.patch(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
