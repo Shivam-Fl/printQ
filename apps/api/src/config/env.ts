@@ -12,7 +12,7 @@ const envBoolean = z.preprocess((value) => {
 }, z.boolean());
 
 /** Empty deployment fields are absent, not malformed credentials. */
-const optionalSecret = <T extends z.ZodTypeAny>(schema: T) => z.preprocess(
+const optionalSecret = <T extends z.ZodType>(schema: T) => z.preprocess(
   (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
   schema.optional(),
 );
@@ -49,9 +49,9 @@ const envSchema = z.object({
     .string()
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)),
-  PUBLIC_WEB_URL: z.string().url().default('http://localhost:5173'),
-  GEOCODING_BASE_URL: z.string().url().default('https://nominatim.openstreetmap.org'),
-  GEOCODING_FALLBACK_BASE_URL: z.string().url().default('https://photon.komoot.io'),
+  PUBLIC_WEB_URL: z.url().default('http://localhost:5173'),
+  GEOCODING_BASE_URL: z.url().default('https://nominatim.openstreetmap.org'),
+  GEOCODING_FALLBACK_BASE_URL: z.url().default('https://photon.komoot.io'),
 
   DATABASE_URL: z.string().min(1),
   DATABASE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,48}$/).optional(),

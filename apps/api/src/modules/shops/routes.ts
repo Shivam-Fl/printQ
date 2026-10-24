@@ -200,9 +200,9 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
-  campusId: z.string().uuid().nullable().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  campusId: z.uuid().nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
   checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100), z.literal(200)]).optional(),
   // How many students the counter serves at once (drives queue bands).
   counterCapacity: z.number().int().min(COUNTER_CAPACITY_MIN).max(COUNTER_CAPACITY_MAX).optional(),
@@ -220,12 +220,12 @@ const shopPatchSchema = z.object({
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number'
     && !(value.latitude === 0 && value.longitude === 0)
     && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
   if (value.latitude === 0 && value.longitude === 0) {
     // "Null Island": the classic unset/geolocation-failed default, never a real counter.
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Coordinates 0, 0 are not a real location — choose the shop entrance on the map',
     });
@@ -234,7 +234,7 @@ const shopPatchSchema = z.object({
   const longitudeProvided = value.longitude !== undefined;
   if (latitudeProvided !== longitudeProvided || (latitudeProvided && ((value.latitude == null) !== (value.longitude == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Latitude and longitude must be updated together',
     });
@@ -243,7 +243,7 @@ const shopPatchSchema = z.object({
   const payeeProvided = value.counterUpiPayeeName !== undefined;
   if (vpaProvided !== payeeProvided || (vpaProvided && ((value.counterUpiVpa == null) !== (value.counterUpiPayeeName == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['counterUpiVpa'],
       message: 'Merchant UPI VPA and payee name must be updated together',
     });
@@ -424,7 +424,7 @@ shopRouter.post(
 shopRouter.post(
   '/printers/:id/test-print',
   requireShopUser,
-  validateBody(z.object({ agentId: z.string().uuid().optional() })),
+  validateBody(z.object({ agentId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const printer = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -888,7 +888,7 @@ shopRouter.post(
 shopRouter.post(
   '/jobs/:id/assign',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid() })),
+  validateBody(z.object({ printerId: z.uuid() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const { printerId } = req.body as { printerId: string };
@@ -935,7 +935,7 @@ async function releaseOrphanedPrint(job: Job, shopUserId: string): Promise<Job> 
 shopRouter.post(
   '/jobs/:id/retry-print',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid().optional() })),
+  validateBody(z.object({ printerId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -1240,7 +1240,7 @@ shopRouter.post(
   validateBody(
     z.object({
       machineLabel: z.string().trim().min(1).max(80),
-      connectedPrinterIds: z.array(z.string().uuid()).default([]),
+      connectedPrinterIds: z.array(z.uuid()).max(50).default([]),
     }),
   ),
   asyncHandler(async (req, res) => {
@@ -1268,7 +1268,7 @@ shopRouter.post(
 shopRouter.patch(
   '/agents/:id',
   requireShopOwner,
-  validateBody(z.object({ connectedPrinterIds: z.array(z.string().uuid()) })),
+  validateBody(z.object({ connectedPrinterIds: z.array(z.uuid()).max(50) })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const agent = await prisma.agent.findFirst({ where: { id: param(req, 'id'), shopId } });
