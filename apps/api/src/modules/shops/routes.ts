@@ -18,7 +18,7 @@ import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../l
 import { param } from '../../lib/http.js';
 import { publishIfReady } from './autoLive.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
-import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
+import { counterReleaseLimiter, makeGeneralLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -46,7 +46,7 @@ import { connectPrinterToDetectingAgents, notifyShopReopened } from './availabil
 import { getCommissionOverview } from '../commission/service.js';
 import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
-import { searchIndianLocations } from '../../providers/geocoding/index.js';
+import { reverseLocation, searchLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
@@ -100,18 +100,38 @@ shopRouter.get(
   }),
 );
 
-/** One-time shop setup search; server-side so provider throttling/caching is centralized. */
+// Public on purpose: the sign-up form prefills the address from the pin before an
+// account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
+const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
+const optionalCoord = (v: unknown, max: number): number | undefined => {
+  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d+)?$/.test(v.trim())) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && Math.abs(n) <= max ? n : undefined;
+};
+
+/** Address / shop / POI search, worldwide, optionally biased towards lat,lng. Provider failure gives an empty list. */
+const geocodeSearch = asyncHandler(async (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
+  if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
+  const lat = optionalCoord(req.query.lat, 90);
+  const lng = optionalCoord(req.query.lng, 180);
+  const bias = lat !== undefined && lng !== undefined ? { latitude: lat, longitude: lng } : undefined;
+  res.json({ results: await searchLocations(query, bias) });
+});
+
+shopRouter.get('/geocode', geocodeLimiter, geocodeSearch);
+// Deprecated alias kept so shipped clients keep working.
+shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeSearch);
+
+/** Pin to address label for prefilling the address. label is null when unknown or the provider is down. */
 shopRouter.get(
-  '/location-search',
-  requireShopOwner,
+  '/geocode/reverse',
+  geocodeLimiter,
   asyncHandler(async (req, res) => {
-    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
-    if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
-    try {
-      res.json({ results: await searchIndianLocations(query) });
-    } catch {
-      throw new HttpError(503, 'Address search is temporarily unavailable. Use device location or manual coordinates.');
-    }
+    const lat = optionalCoord(req.query.lat, 90);
+    const lng = optionalCoord(req.query.lng, 180);
+    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) throw badRequest('A valid lat and lng are required');
+    res.json({ label: await reverseLocation(lat, lng) });
   }),
 );
 
