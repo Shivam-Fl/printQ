@@ -1501,3 +1501,9 @@ td:has(> button), td:has(> .actions) { min-width: 7rem; }
 
 .fee-table { min-width: 540px; }
 .fee-table td, .fee-table th { white-space: nowrap; }
+
+/* draggable shop pin (Leaflet divIcon) */
+.location-pin-icon { background: transparent; border: 0; }
+.location-pin-icon span { display: block; width: 24px; height: 24px; box-sizing: border-box; border: 3px solid #fff; border-radius: 50%; background: #2257d9; box-shadow: 0 2px 8px rgba(20,28,44,.4); cursor: grab; }
+.location-editor { display: grid; gap: 12px; }
+.location-editor .location-actions { grid-template-columns: auto auto; justify-content: start; }
