@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ShopLocationPicker from './ShopLocationPicker.js';
+import { searchMessage, SEARCH_FAILED_MESSAGE } from '../lib/locationFlow.js';
 import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, searchPlaces, type PlaceResult } from '../lib/geocode.js';
 
 interface Props {
@@ -30,6 +31,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const addressRef = useRef(address);
   const reverseSeq = useRef(0);
   const detectedOnce = useRef(false);
+  const detectSeq = useRef(0);
   addressRef.current = address;
   const hasPin = latitude != null && longitude != null;
 
@@ -69,7 +71,9 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     }
     setBusy(true);
     setMessage('');
+    const mine = ++detectSeq.current;
     const applyPosition = (position: GeolocationPosition, approximate: boolean) => {
+      if (mine !== detectSeq.current) return; // cancelled
       const lat = Number(position.coords.latitude.toFixed(6));
       const lng = Number(position.coords.longitude.toFixed(6));
       const accuracy = position.coords.accuracy;
@@ -85,6 +89,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
       setBusy(false);
     };
     const fallback = (denied: boolean) => {
+      if (mine !== detectSeq.current) return;
       setMessage(denied
         ? 'Location access is off. Search your address below or click the map to drop the pin.'
         : 'Could not get a location. Search your address below or click the map to drop the pin.');
@@ -93,16 +98,23 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     navigator.geolocation.getCurrentPosition(
       (position) => applyPosition(position, false),
       (reason) => {
+        if (mine !== detectSeq.current) return;
         if (reason.code === reason.PERMISSION_DENIED) { fallback(true); return; }
         navigator.geolocation.getCurrentPosition(
           (position) => applyPosition(position, true),
           () => fallback(false),
-          { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+          { enableHighAccuracy: false, timeout: 6_000, maximumAge: 300_000 },
         );
       },
-      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
+      { enableHighAccuracy: true, timeout: 8_000, maximumAge: 10_000 },
     );
   }, [place]);
+
+  function cancelDetect() {
+    detectSeq.current += 1;
+    setBusy(false);
+    setMessage('Location lookup cancelled. Search your address below or click the map to drop the pin.');
+  }
 
   useEffect(() => {
     if (!autoDetect || detectedOnce.current || hasPin) return;
@@ -121,11 +133,9 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     try {
       const found = await searchPlaces(text, hasPin ? { latitude, longitude } : null);
       setResults(found);
-      setMessage(found.length
-        ? 'Choose the closest match, then drag the pin to the exact entrance.'
-        : 'Nothing found. That is fine: click the map to drop the pin and type your address below.');
+      setMessage(searchMessage(found));
     } catch {
-      setMessage('Address search is unavailable right now. Click the map to drop the pin and type your address.');
+      setMessage(SEARCH_FAILED_MESSAGE);
     } finally {
       setSearching(false);
     }
@@ -151,6 +161,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
         <button type="button" className="secondary" disabled={busy} onClick={detect}>
           {busy ? 'Finding your location…' : 'Use my location'}
         </button>
+        {busy && <button type="button" className="ghost" onClick={cancelDetect}>Cancel</button>}
       </div>
       {message && <p className="dim" style={{ margin: 0 }} role="status">{message}</p>}
       <form className="location-search" onSubmit={(event) => { event.preventDefault(); void search(); }}>

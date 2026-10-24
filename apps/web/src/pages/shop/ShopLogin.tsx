@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, setShopRole, setToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
+import { postLoginPath } from '../../lib/locationFlow.js';
 
 type Mode = 'password' | 'pin' | 'forgot-request' | 'forgot-confirm';
 
@@ -34,6 +35,7 @@ function ShopAuthLayout({ title, subtitle, children }: { title: string; subtitle
 
 export default function ShopLogin() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [mode, setMode] = useState<Mode>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,7 +56,7 @@ export default function ShopLogin() {
       });
       setToken('shop', res.token);
       setShopRole(res.user.role);
-      navigate('/dashboard');
+      navigate(postLoginPath(params.get('next')));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

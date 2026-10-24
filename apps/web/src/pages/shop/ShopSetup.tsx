@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import ShopNav from '../../components/ShopNav.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
+import { buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
 
 interface SetupStatus {
   profileReady: boolean;
@@ -30,6 +31,9 @@ interface SetupStatus {
     autoLive?: boolean;
   };
 }
+
+/** Signed-out visits (the desktop tray link) come back here after login. */
+const LOGIN_THEN_SETUP = '/dashboard/login?next=/dashboard/setup';
 
 type StepKey = 'locationReady' | 'pricingReady' | 'agentReady' | 'ready';
 
@@ -83,20 +87,22 @@ export default function ShopSetup() {
       const result = await api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' });
       setSetup(result.setup);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
+      if ((err as { status?: number }).status === 401) navigate(LOGIN_THEN_SETUP);
       else setError(err instanceof Error ? err.message : 'Could not load setup');
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(LOGIN_THEN_SETUP);
       return;
     }
     void refresh();
     api<{ shop: { address: string; latitude: number | null; longitude: number | null } }>('/api/shop/me', { role: 'shop' })
       .then((r) => {
-        setPin({ latitude: r.shop.latitude, longitude: r.shop.longitude });
+        // A pin found during register wins over an empty shop, so the owner is not asked for location twice.
+        const fromRegister = r.shop.latitude == null || r.shop.longitude == null ? takeRegisterPin() : null;
+        setPin(fromRegister ?? { latitude: r.shop.latitude, longitude: r.shop.longitude });
         setAddress(r.shop.address);
       })
       .catch(() => { /* the editor still works without the saved values */ })
@@ -128,7 +134,8 @@ export default function ShopSetup() {
   const onPin = useCallback((latitude: number, longitude: number) => setPin({ latitude, longitude }), []);
 
   async function saveLocation() {
-    if (pin.latitude == null || pin.longitude == null) return;
+    const body = buildLocationSave(pin, address);
+    if (!body) return;
     // Legacy (manually verified) shops are re-reviewed when the pin moves; auto-live shops are not.
     if (setup?.verification.autoLive === false && setup.locationReady && setup.verification.status !== 'draft'
       && !confirm('Changing your counter location sends your shop for re-review and hides it from students until approved. Continue?')) {
@@ -140,7 +147,7 @@ export default function ShopSetup() {
       await api('/api/shop/me', {
         method: 'PATCH',
         role: 'shop',
-        body: { latitude: pin.latitude, longitude: pin.longitude, address: address.trim() || 'Pinned location' },
+        body,
       });
       setEditingLocation(false);
       await refresh();

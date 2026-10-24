@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setShopRole, setToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
 import { reverseLabel } from '../../lib/geocode.js';
+import { stashRegisterPin } from '../../lib/locationFlow.js';
 
 export default function ShopRegister() {
   const navigate = useNavigate();
@@ -17,6 +18,8 @@ export default function ShopRegister() {
   const [error, setError] = useState('');
   const [locating, setLocating] = useState(false);
   const [locateNote, setLocateNote] = useState('');
+  /** Coordinates from "Fill from my location", handed to the pin step so it does not ask again. */
+  const coords = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [key]: e.target.value });
@@ -31,10 +34,10 @@ export default function ShopRegister() {
     setLocateNote('');
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const label = await reverseLabel(
-          Number(position.coords.latitude.toFixed(6)),
-          Number(position.coords.longitude.toFixed(6)),
-        );
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        coords.current = { latitude, longitude };
+        const label = await reverseLabel(latitude, longitude);
         if (label) setForm((current) => ({ ...current, address: label }));
         else setLocateNote('Could not find an address here. Type it in; you will pin the exact spot next.');
         setLocating(false);
@@ -57,6 +60,7 @@ export default function ShopRegister() {
       });
       setToken('shop', res.token);
       setShopRole('owner');
+      if (coords.current) stashRegisterPin(coords.current.latitude, coords.current.longitude);
       navigate('/dashboard/setup', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
