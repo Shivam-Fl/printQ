@@ -33,19 +33,33 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   addressRef.current = address;
   const hasPin = latitude != null && longitude != null;
 
-  const fillAddress = useCallback(async (lat: number, lng: number) => {
+  const reverseTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
+    reverseSeq.current += 1;
+  }, []);
+
+  // Debounced (600 ms) so dragging the pin never burns the shared 30/min geocode budget.
+  const fillAddress = useCallback((lat: number, lng: number) => {
+    if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     const mine = ++reverseSeq.current;
+    reverseTimer.current = window.setTimeout(() => { void runReverseRef.current(lat, lng, mine); }, 600);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runReverse = async (lat: number, lng: number, mine: number) => {
     const label = await reverseLabel(lat, lng);
     if (mine !== reverseSeq.current) return;
     if (!addressIsReplaceable(addressRef.current, lastAuto.current)) return;
     const next = label ?? PINNED_LOCATION;
     lastAuto.current = next;
     onAddress(next);
-  }, [onAddress]);
+  };
+  const runReverseRef = useRef(runReverse);
+  runReverseRef.current = runReverse;
 
   const place = useCallback((lat: number, lng: number) => {
     onPin(lat, lng);
-    void fillAddress(lat, lng);
+    fillAddress(lat, lng);
   }, [onPin, fillAddress]);
 
   const detect = useCallback(() => {
@@ -118,6 +132,9 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   }
 
   function choose(result: PlaceResult) {
+    // A choice beats any lookup still in flight for an earlier pin.
+    reverseSeq.current += 1;
+    if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     setCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 18 });
     setResults([]);
     onPin(result.latitude, result.longitude);

@@ -26,7 +26,7 @@ interface SetupStatus {
     verifiedAt: string | null;
     publishedAt: string | null;
     canSubmit: boolean;
-    /** New shops publish themselves once everything is in place; missing = legacy manual review. */
+    /** New shops publish themselves once everything is in place; only an explicit false means legacy manual review. */
     autoLive?: boolean;
   };
 }
@@ -129,6 +129,11 @@ export default function ShopSetup() {
 
   async function saveLocation() {
     if (pin.latitude == null || pin.longitude == null) return;
+    // Legacy (manually verified) shops are re-reviewed when the pin moves; auto-live shops are not.
+    if (setup?.verification.autoLive === false && setup.locationReady && setup.verification.status !== 'draft'
+      && !confirm('Changing your counter location sends your shop for re-review and hides it from students until approved. Continue?')) {
+      return;
+    }
     setSavingLocation(true);
     setLocationError('');
     try {
