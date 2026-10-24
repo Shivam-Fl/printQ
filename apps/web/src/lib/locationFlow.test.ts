@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PINNED_LOCATION } from './geocode.js';
 import {
+  addressAfterReverse,
   buildLocationSave, postLoginPath, REGISTER_PIN_KEY, SEARCH_EMPTY_MESSAGE, SEARCH_FOUND_MESSAGE,
   searchMessage, stashRegisterPin, takeRegisterPin,
 } from './locationFlow.js';
@@ -66,6 +67,20 @@ describe('register pin hand-off', () => {
   it('does nothing when storage is unavailable', () => {
     expect(() => stashRegisterPin(1, 2, null)).not.toThrow();
     expect(takeRegisterPin(null)).toBeNull();
+  });
+});
+
+describe('register pin reverse lookup', () => {
+  it('fills an empty or placeholder address with the found label', () => {
+    expect(addressAfterReverse('', '12 Market Road')).toBe('12 Market Road');
+    expect(addressAfterReverse(PINNED_LOCATION, '12 Market Road')).toBe('12 Market Road');
+  });
+  it('never overwrites text the owner typed', () => {
+    expect(addressAfterReverse('Gate 2, College Road', '12 Market Road')).toBe('Gate 2, College Road');
+  });
+  it('keeps the current value when the lookup finds nothing', () => {
+    expect(addressAfterReverse('', null)).toBe('');
+    expect(buildLocationSave({ latitude: 1, longitude: 2 }, addressAfterReverse('', null))?.address).toBe(PINNED_LOCATION);
   });
 });
 

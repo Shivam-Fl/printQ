@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
+import { reverseLabel } from '../../lib/geocode.js';
 import ShopNav from '../../components/ShopNav.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
-import { buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
+import { addressAfterReverse, buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
 
 interface SetupStatus {
   profileReady: boolean;
@@ -104,6 +105,12 @@ export default function ShopSetup() {
         const fromRegister = r.shop.latitude == null || r.shop.longitude == null ? takeRegisterPin() : null;
         setPin(fromRegister ?? { latitude: r.shop.latitude, longitude: r.shop.longitude });
         setAddress(r.shop.address);
+        if (fromRegister) {
+          // The register pin skipped the editor's lookup: fill the address now unless the owner already has text.
+          void reverseLabel(fromRegister.latitude, fromRegister.longitude)
+            .then((label) => setAddress((current) => addressAfterReverse(current, label)))
+            .catch(() => { /* keep the saved address */ });
+        }
       })
       .catch(() => { /* the editor still works without the saved values */ })
       .finally(() => setShopLoaded(true));

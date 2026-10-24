@@ -41,13 +41,6 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     reverseSeq.current += 1;
   }, []);
 
-  // Debounced (600 ms) so dragging the pin never burns the shared 30/min geocode budget.
-  const fillAddress = useCallback((lat: number, lng: number) => {
-    if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
-    const mine = ++reverseSeq.current;
-    reverseTimer.current = window.setTimeout(() => { void runReverseRef.current(lat, lng, mine); }, 600);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const runReverse = async (lat: number, lng: number, mine: number) => {
     const label = await reverseLabel(lat, lng);
     if (mine !== reverseSeq.current) return;
@@ -58,6 +51,13 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   };
   const runReverseRef = useRef(runReverse);
   runReverseRef.current = runReverse;
+
+  // Debounced (600 ms) so dragging the pin never burns the shared 30/min geocode budget.
+  const fillAddress = useCallback((lat: number, lng: number) => {
+    if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
+    const mine = ++reverseSeq.current;
+    reverseTimer.current = window.setTimeout(() => { void runReverseRef.current(lat, lng, mine); }, 600);
+  }, []);
 
   const place = useCallback((lat: number, lng: number) => {
     onPin(lat, lng);

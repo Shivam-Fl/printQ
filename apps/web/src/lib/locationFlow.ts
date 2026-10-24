@@ -1,5 +1,5 @@
 /** Pure helpers behind the shop location editor and setup, kept DOM-free so they are unit-testable. */
-import { PINNED_LOCATION, type PlaceResult } from './geocode.js';
+import { addressIsReplaceable, PINNED_LOCATION, type PlaceResult } from './geocode.js';
 
 export const SEARCH_FOUND_MESSAGE = 'Choose the closest match, then drag the pin to the exact entrance.';
 export const SEARCH_EMPTY_MESSAGE = 'Nothing found. That is fine: click the map to drop the pin and type your address below.';
@@ -69,4 +69,14 @@ export function takeRegisterPin(store: PinStore | null = defaultStore()): { lati
 export function postLoginPath(next: string | null | undefined): string {
   if (next === '/dashboard/setup') return '/dashboard/setup';
   return '/dashboard';
+}
+
+/**
+ * Address to show after reverse-looking-up a pin handed over from register: the found label,
+ * but only while the current text is empty or machine-filled. Typed text is never overwritten,
+ * and a failed lookup (null) keeps what is there (an empty box saves as "Pinned location").
+ */
+export function addressAfterReverse(current: string, label: string | null): string {
+  if (!label || !addressIsReplaceable(current, null)) return current;
+  return label;
 }
