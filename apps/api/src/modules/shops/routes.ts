@@ -340,7 +340,8 @@ shopRouter.patch(
         'SETTINGS_CHANGED_ELSEWHERE',
       );
     }
-    await publishIfReady(shopId);
+    // The edit is already saved; an auto-publish hiccup must not turn it into a 500.
+    await publishIfReady(shopId).catch(() => false);
     const shop = await prisma.shop.findUniqueOrThrow({
       where: { id: shopId },
       select: {
