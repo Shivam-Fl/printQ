@@ -57,18 +57,30 @@ const hashKey = (...parts: string[]) =>
  * provider gets its own serialized queue in this process. The frontend never
  * talks to a provider directly, so providers can be swapped without an app update.
  */
-function makeQueue(minGapMs: number) {
+/** Max requests waiting per provider; beyond this we skip the provider (caller sees an empty result) instead of queueing for minutes. */
+const MAX_QUEUE_DEPTH = 6;
+const providerGapMs = { value: 1_050 };
+
+/** Test hook: lets unit tests run without the real 1 req/s spacing. */
+export function __setProviderGapForTests(milliseconds: number): void {
+  providerGapMs.value = milliseconds;
+}
+
+function makeQueue() {
   let queue: Promise<void> = Promise.resolve();
   let nextAt = 0;
+  let depth = 0;
   return async function request(url: URL): Promise<Response> {
+    if (depth >= MAX_QUEUE_DEPTH) throw new Error('Geocoding provider queue is full');
+    depth += 1;
     let release!: () => void;
     const previous = queue;
     queue = new Promise<void>((resolve) => { release = resolve; });
-    await previous;
     try {
+      await previous;
       const delay = Math.max(0, nextAt - Date.now());
       if (delay) await wait(delay);
-      nextAt = Date.now() + minGapMs;
+      nextAt = Date.now() + providerGapMs.value;
       return await fetch(url, {
         headers: {
           Accept: 'application/json',
@@ -79,13 +91,24 @@ function makeQueue(minGapMs: number) {
         signal: AbortSignal.timeout(8_000),
       });
     } finally {
+      depth -= 1;
       release();
     }
   };
 }
 
-const primaryRequest = makeQueue(1_050);
-const fallbackRequest = makeQueue(1_050);
+const primaryRequest = makeQueue();
+const fallbackRequest = makeQueue();
+
+/** Identical concurrent lookups share one provider call. */
+const inflight = new Map<string, Promise<unknown>>();
+function dedupe<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const running = inflight.get(key) as Promise<T> | undefined;
+  if (running) return running;
+  const promise = work().finally(() => inflight.delete(key));
+  inflight.set(key, promise);
+  return promise;
+}
 
 function validCoords(latitude: number, longitude: number): boolean {
   return Number.isFinite(latitude) && Number.isFinite(longitude)
@@ -140,7 +163,13 @@ async function getJson(request: (url: URL) => Promise<Response>, url: URL): Prom
  * (both OSM-based, free, no key) when the primary errors or finds nothing.
  * Never throws: any provider failure yields an empty list so setup is never blocked.
  */
-export async function searchLocations(query: string, bias?: SearchBias): Promise<GeocodingResult[]> {
+export function searchLocations(query: string, bias?: SearchBias): Promise<GeocodingResult[]> {
+  const normalized = query.trim().replace(/\s+/g, ' ').slice(0, 180).toLowerCase();
+  const key = `s|${normalized}|${bias ? `${bias.latitude},${bias.longitude}` : ''}`;
+  return dedupe(key, () => searchLocationsUncached(query, bias));
+}
+
+async function searchLocationsUncached(query: string, bias?: SearchBias): Promise<GeocodingResult[]> {
   const normalized = query.trim().replace(/\s+/g, ' ').slice(0, 180);
   if (!normalized) return [];
   // Round the bias so nearby callers share cache entries.
@@ -190,7 +219,11 @@ export async function searchLocations(query: string, bias?: SearchBias): Promise
 }
 
 /** Reverse lookup (pin to address label). Never throws; null when unknown or on provider failure. */
-export async function reverseLocation(latitude: number, longitude: number): Promise<string | null> {
+export function reverseLocation(latitude: number, longitude: number): Promise<string | null> {
+  return dedupe(`r|${latitude.toFixed(4)},${longitude.toFixed(4)}`, () => reverseLocationUncached(latitude, longitude));
+}
+
+async function reverseLocationUncached(latitude: number, longitude: number): Promise<string | null> {
   if (!validCoords(latitude, longitude)) return null;
   // ~11 m grid so repeated pin nudges hit the cache.
   const lat = latitude.toFixed(4);

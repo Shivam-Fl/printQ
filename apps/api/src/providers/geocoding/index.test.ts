@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { reverseLocation, searchLocations } from './index.js';
+import { __setProviderGapForTests, reverseLocation, searchLocations } from './index.js';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -11,7 +11,7 @@ const photon = { features: [{
 }] };
 
 describe('geocoding provider', () => {
-  beforeEach(() => vi.useRealTimers());
+  beforeEach(() => __setProviderGapForTests(0));
   afterEach(() => vi.unstubAllGlobals());
 
   it('searches worldwide (no country restriction), asks for 10 results, biases by lat/lng and caches', async () => {
@@ -76,5 +76,19 @@ describe('geocoding provider', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down'); }));
     expect(await reverseLocation(1.2345, 2.3456)).toBeNull();
     expect(await reverseLocation(999, 0)).toBeNull();
+  });
+
+  it('shares one provider call between identical concurrent searches and bounds the queue', async () => {
+    __setProviderGapForTests(20);
+    const fetchMock = vi.fn(async () => json(nominatim));
+    vi.stubGlobal('fetch', fetchMock);
+    await Promise.all([searchLocations('Concurrent Query One'), searchLocations('concurrent  query one')]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // A flood of distinct queries must not build an unbounded backlog: extras get an empty list.
+    fetchMock.mockClear();
+    const flood = await Promise.all(Array.from({ length: 20 }, (_, i) => searchLocations(`flood query ${i}`)));
+    expect(flood.filter((r) => r.length === 0).length).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.length).toBeLessThan(20);
   });
 });
