@@ -11,4 +11,10 @@ describe('formatDistance', () => {
     expect(formatDistance(234)).toBe('~230 m away');
     expect(formatDistance(1500)).toBe('~1.5 km away');
   });
+  it('picks the unit after rounding', () => {
+    expect(formatDistance(994)).toBe('~990 m away');
+    expect(formatDistance(995)).toBe('~1.0 km away');
+    expect(formatDistance(999)).toBe('~1.0 km away');
+    expect(formatDistance(1000)).toBe('~1.0 km away');
+  });
 });
