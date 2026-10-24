@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nearbyShops, publishedShopWhere } from './discovery.js';
+import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 
 describe('public shop discovery', () => {
   it('requires verification and publication; a campus is optional but must be active when present', () => {
@@ -42,5 +42,14 @@ describe('public shop discovery', () => {
     expect(shops).toHaveLength(1);
     expect(shops[0]).toMatchObject({ slug: 'near-counter', distanceM: 60 });
     expect(JSON.stringify(shops)).not.toMatch(/latitude|longitude|exactDistance/i);
+  });
+
+  it('bounding box bounds longitude normally, and skips it near the antimeridian and poles', () => {
+    const london = nearbyBoundingBox({ latitude: 51.5, longitude: -0.12 }, 5_000);
+    expect(london.latitude.gte).toBeLessThan(51.5);
+    expect(london.longitude).toBeDefined();
+    expect(nearbyBoundingBox({ latitude: -17.7, longitude: 179.99 }, 5_000).longitude).toBeUndefined();
+    expect(nearbyBoundingBox({ latitude: -17.7, longitude: -179.99 }, 5_000).longitude).toBeUndefined();
+    expect(nearbyBoundingBox({ latitude: 89.99, longitude: 10 }, 5_000).longitude).toBeUndefined();
   });
 });

@@ -26,9 +26,14 @@ describe('publishIfReady (new shops go live automatically)', () => {
     findUnique.mockResolvedValue(readyShop());
     expect(await publishIfReady('s1')).toBe(true);
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ verificationStatus: 'draft', publishedAt: null, autoLive: true }),
+      where: expect.objectContaining({ verificationStatus: { in: ['draft', 'submitted'] }, publishedAt: null, autoLive: true }),
       data: expect.objectContaining({ verificationStatus: 'verified', publishedAt: expect.any(Date) }),
     }));
+  });
+
+  it('also publishes a shop stuck in submitted (older client)', async () => {
+    findUnique.mockResolvedValue(readyShop({ verificationStatus: 'submitted' }));
+    expect(await publishIfReady('s1')).toBe(true);
   });
 
   it.each([

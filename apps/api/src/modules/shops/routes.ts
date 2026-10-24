@@ -480,6 +480,11 @@ shopRouter.post(
       res.json({ verification: { status: live.verificationStatus, submittedAt: live.verificationSubmittedAt } });
       return;
     }
+    if (shop.autoLive && shop.verificationStatus === 'draft') {
+      // Not live yet (e.g. agent offline): stay draft so it publishes itself when ready; never park in "submitted".
+      res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
+      return;
+    }
     if (shop.verificationStatus === 'verified') {
       res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
       return;

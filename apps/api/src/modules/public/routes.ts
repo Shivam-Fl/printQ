@@ -7,7 +7,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
-import { nearbyShops, publishedShopWhere } from './discovery.js';
+import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 import { publicCampusesCache, publicShopsCache, setPublicListCacheHeaders } from './cache.js';
 
 export const publicRouter = Router();
@@ -108,14 +108,12 @@ publicRouter.post(
       longitude: number;
       maxDistanceM: number;
     };
-    // Cheap bounding-box prefilter so a worldwide directory never loads far-away shops.
-    const latDelta = maxDistanceM / 111_000;
-    const lngDelta = maxDistanceM / (111_000 * Math.max(0.01, Math.cos((latitude * Math.PI) / 180)));
+    const box = nearbyBoundingBox({ latitude, longitude }, maxDistanceM);
     const shops = await prisma.shop.findMany({
       where: {
         ...publishedShopWhere,
-        latitude: { gte: latitude - latDelta, lte: latitude + latDelta },
-        ...(lngDelta >= 180 ? {} : { longitude: { gte: longitude - lngDelta, lte: longitude + lngDelta } }),
+        latitude: box.latitude,
+        ...(box.longitude ? { longitude: box.longitude } : {}),
       },
       // A launch-scale bounded candidate pool, then an exact great-circle
       // calculation. Move this to a PostGIS/geography index before operating
