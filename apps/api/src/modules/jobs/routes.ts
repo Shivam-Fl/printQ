@@ -58,9 +58,9 @@ import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
 export const jobsRouter = Router();
 
 const checkInSchema = z.object({
-  latitude: z.number().finite().min(-90).max(90),
-  longitude: z.number().finite().min(-180).max(180),
-  accuracyM: z.number().finite().min(0).max(1_000),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracyM: z.number().min(0).max(1_000),
   measuredAt: z.coerce.date(),
 });
 
@@ -93,7 +93,7 @@ const SHOP_PAUSED_MESSAGE = 'This shop has paused new orders or has no connected
 jobsRouter.post(
   '/quote',
   requireStudent,
-  validateBody(z.object({ fileId: z.string().uuid(), specs: jobSpecsSchema, couponCode: couponCodeSchema.optional() })),
+  validateBody(z.object({ fileId: z.uuid(), specs: jobSpecsSchema, couponCode: couponCodeSchema.optional() })),
   asyncHandler(async (req, res) => {
     const { fileId, specs, couponCode } = req.body as { fileId: string; specs: JobSpecs; couponCode?: string };
     const file = await loadFileForOrder(fileId, req.student!.id);
