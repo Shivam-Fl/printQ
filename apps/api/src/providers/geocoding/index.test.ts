@@ -1,35 +1,94 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { searchIndianLocations } from './index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { __setProviderGapForTests, reverseLocation, searchLocations } from './index.js';
 
-describe('shop location search', () => {
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+const nominatim = [{ place_id: 42, display_name: 'Sharma Xerox, MG Road, Pune, India', lat: '18.5204', lon: '73.8567' }];
+const photon = { features: [{
+  geometry: { coordinates: [-0.1276, 51.5072] },
+  properties: { osm_id: 7, osm_type: 'N', name: 'Corner Print', street: 'High St', housenumber: '4', city: 'London', country: 'United Kingdom' },
+}] };
+
+describe('geocoding provider', () => {
+  beforeEach(() => __setProviderGapForTests(0));
   afterEach(() => vi.unstubAllGlobals());
 
-  it('limits searches to India, identifies PrintQs and caches repeated queries', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify([{
-      place_id: 42,
-      display_name: 'Example College, Delhi, India',
-      lat: '28.5455021',
-      lon: '77.1902005',
-    }]), { status: 200, headers: { 'content-type': 'application/json' } }));
+  it('searches worldwide (no country restriction), asks for 10 results, biases by lat/lng and caches', async () => {
+    const fetchMock = vi.fn(async () => json(nominatim));
     vi.stubGlobal('fetch', fetchMock);
+    const bias = { latitude: 18.52, longitude: 73.85 };
 
-    const first = await searchIndianLocations('Example College Delhi 110016');
-    const second = await searchIndianLocations('  Example   College Delhi 110016  ');
+    const first = await searchLocations('Sharma Xerox Pune', bias);
+    const second = await searchLocations('  Sharma   Xerox Pune ', bias);
 
     expect(first).toEqual(second);
-    expect(first[0]).toMatchObject({
-      id: '42',
-      label: 'Example College, Delhi, India',
-      latitude: 28.5455021,
-      longitude: 77.1902005,
-    });
+    expect(first[0]).toMatchObject({ id: '42', latitude: 18.5204, longitude: 73.8567 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, options] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toContain('countrycodes=in');
-    expect(String(url)).toContain('limit=5');
-    expect(options?.headers).toMatchObject({
-      Referer: 'https://printqs.com/',
-      'User-Agent': expect.stringContaining('PrintQs'),
-    });
+    const [url, options] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).not.toContain('countrycodes');
+    expect(String(url)).toContain('limit=10');
+    expect(String(url)).toContain('viewbox=');
+    expect(String(url)).toContain('bounded=0');
+    expect(options.headers).toMatchObject({ 'User-Agent': expect.stringContaining('PrintQs') });
+  });
+
+  it('falls back to Photon when the primary returns nothing', async () => {
+    const fetchMock = vi.fn(async (url: URL) =>
+      String(url).includes('photon') ? json(photon) : json([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const results = await searchLocations('Corner Print London');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(results).toEqual([{
+      id: 'N7', label: 'Corner Print, High St 4, London, United Kingdom', latitude: 51.5072, longitude: -0.1276,
+    }]);
+  });
+
+  it('falls back to Photon when the primary errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: URL) =>
+      String(url).includes('photon') ? json(photon) : json({}, 503)));
+    expect(await searchLocations('Corner Print errors London')).toHaveLength(1);
+  });
+
+  it('returns an empty list, never throws, when every provider fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
+    expect(await searchLocations('Nowhere At All Outage')).toEqual([]);
+  });
+
+  it('does not cache an outage-driven empty result', async () => {
+    const down = vi.fn(async () => { throw new Error('down'); });
+    vi.stubGlobal('fetch', down);
+    expect(await searchLocations('Retry After Outage')).toEqual([]);
+    vi.stubGlobal('fetch', vi.fn(async () => json(nominatim)));
+    expect(await searchLocations('Retry After Outage')).toHaveLength(1);
+  });
+
+  it('reverse lookup returns a label, falls back, and gives null on failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ display_name: 'MG Road, Pune, India' })));
+    expect(await reverseLocation(18.5204, 73.8567)).toBe('MG Road, Pune, India');
+
+    vi.stubGlobal('fetch', vi.fn(async (url: URL) =>
+      String(url).includes('photon') ? json(photon) : json({}, 500)));
+    expect(await reverseLocation(51.5072, -0.1276)).toBe('Corner Print, High St 4, London, United Kingdom');
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down'); }));
+    expect(await reverseLocation(1.2345, 2.3456)).toBeNull();
+    expect(await reverseLocation(999, 0)).toBeNull();
+  });
+
+  it('shares one provider call between identical concurrent searches and bounds the queue', async () => {
+    __setProviderGapForTests(20);
+    const fetchMock = vi.fn(async () => json(nominatim));
+    vi.stubGlobal('fetch', fetchMock);
+    await Promise.all([searchLocations('Concurrent Query One'), searchLocations('concurrent  query one')]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // A flood of distinct queries must not build an unbounded backlog: extras get an empty list.
+    fetchMock.mockClear();
+    const flood = await Promise.all(Array.from({ length: 20 }, (_, i) => searchLocations(`flood query ${i}`)));
+    expect(flood.filter((r) => r.length === 0).length).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.length).toBeLessThan(20);
   });
 });
