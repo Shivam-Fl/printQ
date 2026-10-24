@@ -71,12 +71,12 @@ export const printOptionsSchema = z
     menu.papers.forEach((paper, index) => {
       const key = paper.id.toLowerCase();
       if (seenPapers.has(key)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['papers', index, 'id'], message: `Duplicate paper type "${paper.id}"` });
+        ctx.addIssue({ code: 'custom', path: ['papers', index, 'id'], message: `Duplicate paper type "${paper.id}"` });
       }
       seenPapers.add(key);
       if (paper.colorPaise != null && paper.colorPaise < paper.bwPaise) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['papers', index, 'colorPaise'],
           message: `Colour price for "${paper.label}" cannot be lower than its black & white price`,
         });
@@ -88,10 +88,10 @@ export const printOptionsSchema = z
       if (key === 'none') {
         // "None" is always offered implicitly (binding: null); a real row with
         // this id would shadow it.
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['bindings', index, 'id'], message: '"none" is reserved — it is always offered automatically' });
+        ctx.addIssue({ code: 'custom', path: ['bindings', index, 'id'], message: '"none" is reserved — it is always offered automatically' });
       }
       if (seenBindings.has(key)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['bindings', index, 'id'], message: `Duplicate binding "${binding.id}"` });
+        ctx.addIssue({ code: 'custom', path: ['bindings', index, 'id'], message: `Duplicate binding "${binding.id}"` });
       }
       seenBindings.add(key);
     });
@@ -99,10 +99,10 @@ export const printOptionsSchema = z
 
 export const printerInputSchema = z.object({
   label: z.string().trim().min(1).max(80),
-  paperSizesLoaded: z.array(optionId).min(1),
+  paperSizesLoaded: z.array(optionId).min(1).max(12),
   colorSupport: z.boolean(),
   currentlyLoadedPaper: z.string().trim().max(80).optional(),
-  finishingOptions: z.array(optionId).default([]),
+  finishingOptions: z.array(optionId).max(12).default([]),
   avgPagesPerMinute: z.number().int().min(1).max(200).default(15),
   status: z.enum(PRINTER_STATUSES).default('online'),
   /** exact OS/spooler printer name to dispatch to — set via the detected-printer picker */
@@ -131,32 +131,40 @@ export const verifyLoginOtpSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
 });
 
+/**
+ * zod 4 dropped `required_error`: a missing (undefined) value gets the
+ * field-named message, any other type error keeps zod's default text.
+ */
+const required = (message: string) => ({
+  error: (issue: { input?: unknown }) => (issue.input === undefined ? message : undefined),
+});
+
 /** Self-serve shop onboarding. Messages name the field so the form can show them verbatim. */
 export const shopRegisterSchema = z.object({
   shopName: z
-    .string({ required_error: 'Shop name is required' })
+    .string(required('Shop name is required'))
     .trim()
     .min(2, 'Shop name must be at least 2 characters')
     .max(120, 'Shop name must be at most 120 characters'),
   address: z
-    .string({ required_error: 'Address is required' })
+    .string(required('Address is required'))
     .trim()
     .min(3, 'Address must be at least 3 characters')
     .max(300, 'Address must be at most 300 characters'),
   campusName: z.string().trim().max(120, 'Campus name must be at most 120 characters').optional(),
   ownerName: z
-    .string({ required_error: 'Owner name is required' })
+    .string(required('Owner name is required'))
     .trim()
     .min(1, 'Owner name is required')
     .max(80, 'Owner name must be at most 80 characters'),
   email: z
-    .string({ required_error: 'Email is required' })
+    .string(required('Email is required'))
     .trim()
     .toLowerCase()
     .email('Email is invalid')
     .max(254, 'Email must be at most 254 characters'),
   password: z
-    .string({ required_error: 'Password is required' })
+    .string(required('Password is required'))
     .min(8, 'Password must be at least 8 characters')
     .max(128, 'Password must be at most 128 characters'),
 });
@@ -192,7 +200,7 @@ export const staffLoginSchema = z.object({
 export const releaseOtpSchema = z.object({
   otp: z.string().trim().regex(/^\d{6}$/, 'OTP is 6 digits'),
   /** manual-mode: shop picks the printer; auto-mode: omitted */
-  printerId: z.string().uuid().optional(),
+  printerId: z.uuid().optional(),
   /** Explicit staff confirmation for a paid order outside the revealed band. */
   overrideQueue: z.boolean().default(false),
   /**
@@ -211,7 +219,7 @@ export const couponCodeSchema = z.string().trim().min(1).max(40);
 
 export const createJobSchema = z
   .object({
-    fileId: z.string().uuid(),
+    fileId: z.uuid(),
     specs: jobSpecsSchema,
     mode: z.enum(JOB_MODES).default('instant'),
     /** required for scheduled mode: 15 min – 72 h ahead */
@@ -225,13 +233,13 @@ export const createJobSchema = z
   .superRefine((val, ctx) => {
     if (val.mode === 'scheduled') {
       if (!val.scheduledTime) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scheduledTime'], message: 'Pick a time slot' });
+        ctx.addIssue({ code: 'custom', path: ['scheduledTime'], message: 'Pick a time slot' });
         return;
       }
       const ahead = val.scheduledTime.getTime() - Date.now();
       if (ahead < 15 * 60_000 || ahead > 72 * 3_600_000) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['scheduledTime'],
           message: 'Slot must be between 15 minutes and 72 hours from now',
         });
