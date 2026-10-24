@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import { reverseLabel } from '../../lib/geocode.js';
 import ShopNav from '../../components/ShopNav.js';
+import { shouldPollSetup, startSetupPolling } from '../../lib/setupPolling.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import { addressAfterReverse, buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
 
@@ -69,8 +70,6 @@ const STEPS: Array<{ key: StepKey; number: string; title: string; body: string; 
   },
 ];
 
-const SETUP_POLL_MS = 8000;
-
 export default function ShopSetup() {
   const navigate = useNavigate();
   const [setup, setSetup] = useState<SetupStatus | null>(null);
@@ -119,24 +118,20 @@ export default function ShopSetup() {
   }, [navigate, refresh]);
 
   // While setup is not ready, keep the status fresh so the shop goes live while this tab is open.
-  const waiting = setup !== null && !setup.ready;
+  const waiting = shouldPollSetup(setup);
   useEffect(() => {
     if (!waiting) return;
-    const poll = () => {
-      if (document.visibilityState === 'hidden') return;
+    return startSetupPolling({
       // Silent: a failed background poll must not replace the page with an error.
-      api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' })
-        .then((result) => setSetup(result.setup))
-        .catch(() => undefined);
-    };
-    const timer = window.setInterval(poll, SETUP_POLL_MS);
-    window.addEventListener('focus', poll);
-    document.addEventListener('visibilitychange', poll);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('focus', poll);
-      document.removeEventListener('visibilitychange', poll);
-    };
+      poll: () => {
+        api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' })
+          .then((result) => setSetup(result.setup))
+          .catch(() => undefined);
+      },
+      isHidden: () => document.visibilityState === 'hidden',
+      win: window,
+      doc: document,
+    });
   }, [waiting]);
 
   useEffect(() => {
