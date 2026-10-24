@@ -214,6 +214,8 @@ authRouter.post(
         name: body.shopName,
         address: body.address,
         campusName: body.campusName ?? null,
+        // New shops go live automatically once setup is complete; no campus required.
+        autoLive: true,
         autoAssignEnabled: true,
         rateCard: {}, // legacy column, superseded by printOptions
         printOptions: DEFAULT_PRINT_OPTIONS as unknown as object,
