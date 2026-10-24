@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import { reverseLabel } from '../../lib/geocode.js';
 import ShopNav from '../../components/ShopNav.js';
+import { shouldPollSetup, startSetupPolling } from '../../lib/setupPolling.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import { addressAfterReverse, buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
 
@@ -115,6 +116,23 @@ export default function ShopSetup() {
       .catch(() => { /* the editor still works without the saved values */ })
       .finally(() => setShopLoaded(true));
   }, [navigate, refresh]);
+
+  // While setup is not ready, keep the status fresh so the shop goes live while this tab is open.
+  const waiting = shouldPollSetup(setup);
+  useEffect(() => {
+    if (!waiting) return;
+    return startSetupPolling({
+      // Silent: a failed background poll must not replace the page with an error.
+      poll: () => {
+        api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' })
+          .then((result) => setSetup(result.setup))
+          .catch(() => undefined);
+      },
+      isHidden: () => document.visibilityState === 'hidden',
+      win: window,
+      doc: document,
+    });
+  }, [waiting]);
 
   useEffect(() => {
     if (!setup?.studentUrl) return;
