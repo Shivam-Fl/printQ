@@ -320,9 +320,9 @@ export default function ShopSetup() {
         <div>
           <span className="eyebrow-label">No printer nearby?</span>
           <h2>Test the entire flow in simulation mode</h2>
-          <p>The simulated agent still claims jobs, downloads the real PDF and reports print completion. No paper or hardware is used.</p>
+          <p>The simulated agent still claims jobs, downloads the real PDF and reports print completion. No paper or hardware is used. The Safe simulator connects through the PrintQs Shop desktop app, like printers do.</p>
         </div>
-        <Link className="button-link secondary" to="/dashboard/agents">Set up a simulator</Link>
+        <Link className="button-link secondary" to="/dashboard/agents">Set up a simulator in the desktop app</Link>
       </section>
 
       {error && <div className="error-box">{error}</div>}

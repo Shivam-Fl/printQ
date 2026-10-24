@@ -125,7 +125,7 @@ export default function ShopRegister() {
           <ol>
             <li><span>1</span><div><strong>Confirm your location</strong><p>We find it for you; drag the pin to your entrance.</p></div></li>
             <li><span>2</span><div><strong>Check your prices</strong><p>Sensible defaults are already filled in.</p></div></li>
-            <li><span>3</span><div><strong>Connect the counter PC</strong><p>Paste one secure command, or use the PrintQ desktop app.</p></div></li>
+            <li><span>3</span><div><strong>Connect the counter PC</strong><p>Install the PrintQs Shop desktop app on the counter PC and sign in. It finds your printers, or runs the Safe simulator if you have none.</p></div></li>
             <li><span>4</span><div><strong>You are live</strong><p>Students nearby can find you as soon as your PC is connected.</p></div></li>
           </ol>
         </div>

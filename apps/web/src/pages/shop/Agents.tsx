@@ -161,8 +161,8 @@ export default function Agents() {
           <div className="connect-intro">
             <span className="step-number">01</span>
             <div>
-              <h2>Open this dashboard in PrintQs Shop</h2>
-              <p>The desktop app includes this complete dashboard plus printer discovery, automatic printing, startup and health monitoring. Browser-only mode cannot directly control Windows printers.</p>
+              <h2>Connect printers and the Safe simulator through PrintQs Shop</h2>
+              <p>The desktop app includes this complete dashboard plus printer discovery, automatic printing, startup and health monitoring. Browser-only mode cannot directly control Windows printers. Printers and the Safe simulator (for testing with no printer) both connect through the desktop app, so install it, sign in, and connect from there.</p>
             </div>
           </div>
           <a className="button-link" href={windowsDownloadUrl}>Download PrintQs Shop for Windows</a>

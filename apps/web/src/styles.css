@@ -265,7 +265,7 @@ button.ghost {
   color: var(--ink);
   border: 1.5px solid var(--rule);
 }
-button.ghost:hover { border-color: var(--pencil); }
+button.ghost:hover:not(:disabled) { background: var(--stamp-soft); color: var(--ink); border-color: var(--stamp); box-shadow: none; }
 button.secondary { background: var(--paper); color: var(--ink); border: 1px solid var(--rule); }
 button.secondary:hover:not(:disabled) { background: #f8f9fc; border-color: #cbd3df; box-shadow: none; }
 button.danger { background: var(--danger); }
