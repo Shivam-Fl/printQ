@@ -120,13 +120,13 @@ export default function AdminConsole() {
     <main className="page wide shop-page">
       <Topbar />
       <header className="page-heading">
-        <div><span className="eyebrow-label">Platform operations</span><h1>Campus &amp; shop review</h1><p>Only verified and explicitly published counters can appear in student discovery.</p></div>
+        <div><span className="eyebrow-label">Platform operations</span><h1>Campus &amp; shop review</h1><p>A shop goes live in student discovery by itself once its setup is complete. You can unpublish any shop that should not appear.</p></div>
         <button className="ghost small" onClick={signOut}>Sign out</button>
       </header>
       {error && <div className="error-box">{error}</div>}
 
       <section className="settings-section">
-        <div className="settings-section-copy"><h2>Campus catalogue</h2><p>Curate the canonical campus before a shop can request publication.</p></div>
+        <div className="settings-section-copy"><h2>Campus catalogue</h2><p>Optional: campuses help students find nearby shops, but a shop does not need one to go live.</p></div>
         <div className="settings-surface stack">
           <form className="form-row" onSubmit={createCampus}>
             <div className="field grow"><label htmlFor="campus-name">Campus name</label><input id="campus-name" value={campusName} onChange={(event) => setCampusName(event.target.value)} required /></div>
