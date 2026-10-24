@@ -51,6 +51,7 @@ const envSchema = z.object({
     .transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)),
   PUBLIC_WEB_URL: z.string().url().default('http://localhost:5173'),
   GEOCODING_BASE_URL: z.string().url().default('https://nominatim.openstreetmap.org'),
+  GEOCODING_FALLBACK_BASE_URL: z.string().url().default('https://photon.komoot.io'),
 
   DATABASE_URL: z.string().min(1),
   DATABASE_NAMESPACE: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,48}$/).optional(),
