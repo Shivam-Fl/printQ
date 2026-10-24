@@ -7,7 +7,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
-import { nearbyShops, publishedShopWhere } from './discovery.js';
+import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 import { publicCampusesCache, publicShopsCache, setPublicListCacheHeaders } from './cache.js';
 
 export const publicRouter = Router();
@@ -29,7 +29,7 @@ publicRouter.get(
   }),
 );
 
-/** Only independently verified, explicitly published shops on active campuses are discoverable. */
+/** Only published shops are discoverable (a campus is optional; if present it must be active). */
 publicRouter.get(
   '/shops',
   asyncHandler(async (req, res) => {
@@ -76,7 +76,7 @@ publicRouter.get(
         return {
           slug: shop.slug,
           name: shop.name,
-          campusName: shop.campus!.name,
+          campusName: shop.campus?.name ?? null,
           address: shop.address,
           open: shop.acceptingOrders && !shop.feeBlockedAt
             && shop.latitude != null
@@ -108,8 +108,13 @@ publicRouter.post(
       longitude: number;
       maxDistanceM: number;
     };
+    const box = nearbyBoundingBox({ latitude, longitude }, maxDistanceM);
     const shops = await prisma.shop.findMany({
-      where: publishedShopWhere,
+      where: {
+        ...publishedShopWhere,
+        latitude: box.latitude,
+        ...(box.longitude ? { longitude: box.longitude } : {}),
+      },
       // A launch-scale bounded candidate pool, then an exact great-circle
       // calculation. Move this to a PostGIS/geography index before operating
       // a nationwide directory; no caller coordinates are persisted either way.
@@ -136,7 +141,7 @@ publicRouter.post(
         slug: shop.slug,
         name: shop.name,
         address: shop.address,
-        campusName: shop.campus!.name,
+        campusName: shop.campus?.name ?? null,
         latitude: shop.latitude,
         longitude: shop.longitude,
         open: shop.acceptingOrders && !shop.feeBlockedAt
@@ -202,7 +207,7 @@ publicRouter.get(
         slug: shop.slug,
         name: shop.name,
         address: shop.address,
-        campusName: shop.campus!.name,
+        campusName: shop.campus?.name ?? null,
         open: shop.acceptingOrders && !shop.feeBlockedAt && shop.latitude != null && shop.longitude != null && online.length > 0,
         temporarilyUnavailable: Boolean(shop.feeBlockedAt),
         colorAvailable,

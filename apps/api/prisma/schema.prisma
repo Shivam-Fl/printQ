@@ -187,6 +187,10 @@ model Shop {
   publishedAt             DateTime?
   /// Private reviewer context. It is never selected by public or shop routes.
   verificationNotes       String?
+  /// True for shops registered under the auto-go-live rule: they publish themselves once
+  /// location, menu, a linked printer and an online agent exist, and edits never unpublish them.
+  /// Existing shops stay false (manual verification), so nothing about them changes.
+  autoLive                Boolean                @default(false)
   /// Owner-captured counter coordinates. Used for one-time arrival checks and
   /// nearby discovery; students' coordinates are never persisted.
   latitude                Float?
