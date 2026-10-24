@@ -102,7 +102,7 @@ shopRouter.get(
 // account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
 const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
 const optionalCoord = (v: unknown, max: number): number | undefined => {
-  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d{1,10})?$/.test(v.trim())) return undefined;
+  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d+)?$/.test(v.trim())) return undefined;
   const n = Number(v);
   return Number.isFinite(n) && Math.abs(n) <= max ? n : undefined;
 };

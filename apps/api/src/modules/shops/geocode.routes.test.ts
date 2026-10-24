@@ -38,6 +38,11 @@ describe('geocode routes (public, no auth)', () => {
     expect(search).toHaveBeenNthCalledWith(2, 'corner print', undefined);
   });
 
+  it('accepts real browser/Leaflet coordinates with 15 decimals', async () => {
+    await fetch(`${base}/api/shop/geocode?q=corner+print&lat=18.520430123456789&lng=73.856743123456789`);
+    expect(search).toHaveBeenCalledWith('corner print', { latitude: 18.520430123456789, longitude: 73.856743123456789 });
+  });
+
   it('returns 400 for a query under 3 characters', async () => {
     expect((await fetch(`${base}/api/shop/geocode?q=ab`)).status).toBe(400);
     expect(search).not.toHaveBeenCalled();
