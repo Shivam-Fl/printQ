@@ -11,6 +11,7 @@ import { applyTransition } from '../jobs/transitions.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
 import { notifyShopReopened } from '../shops/availability.js';
+import { publishIfReady } from '../shops/autoLive.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
 import { env } from '../../config/env.js';
@@ -63,6 +64,8 @@ agentRouter.post(
     });
     // A restarted process keeps the agent id: recover the jobs its predecessor held.
     if (agent.sessionId) await reconcileAgentSession(agent, agent.sessionId, inFlightJobIds);
+    // an agent coming online may be the last thing a new shop was waiting for
+    await publishIfReady(agent.shopId).catch(() => false);
     res.json({ ok: true });
   }),
 );
@@ -111,6 +114,7 @@ agentRouter.post(
     await advanceShopQueues(agent.shopId);
     await emitQueueUpdate(agent.shopId);
     await notifyShopReopened(agent.shopId);
+    await publishIfReady(agent.shopId).catch(() => false);
     publishEvent(`shop:${agent.shopId}`, 'agent:printers_detected', { agentId: agent.id, printers });
     res.json({ ok: true });
   }),
