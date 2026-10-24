@@ -1,13 +1,20 @@
 /**
- * Permission policy for the shop dashboard window. Device location is what lets
- * first-run setup pin the shop automatically, so it is granted to the trusted
- * PrintQs pages only; every other permission keeps Electron's previous default (granted).
+ * Permission policy for the shop dashboard window: default-deny. Device location
+ * lets first-run setup pin the shop automatically; notifications and clipboard
+ * writes are what the dashboard already uses. Everything else is refused, and
+ * only for the origins the caller passes as trusted.
  */
+const ALLOWED_PERMISSIONS = new Set([
+  'geolocation',
+  'notifications',
+  'clipboard-sanitized-write',
+  'fullscreen',
+]);
+
 export function shouldGrantPermission(
   permission: string,
   requestingUrl: string,
   isTrustedUrl: (url: string) => boolean,
 ): boolean {
-  if (permission === 'geolocation') return isTrustedUrl(requestingUrl);
-  return true;
+  return ALLOWED_PERMISSIONS.has(permission) && isTrustedUrl(requestingUrl);
 }

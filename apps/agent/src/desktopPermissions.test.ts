@@ -8,7 +8,13 @@ describe('shouldGrantPermission', () => {
     expect(shouldGrantPermission('geolocation', 'https://printqs.com/dashboard/setup', trusted)).toBe(true);
     expect(shouldGrantPermission('geolocation', 'https://evil.example/', trusted)).toBe(false);
   });
-  it('keeps the previous default for other permissions', () => {
+  it('allows the dashboard permissions on trusted pages, denies them elsewhere', () => {
     expect(shouldGrantPermission('notifications', 'https://printqs.com/', trusted)).toBe(true);
+    expect(shouldGrantPermission('notifications', 'https://evil.example/', trusted)).toBe(false);
+  });
+  it('denies every other permission by default', () => {
+    for (const permission of ['media', 'midi', 'openExternal', 'hid', 'usb', 'clipboard-read']) {
+      expect(shouldGrantPermission(permission, 'https://printqs.com/', trusted)).toBe(false);
+    }
   });
 });
