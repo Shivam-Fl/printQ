@@ -67,7 +67,10 @@ export default function PdfPreview({ fileId, totalPages, pageRange }: Props) {
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const measure = () => setWidth(el.clientWidth);
+    const measure = () => {
+      const style = getComputedStyle(el);
+      setWidth(Math.max(0, el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -137,7 +140,7 @@ export default function PdfPreview({ fileId, totalPages, pageRange }: Props) {
         <div className="pdf-scroller" ref={scroller} tabIndex={0} aria-label="Print preview pages">
           {pageNumbers.map((n, i) => (
             <PageSlot key={n} doc={doc} pageNumber={n} ordinal={i + 1} of={pageNumbers.length}
-              width={previewPageWidth(Math.max(width - 2, 0) || 280, zoom)} eager={i === 0} root={scroller} />
+              width={previewPageWidth(width || 280, zoom)} eager={i === 0} root={scroller} />
           ))}
         </div>
       )}

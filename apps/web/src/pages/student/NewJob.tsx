@@ -226,7 +226,7 @@ export default function NewJob() {
   const maxSlot = toLocalInput(new Date(Date.now() + 72 * 3_600_000));
 
   return (
-    <div className="page">
+    <div className="page wide">
       <Topbar />
       <div className="checkout-heading">
         <span className="eyebrow-label">Review before you visit</span>
