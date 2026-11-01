@@ -36,15 +36,15 @@ const ADMIN_RESET_RESEND_MS = 60_000;
 const ADMIN_RESET_DAILY_LIMIT = 10;
 const ADMIN_RESET_MAX_ATTEMPTS = 5;
 const coordinatesSchema = z.object({
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const campusInputSchema = z.object({
@@ -58,15 +58,15 @@ const campusPatchSchema = z.object({
   address: z.string().trim().min(3).max(300).optional(),
   slug: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
@@ -395,8 +395,8 @@ adminRouter.post(
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
     if (shop.verificationStatus !== 'submitted') throw conflict('Only submitted shops can be verified');
-    if (!shop.campus?.isActive || shop.latitude == null || shop.longitude == null) {
-      throw conflict('The shop no longer has an active campus and complete location');
+    if ((shop.campus && !shop.campus.isActive) || shop.latitude == null || shop.longitude == null) {
+      throw conflict('The shop is on an inactive campus or has no complete location');
     }
     const verified = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
@@ -442,8 +442,8 @@ adminRouter.post(
     const id = param(req, 'id');
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
-    if (shop.verificationStatus !== 'verified' || !shop.campus?.isActive) {
-      throw conflict('Only verified shops on active campuses can be published');
+    if (shop.verificationStatus !== 'verified' || (shop.campus && !shop.campus.isActive)) {
+      throw conflict('Only verified shops that are not on an inactive campus can be published');
     }
     const published = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({

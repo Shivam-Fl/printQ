@@ -294,16 +294,9 @@ async function main() {
     return result.data.agents?.some((agent) => agent.status === 'online' && agent.detectedPrinters?.length > 0);
   });
   assert(true, 'restarted agent process re-registered under the same agent id');
+  // A new shop is auto-live: once its agent is online the submit call publishes it with no admin step.
   const submitted = await request('/api/shop/verification/submit', { method: 'POST', token: shopToken });
-  assert(submitted.status === 200 && submitted.data.verification?.status === 'submitted', 'shop independently requested verification');
-  const verifiedShop = await request(`/api/admin/shops/${registered.data.user.shopId}/verify`, {
-    method: 'POST', token: adminToken, body: { notes: 'CI simulator only' },
-  });
-  assert(verifiedShop.status === 200 && verifiedShop.data.shop?.verificationStatus === 'verified', 'administrator verified shop separately');
-  const publishedShop = await request(`/api/admin/shops/${registered.data.user.shopId}/publish`, {
-    method: 'POST', token: adminToken,
-  });
-  assert(publishedShop.status === 200 && publishedShop.data.shop?.publishedAt, 'administrator published verified shop');
+  assert(submitted.status === 200 && submitted.data.verification?.status === 'verified', 'new shop went live by itself once its agent was online');
   const setup = await request('/api/shop/setup-status', { token: shopToken });
   assert(setup.data.setup?.ready === true, 'setup checklist reports launch-ready');
   const publicShop = await request(`/api/public/shops/${shopSlug}`);

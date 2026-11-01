@@ -16,8 +16,9 @@ import {
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
+import { publishIfReady } from './autoLive.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
-import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
+import { counterReleaseLimiter, makeGeneralLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -43,9 +44,9 @@ import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
-import { distanceMeters, isWithinIndia, MATERIAL_MOVE_M, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
+import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
-import { searchIndianLocations } from '../../providers/geocoding/index.js';
+import { reverseLocation, searchLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
 
 export const shopRouter = Router();
@@ -68,6 +69,7 @@ shopRouter.get(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
@@ -98,18 +100,38 @@ shopRouter.get(
   }),
 );
 
-/** One-time shop setup search; server-side so provider throttling/caching is centralized. */
+// Public on purpose: the sign-up form prefills the address from the pin before an
+// account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
+const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
+const optionalCoord = (v: unknown, max: number): number | undefined => {
+  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d+)?$/.test(v.trim())) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && Math.abs(n) <= max ? n : undefined;
+};
+
+/** Address / shop / POI search, worldwide, optionally biased towards lat,lng. Provider failure gives an empty list. */
+const geocodeSearch = asyncHandler(async (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
+  if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
+  const lat = optionalCoord(req.query.lat, 90);
+  const lng = optionalCoord(req.query.lng, 180);
+  const bias = lat !== undefined && lng !== undefined ? { latitude: lat, longitude: lng } : undefined;
+  res.json({ results: await searchLocations(query, bias) });
+});
+
+shopRouter.get('/geocode', geocodeLimiter, geocodeSearch);
+// Deprecated alias kept so shipped clients keep working.
+shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeSearch);
+
+/** Pin to address label for prefilling the address. label is null when unknown or the provider is down. */
 shopRouter.get(
-  '/location-search',
-  requireShopOwner,
+  '/geocode/reverse',
+  geocodeLimiter,
   asyncHandler(async (req, res) => {
-    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
-    if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
-    try {
-      res.json({ results: await searchIndianLocations(query) });
-    } catch {
-      throw new HttpError(503, 'Address search is temporarily unavailable. Use device location or manual coordinates.');
-    }
+    const lat = optionalCoord(req.query.lat, 90);
+    const lng = optionalCoord(req.query.lng, 180);
+    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) throw badRequest('A valid lat and lng are required');
+    res.json({ label: await reverseLocation(lat, lng) });
   }),
 );
 
@@ -125,6 +147,11 @@ shopRouter.get(
       prisma.agent.findMany({ where: { shopId } }),
     ]);
     if (!shop) throw notFound();
+    // New (autoLive) shops go live by themselves once everything is in place.
+    if (await publishIfReady(shopId)) {
+      const fresh = await prisma.shop.findUnique({ where: { id: shopId } });
+      if (fresh) Object.assign(shop, fresh);
+    }
 
     const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
     const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
@@ -138,7 +165,7 @@ shopRouter.get(
 
     res.json({
       setup: {
-        profileReady: Boolean(shop.name.trim() && shop.address.trim() && shop.campusId),
+        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
         locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
@@ -150,6 +177,7 @@ shopRouter.get(
           && shop.verificationStatus === 'verified'
           && shop.publishedAt != null,
         verification: {
+          autoLive: shop.autoLive,
           status: shop.verificationStatus,
           submittedAt: shop.verificationSubmittedAt,
           verifiedAt: shop.verifiedAt,
@@ -158,7 +186,6 @@ shopRouter.get(
             && pricingReady
             && readyPrinters.length > 0
             && agentReady
-            && Boolean(shop.campusId)
             && shop.verificationStatus !== 'submitted'
             && shop.verificationStatus !== 'verified',
         },
@@ -180,9 +207,9 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
-  campusId: z.string().uuid().nullable().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  campusId: z.uuid().nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
   checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100), z.literal(200)]).optional(),
   // How many students the counter serves at once (drives queue bands).
   counterCapacity: z.number().int().min(COUNTER_CAPACITY_MIN).max(COUNTER_CAPACITY_MAX).optional(),
@@ -197,15 +224,11 @@ const shopPatchSchema = z.object({
   /** printOptionsVersion the client last loaded; a stale one cannot overwrite a newer menu. */
   expectedPrintOptionsVersion: z.number().int().min(0).optional(),
 }).superRefine((value, context) => {
-  if (typeof value.latitude === 'number' && typeof value.longitude === 'number'
-    && !(value.latitude === 0 && value.longitude === 0)
-    && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
-  }
+  // Worldwide: no country restriction on the pin (range is already enforced above).
   if (value.latitude === 0 && value.longitude === 0) {
     // "Null Island": the classic unset/geolocation-failed default, never a real counter.
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Coordinates 0, 0 are not a real location — choose the shop entrance on the map',
     });
@@ -214,7 +237,7 @@ const shopPatchSchema = z.object({
   const longitudeProvided = value.longitude !== undefined;
   if (latitudeProvided !== longitudeProvided || (latitudeProvided && ((value.latitude == null) !== (value.longitude == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Latitude and longitude must be updated together',
     });
@@ -223,7 +246,7 @@ const shopPatchSchema = z.object({
   const payeeProvided = value.counterUpiPayeeName !== undefined;
   if (vpaProvided !== payeeProvided || (vpaProvided && ((value.counterUpiVpa == null) !== (value.counterUpiPayeeName == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['counterUpiVpa'],
       message: 'Merchant UPI VPA and payee name must be updated together',
     });
@@ -256,6 +279,7 @@ shopRouter.patch(
         address: true,
         campusId: true,
         campusName: true,
+        autoLive: true,
         latitude: true,
         longitude: true,
         printOptions: true,
@@ -288,7 +312,8 @@ shopRouter.patch(
         delete body.longitude;
       }
     }
-    const verificationReset = nameChanged || addressChanged || campusChanged || locationChanged;
+    // Auto-live shops stay live through edits; manually verified shops are re-reviewed as before.
+    const verificationReset = !current.autoLive && (nameChanged || addressChanged || campusChanged || locationChanged);
 
     let menuChanged = false;
     if ('printOptions' in body) {
@@ -335,6 +360,8 @@ shopRouter.patch(
         'SETTINGS_CHANGED_ELSEWHERE',
       );
     }
+    // The edit is already saved; an auto-publish hiccup must not turn it into a 500.
+    await publishIfReady(shopId).catch(() => false);
     const shop = await prisma.shop.findUniqueOrThrow({
       where: { id: shopId },
       select: {
@@ -345,6 +372,7 @@ shopRouter.patch(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
@@ -404,7 +432,7 @@ shopRouter.post(
 shopRouter.post(
   '/printers/:id/test-print',
   requireShopUser,
-  validateBody(z.object({ agentId: z.string().uuid().optional() })),
+  validateBody(z.object({ agentId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const printer = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -463,12 +491,27 @@ shopRouter.post(
       include: { campus: true, printers: true, agents: true },
     });
     if (!shop) throw notFound();
+    if (shop.autoLive && shop.verificationStatus === 'rejected') {
+      // An admin rejection is final for auto-live shops: resubmitting must not skip the admin.
+      throw conflict('This shop was rejected by PrintQs review. Contact support to have it reviewed again.');
+    }
     const hasCoordinates = shop.latitude != null && shop.longitude != null;
     const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
     const hasAgent = shop.agents.length > 0;
     const hasMenu = shopOptions(shop).papers.length > 0;
-    if (!shop.campus || !shop.campus.isActive || !hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
-      throw badRequest('Complete campus, location, printer, agent, and print-menu setup before requesting verification');
+    if (!hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
+      throw badRequest('Complete location, printer, agent, and print-menu setup before requesting verification');
+    }
+    // A campus is optional. Auto-live shops publish themselves as soon as the agent is online.
+    if (await publishIfReady(shop.id)) {
+      const live = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id }, select: { verificationStatus: true, verificationSubmittedAt: true } });
+      res.json({ verification: { status: live.verificationStatus, submittedAt: live.verificationSubmittedAt } });
+      return;
+    }
+    if (shop.autoLive && shop.verificationStatus === 'draft') {
+      // Not live yet (e.g. agent offline): stay draft so it publishes itself when ready; never park in "submitted".
+      res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
+      return;
     }
     if (shop.verificationStatus === 'verified') {
       res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
@@ -868,7 +911,7 @@ shopRouter.post(
 shopRouter.post(
   '/jobs/:id/assign',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid() })),
+  validateBody(z.object({ printerId: z.uuid() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const { printerId } = req.body as { printerId: string };
@@ -915,7 +958,7 @@ async function releaseOrphanedPrint(job: Job, shopUserId: string): Promise<Job> 
 shopRouter.post(
   '/jobs/:id/retry-print',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid().optional() })),
+  validateBody(z.object({ printerId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -1132,6 +1175,7 @@ shopRouter.post(
     });
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }
@@ -1165,6 +1209,7 @@ shopRouter.patch(
     // its PC is reachable from here — auto-add without a manual chip-pick.
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }
@@ -1220,7 +1265,7 @@ shopRouter.post(
   validateBody(
     z.object({
       machineLabel: z.string().trim().min(1).max(80),
-      connectedPrinterIds: z.array(z.string().uuid()).default([]),
+      connectedPrinterIds: z.array(z.uuid()).max(50).default([]),
     }),
   ),
   asyncHandler(async (req, res) => {
@@ -1248,7 +1293,7 @@ shopRouter.post(
 shopRouter.patch(
   '/agents/:id',
   requireShopOwner,
-  validateBody(z.object({ connectedPrinterIds: z.array(z.string().uuid()) })),
+  validateBody(z.object({ connectedPrinterIds: z.array(z.uuid()).max(50) })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const agent = await prisma.agent.findFirst({ where: { id: param(req, 'id'), shopId } });

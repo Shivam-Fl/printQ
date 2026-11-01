@@ -15,7 +15,7 @@ pushRouter.get('/vapid-public-key', (_req, res) => {
 });
 
 const subscribeSchema = z.object({
-  endpoint: z.string().url().max(1000),
+  endpoint: z.url().max(1000),
   keys: z.object({
     p256dh: z.string().min(1).max(300),
     auth: z.string().min(1).max(100),
@@ -84,7 +84,7 @@ pushRouter.post(
 pushRouter.post(
   '/unsubscribe',
   requireStudent,
-  validateBody(z.object({ endpoint: z.string().url().max(1000) })),
+  validateBody(z.object({ endpoint: z.url().max(1000) })),
   asyncHandler(async (req, res) => {
     const { endpoint } = req.body as { endpoint: string };
     await prisma.pushSubscription.deleteMany({

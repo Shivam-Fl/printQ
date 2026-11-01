@@ -131,20 +131,13 @@ export function buildSettingsPatch(
 // ---- coordinate sanity (OWN-10, warning only) ----------------------------
 
 /**
- * A soft hint for obviously wrong pins. Never blocks a save: the product is not
- * India-only, so only exact 0,0 (also rejected server-side) and the classic
- * lat/lng swap for an Indian shop (lat 68-98, lng 6-36) are called out.
+ * A soft hint for obviously wrong pins. Never blocks a save: the product works
+ * worldwide, so only exact 0,0 (also rejected server-side) is called out.
  */
 export function coordinateWarning(latitude: number | null, longitude: number | null): string | null {
   if (latitude == null || longitude == null) return null;
   if (latitude === 0 && longitude === 0) {
     return 'Coordinates 0, 0 are in the ocean off Africa, not a shop. Choose the entrance on the map.';
-  }
-  if (latitude >= 68 && latitude <= 98 && longitude >= 6 && longitude <= 36) {
-    return 'These look swapped — in India, latitude is about 8–35 and longitude about 68–98. Check the two boxes.';
-  }
-  if (latitude < 6 || latitude > 37.5 || longitude < 68 || longitude > 98) {
-    return 'That location is outside India — check latitude/longitude';
   }
   return null;
 }

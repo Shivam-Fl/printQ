@@ -4,7 +4,7 @@ import { api, ApiError, getShopRole, getToken } from '../../api.js';
 import { useNavigate } from 'react-router-dom';
 import QueueSettings from '../../components/QueueSettings.js';
 import ShopNav from '../../components/ShopNav.js';
-import ShopLocationPicker from '../../components/ShopLocationPicker.js';
+import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import {
   buildSettingsPatch,
   locationChangeNeedsReview,
@@ -66,6 +66,7 @@ interface ShopProfile {
   campusId: string | null;
   campus: { id: string; name: string; slug: string } | null;
   slug: string;
+  autoLive?: boolean;
   latitude: number | null;
   longitude: number | null;
   checkInRadiusM: number;
@@ -81,12 +82,6 @@ interface Campus {
   slug: string;
   name: string;
   address: string;
-}
-interface LocationSearchResult {
-  id: string;
-  label: string;
-  latitude: number;
-  longitude: number;
 }
 
 const slug = (s: string) =>
@@ -108,13 +103,6 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  const [locationBusy, setLocationBusy] = useState(false);
-  const [locationMessage, setLocationMessage] = useState('');
-  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [locationCenter, setLocationCenter] = useState<{ latitude: number; longitude: number; zoom?: number } | null>(null);
-  const [locationQuery, setLocationQuery] = useState('');
-  const [locationSearchBusy, setLocationSearchBusy] = useState(false);
-  const [locationResults, setLocationResults] = useState<LocationSearchResult[]>([]);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   // What the server last told us — saves send only the difference from this.
   const [baseline, setBaseline] = useState<{ draft: SettingsDraft; menuVersion: number } | null>(null);
@@ -159,6 +147,7 @@ export default function Settings() {
           campusId: r.shop.campusId,
           campus: r.shop.campus,
           slug: r.shop.slug,
+          autoLive: r.shop.autoLive,
           latitude: r.shop.latitude,
           longitude: r.shop.longitude,
           checkInRadiusM: r.shop.checkInRadiusM,
@@ -169,11 +158,18 @@ export default function Settings() {
           counterUpiPayeeName: r.shop.counterUpiPayeeName,
           counterUpiVerifiedAt: r.shop.counterUpiVerifiedAt,
         });
-        setLocationQuery([r.shop.address, r.shop.campus?.name ?? r.shop.campusName].filter(Boolean).join(', '));
         setAutoAssign(r.shop.autoAssignEnabled);
       })
       .catch(() => navigate('/dashboard/login'));
   }, [navigate, reloadTick]);
+
+  const setPin = useCallback((latitude: number, longitude: number) => {
+    setProfile((current) => current ? { ...current, latitude, longitude, locationUpdatedAt: new Date().toISOString() } : current);
+    setError('');
+  }, []);
+  const setAddress = useCallback((address: string) => {
+    setProfile((current) => current ? { ...current, address } : current);
+  }, []);
 
   if (!opts) {
     return (
@@ -191,102 +187,6 @@ export default function Settings() {
   const priceErrorsPresent = opts.papers.some((p) => p.label.trim() && Object.values(paperErrors(p)).some(Boolean))
     || opts.bindings.some((b) => b.label.trim() && Object.values(bindingErrors(b)).some(Boolean));
   const locationHint = profile ? coordinateWarning(profile.latitude, profile.longitude) : null;
-
-  function captureShopLocation() {
-    if (!navigator.geolocation) {
-      setLocationPickerOpen(true);
-      setLocationMessage('This device cannot provide location. Place the entrance pin on the map instead.');
-      return;
-    }
-    setLocationBusy(true);
-    setLocationMessage('');
-    setError('');
-    const applyPosition = (position: GeolocationPosition, approximate: boolean) => {
-      const latitude = Number(position.coords.latitude.toFixed(6));
-      const longitude = Number(position.coords.longitude.toFixed(6));
-      const accuracy = position.coords.accuracy;
-      const zoom = accuracy <= 250 ? 17 : accuracy <= 2_000 ? 14 : accuracy <= 10_000 ? 12 : 10;
-      setLocationCenter({ latitude, longitude, zoom });
-      if (accuracy > 100 || approximate) {
-        setLocationPickerOpen(true);
-        setLocationMessage(`The PC found your area with about ${Math.round(accuracy)} m accuracy. Click the exact shop entrance on the map.`);
-      } else {
-        setProfile((current) => current ? {
-          ...current,
-          latitude,
-          longitude,
-          locationUpdatedAt: new Date(position.timestamp).toISOString(),
-        } : current);
-        setLocationMessage(`Location captured with about ${Math.round(accuracy)} m accuracy. Save changes to activate it.`);
-      }
-      setLocationBusy(false);
-    };
-    const openSearchFallback = (permissionDenied: boolean) => {
-      setLocationPickerOpen(true);
-      setLocationMessage(permissionDenied
-        ? 'Location access is off. Search your college or address below, then click the exact entrance.'
-        : 'The PC could not provide a location. Search your college or address below, then click the exact entrance.');
-      setLocationBusy(false);
-    };
-    navigator.geolocation.getCurrentPosition(
-      (position) => applyPosition(position, false),
-      (reason) => {
-        if (reason.code === reason.PERMISSION_DENIED) {
-          openSearchFallback(true);
-          return;
-        }
-        setLocationMessage('Precise location was unavailable. Trying the PC’s approximate network location…');
-        navigator.geolocation.getCurrentPosition(
-          (position) => applyPosition(position, true),
-          () => openSearchFallback(false),
-          { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
-        );
-      },
-      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
-    );
-  }
-
-  async function searchLocation() {
-    const query = locationQuery.trim();
-    if (query.length < 3) {
-      setLocationMessage('Enter a college, shop address, area or city to search.');
-      return;
-    }
-    setLocationSearchBusy(true);
-    setLocationResults([]);
-    setError('');
-    try {
-      const response = await api<{ results: LocationSearchResult[] }>(
-        `/api/shop/location-search?q=${encodeURIComponent(query)}`,
-        { role: 'shop' },
-      );
-      setLocationResults(response.results);
-      setLocationMessage(response.results.length
-        ? 'Select the closest result, then click the exact shop entrance on the map.'
-        : 'No matching place found. Add the city or PIN code and search again.');
-    } catch (err) {
-      setLocationMessage(err instanceof Error ? err.message : 'Could not search this address.');
-    } finally {
-      setLocationSearchBusy(false);
-    }
-  }
-
-  function chooseLocationResult(result: LocationSearchResult) {
-    setLocationCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 17 });
-    setLocationResults([]);
-    setLocationMessage(`Showing ${result.label}. Now click the exact shop entrance.`);
-  }
-
-  function selectShopLocation(latitude: number, longitude: number) {
-    setProfile((current) => current ? {
-      ...current,
-      latitude,
-      longitude,
-      locationUpdatedAt: new Date().toISOString(),
-    } : current);
-    setLocationMessage('Entrance pin selected. Save all changes to activate it.');
-    setError('');
-  }
 
   async function save() {
     if (!opts || !profile) return;
@@ -336,7 +236,7 @@ export default function Settings() {
     // Only what changed: re-sending untouched fields would unpublish a verified
     // shop and let a stale tab overwrite another tab's edits.
     const patch = buildSettingsPatch(baseline.draft, draft, baseline.menuVersion);
-    if (locationChangeNeedsReview(baseline.draft, draft)
+    if (profile.autoLive !== true && locationChangeNeedsReview(baseline.draft, draft)
       && !confirm('Moving your counter location sends your shop for re-review and hides it from students until approved. Continue?')) {
       return;
     }
@@ -402,7 +302,7 @@ export default function Settings() {
             <div className="form-row">
               <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
               <div className="field grow">
-                <label htmlFor="profile-campus">Approved campus</label>
+                <label htmlFor="profile-campus">Campus <span className="optional-label">optional</span></label>
                 <select
                   id="profile-campus"
                   value={profile.campusId ?? ''}
@@ -411,10 +311,10 @@ export default function Settings() {
                     setProfile({ ...profile, campusId: campus?.id ?? null, campus, campusName: campus?.name ?? null });
                   }}
                 >
-                  <option value="">Choose a campus before requesting verification</option>
+                  <option value="">Not on a campus</option>
                   {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
                 </select>
-                <span className="field-help">Only a platform-approved campus can be published to students.</span>
+                <span className="field-help">Only needed if your shop is on a listed campus. Every shop is visible to students nearby either way.</span>
               </div>
             </div>
             <div className="field"><label htmlFor="profile-address">Counter address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
@@ -470,56 +370,15 @@ export default function Settings() {
                 </select>
                 <span className="field-help">Smaller zones reduce remote check-ins but need a more accurate phone location.</span>
               </div>
-              <div className="field grow">
-                <label>Counter coordinates</label>
-                <div className="location-actions">
-                  <button className="secondary" disabled={locationBusy} onClick={captureShopLocation}>
-                    {locationBusy ? 'Checking location…' : 'Use this device'}
-                  </button>
-                  <button className="ghost" onClick={() => setLocationPickerOpen((open) => !open)}>
-                    {locationPickerOpen ? 'Close map' : 'Choose on map'}
-                  </button>
-                </div>
-              </div>
             </div>
-            {locationMessage && <p className="dim" style={{ margin: 0 }} role="status">{locationMessage}</p>}
-            {locationPickerOpen && (
-              <>
-                <form className="location-search" onSubmit={(event) => { event.preventDefault(); void searchLocation(); }}>
-                  <div className="field grow">
-                    <label htmlFor="location-search">Find your shop area</label>
-                    <input
-                      id="location-search"
-                      type="text"
-                      value={locationQuery}
-                      onChange={(event) => setLocationQuery(event.target.value)}
-                      placeholder="College, shop address, area or PIN code"
-                      autoComplete="street-address"
-                    />
-                  </div>
-                  <button type="submit" disabled={locationSearchBusy || locationQuery.trim().length < 3}>
-                    {locationSearchBusy ? 'Searching…' : 'Find address'}
-                  </button>
-                </form>
-                {locationResults.length > 0 && (
-                  <div className="location-search-results" role="list" aria-label="Address matches">
-                    {locationResults.map((result) => (
-                      <button type="button" key={result.id} onClick={() => chooseLocationResult(result)} role="listitem">
-                        <span className="location-result-pin">PIN</span>
-                        <span>{result.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <ShopLocationPicker
-                  latitude={profile.latitude}
-                  longitude={profile.longitude}
-                  center={locationCenter}
-                  onChange={selectShopLocation}
-                />
-                <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
-              </>
-            )}
+            <ShopLocationEditor
+              latitude={profile.latitude}
+              longitude={profile.longitude}
+              address={profile.address}
+              onPin={setPin}
+              onAddress={setAddress}
+              hideAddress
+            />
             {locationHint && <p className="warn-note" role="status">{locationHint}</p>}
             <details className="location-coordinates">
               <summary>Enter coordinates manually</summary>

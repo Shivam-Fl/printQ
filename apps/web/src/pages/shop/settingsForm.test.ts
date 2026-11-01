@@ -134,15 +134,14 @@ describe('changed-fields-only settings save (OWN-1 / OWN-5, client)', () => {
 
 describe('coordinate sanity warning (OWN-10, UI only)', () => {
   it('warns for 0,0', () => expect(coordinateWarning(0, 0)).toMatch(/0, 0/));
-  it('warns when latitude/longitude look swapped for India', () => {
-    expect(coordinateWarning(77.209, 28.6139)).toMatch(/swapped/i);
-  });
   it('is quiet for a normal Indian location and for nulls', () => {
     expect(coordinateWarning(28.6139, 77.209)).toBeNull();
     expect(coordinateWarning(null, null)).toBeNull();
   });
-  it('warns for a location outside India', () => {
-    expect(coordinateWarning(51.5, -0.12)).toMatch(/outside India/);
+  it('accepts locations anywhere in the world (no India-only check)', () => {
+    expect(coordinateWarning(51.5, -0.12)).toBeNull();
+    expect(coordinateWarning(-33.87, 151.21)).toBeNull();
+    expect(coordinateWarning(40.7, -74)).toBeNull();
   });
 });
 
