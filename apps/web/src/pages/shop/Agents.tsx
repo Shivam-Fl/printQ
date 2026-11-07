@@ -3,6 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { API_URL, api, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
+import { PcLinkShare, PcSteps } from '../../components/PcSetup.js';
+import { WINDOWS_DOWNLOAD_URL, detectPhoneLike } from '../../lib/pcDownload.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface DetectedPrinter {
   name: string;
@@ -19,12 +22,10 @@ interface AgentRow {
   detectedAt: string | null;
 }
 
-const windowsDownloadUrl =
-  'https://github.com/Shivam-Fl/printqs-desktop/releases/latest/download/PrintQs-Shop-Setup.exe';
-
 export default function Agents() {
   const navigate = useNavigate();
   const desktop = window.printqsDesktop;
+  const [phone] = useState(detectPhoneLike);
   const [agents, setAgents] = useState<AgentRow[]>([]);
   const [label, setLabel] = useState('Counter PC');
   const [mode, setMode] = useState<'real' | 'simulate'>('real');
@@ -41,14 +42,14 @@ export default function Agents() {
       const result = await api<{ agents: AgentRow[] }>('/api/shop/agents', { role: 'shop' });
       setAgents(result.agents);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
+      if ((err as { status?: number }).status === 401) navigate(shopLoginPath());
       else setError(err instanceof Error ? err.message : 'Failed to load computers');
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     void refresh();
@@ -149,23 +150,21 @@ export default function Agents() {
       <ShopNav />
       <header className="page-heading">
         <div>
-          <span className="eyebrow-label">Local printer control</span>
+          <span className="eyebrow-label">Counter computer</span>
           <h1>Shop computers</h1>
-          <p>The PrintQs Shop app securely links this dashboard to printers installed on each Windows counter PC.</p>
+          <p>PrintQs prints from the Windows computer next to your printer, using the PrintQs Shop app.</p>
         </div>
         <span className="summary-pill">{agents.filter((agent) => agent.status === 'online').length} online</span>
       </header>
 
       {!desktop && (
-        <section className="connect-panel">
-          <div className="connect-intro">
-            <span className="step-number">01</span>
-            <div>
-              <h2>Connect printers and the Safe simulator through PrintQs Shop</h2>
-              <p>The desktop app includes this complete dashboard plus printer discovery, automatic printing, startup and health monitoring. Browser-only mode cannot directly control Windows printers. Printers and the Safe simulator (for testing with no printer) both connect through the desktop app, so install it, sign in, and connect from there.</p>
-            </div>
-          </div>
-          <a className="button-link" href={windowsDownloadUrl}>Download PrintQs Shop for Windows</a>
+        <section className="connect-panel pc-setup">
+          <h2>Set up your counter computer</h2>
+          <p className="pc-setup-lead">Do these 3 steps on the Windows computer next to your printer.</p>
+          {phone && <PcLinkShare withQr />}
+          <PcSteps />
+          {!phone && <a className="button-link" href={WINDOWS_DOWNLOAD_URL}>Download PrintQs Shop for Windows</a>}
+          <p className="field-help">No printer yet? The app also has a test printer, so you can try a full order first.</p>
         </section>
       )}
 
@@ -242,13 +241,13 @@ export default function Agents() {
 
       <section>
         <div className="section-heading">
-          <div><h2>Registered computers</h2><p>A computer shows offline after two minutes without a heartbeat.</p></div>
+          <div><h2>Registered computers</h2><p>A computer shows offline if PrintQs hasn’t heard from it for two minutes.</p></div>
         </div>
 
         {agents.length === 0 ? (
           <div className="empty-state">
             <strong>No computers connected yet</strong>
-            <p>{desktop ? 'Connect this Windows PC above to discover its printers.' : 'Install PrintQs Shop on a counter PC, sign in, then connect it here.'}</p>
+            <p>{desktop ? 'Connect this Windows PC above to discover its printers.' : 'Follow the 3 steps above on your counter computer. It shows up here once connected.'}</p>
           </div>
         ) : (
           <div className="device-grid">

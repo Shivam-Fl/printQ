@@ -2,7 +2,7 @@ import express from 'express';
 import { describe, expect, it } from 'vitest';
 import { signShopToken, signStudentToken } from '../lib/tokens.js';
 import { errorHandler } from './error.js';
-import { counterReleaseLimiter, makeGeneralLimiter, principalOf } from './rateLimit.js';
+import { counterReleaseLimiter, loginLimiter, makeGeneralLimiter, pinLoginFailureLimiter, principalOf } from './rateLimit.js';
 
 /** Tiny app with the real limiter factory at small numbers: 3 per user, 12 per IP per window. */
 async function withApp(run: (call: (opts: { token?: string; ip: string }) => Promise<Response>) => Promise<void>) {
@@ -100,5 +100,78 @@ describe('general rate limit keys authenticated traffic by principal', () => {
     expect(principalOf(req({ authorization: 'Bearer forged' }))).toBeNull();
     expect(principalOf(req({}))).toBeNull();
     expect(principalOf(req({ 'x-agent-token': 'a'.repeat(40) }))).toMatch(/^agent:/);
+  });
+});
+
+/** A login-shaped app: per-IP loginLimiter, then the per-account PIN brake; the "right" secret is 2468 / good-pass-1. */
+async function withLoginApp(run: (call: (body: Record<string, string>, ip: string) => Promise<Response>) => Promise<void>) {
+  const app = express();
+  app.set('trust proxy', true);
+  app.use(express.json());
+  app.post('/login', loginLimiter, pinLoginFailureLimiter, (req, res) => {
+    const secret = req.body.pin ?? req.body.password;
+    res.status(secret === '2468' || secret === 'good-pass-1' ? 200 : 401).json({});
+  });
+  app.use(errorHandler);
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('listener unavailable');
+    const url = `http://127.0.0.1:${address.port}/login`;
+    await run((body, ip) => fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+      body: JSON.stringify(body),
+    }));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+  }
+}
+
+describe('shop login limits (S1, S3)', () => {
+  let n = 0;
+  const email = () => `staff-${Date.now()}-${n++}@shop.test`;
+
+  it('successful sign-ins do not use up the per-IP login budget', async () => {
+    await withLoginApp(async (call) => {
+      for (let i = 0; i < 8; i += 1) expect((await call({ email: email(), password: 'good-pass-1' }, '10.8.0.1')).status).toBe(200);
+      // failures still count: 5 per minute per IP
+      for (let i = 0; i < 5; i += 1) expect((await call({ email: email(), password: 'wrong-pass' }, '10.8.0.1')).status).toBe(401);
+      expect((await call({ email: email(), password: 'good-pass-1' }, '10.8.0.1')).status).toBe(429);
+    });
+  });
+
+  it('10 wrong PINs for one account lock that account for 15 minutes, whatever the IP', async () => {
+    await withLoginApp(async (call) => {
+      const target = email();
+      for (let i = 0; i < 10; i += 1) expect((await call({ email: target, pin: String(1000 + i) }, `10.8.1.${i}`)).status).toBe(401);
+      // a fresh IP and even the right PIN are refused now
+      const blocked = await call({ email: target, pin: '2468' }, '10.8.1.200');
+      expect(blocked.status).toBe(429);
+      expect(Number(blocked.headers.get('retry-after'))).toBe(900);
+      expect(((await blocked.json()) as { error: string }).error).toMatch(/wrong PINs for this account/);
+      // a PIN typed in the password box spends the same budget
+      expect((await call({ email: target, password: '2468' }, '10.8.1.201')).status).toBe(429);
+      // other accounts are unaffected
+      expect((await call({ email: email(), pin: '2468' }, '10.8.1.202')).status).toBe(200);
+    });
+  });
+
+  it('a full password is never blocked by the PIN brake, so an owner cannot be locked out by PIN spam', async () => {
+    await withLoginApp(async (call) => {
+      const owner = email();
+      for (let i = 0; i < 10; i += 1) await call({ email: owner, password: String(100000 + i) }, `10.8.2.${i}`);
+      expect((await call({ email: owner, password: 'good-pass-1' }, '10.8.2.100')).status).toBe(200);
+    });
+  });
+
+  it('correct PINs hand their slot back', async () => {
+    await withLoginApp(async (call) => {
+      const staff = email();
+      for (let i = 0; i < 9; i += 1) expect((await call({ email: staff, pin: String(1000 + i) }, `10.8.3.${i}`)).status).toBe(401);
+      for (let i = 0; i < 5; i += 1) expect((await call({ email: staff, pin: '2468' }, `10.8.3.${50 + i}`)).status).toBe(200);
+      expect((await call({ email: staff, pin: '1111' }, '10.8.3.99')).status).toBe(401);
+      expect((await call({ email: staff, pin: '1112' }, '10.8.3.98')).status).toBe(429);
+    });
   });
 });

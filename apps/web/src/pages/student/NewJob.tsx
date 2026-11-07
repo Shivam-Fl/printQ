@@ -36,6 +36,14 @@ interface Quote {
 // pdf.js is ~400 KB: load it only when this screen is opened.
 const PdfPreview = lazy(() => import('../../components/PdfPreview.js'));
 
+/** Why the Ink select is locked to B/W, or null when colour can be chosen. */
+export function inkUnavailableNote(papers: Paper[], paperId: string): string | null {
+  const paper = papers.find((p) => p.id === paperId);
+  if (paper?.colorAvailable) return null;
+  if (!papers.some((p) => p.colorAvailable)) return 'This shop prints black & white only right now.';
+  return `Colour isn’t available on ${paper?.label ?? 'this paper'} here. Choose another paper size for colour.`;
+}
+
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -151,6 +159,7 @@ export default function NewJob() {
 
   const paper = opts?.papers.find((p) => p.id === specs?.paperSize);
   const colorAvailable = Boolean(paper?.colorAvailable);
+  const inkNote = opts && specs ? inkUnavailableNote(opts.papers, specs.paperSize) : null;
 
   // if the chosen paper can't do colour, force B/W
   useEffect(() => {
@@ -228,17 +237,18 @@ export default function NewJob() {
   return (
     <div className="page wide">
       <Topbar />
-      <div className="checkout-heading">
-        <span className="eyebrow-label">Review before you visit</span>
-        <h1>Set up your print</h1>
-        <p className="dim">Check the preview and choose only what you need. The total updates instantly.</p>
-        <div className="checkout-steps" aria-label="Order progress">
-          <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Pay at shop</span><span>Arrive &amp; check in</span>
-        </div>
-      </div>
-
       <div className="checkout-grid">
+        {/* Heading sits in the left column so the preview + total start at the top
+            (laptop: total and Prepare order stay on screen; phone: settings come first). */}
         <div className="checkout-main">
+          <div className="checkout-heading">
+            <span className="eyebrow-label">Review before you visit</span>
+            <h1>Set up your print</h1>
+            <p className="dim">Choose only what you need and check the preview. The total updates instantly.</p>
+            <div className="checkout-steps" aria-label="Order progress">
+              <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Pay at shop</span><span>Arrive &amp; check in</span>
+            </div>
+          </div>
           <section className="checkout-card">
             <div className="checkout-card-head">
               <h2>Print settings</h2>
@@ -259,10 +269,11 @@ export default function NewJob() {
             <div className="form-row">
               <div className="field grow">
                 <label htmlFor="color">Ink</label>
-                <select id="color" value={specs.color ? 'color' : 'bw'} disabled={!colorAvailable} onChange={(e) => set('color', e.target.value === 'color')}>
+                <select id="color" value={specs.color ? 'color' : 'bw'} disabled={!colorAvailable} aria-describedby={inkNote ? 'color-hint' : undefined} onChange={(e) => set('color', e.target.value === 'color')}>
                   <option value="bw">Black &amp; white</option>
                   {colorAvailable && <option value="color">Colour</option>}
                 </select>
+                {inkNote && <span id="color-hint" className="field-help">{inkNote}</span>}
               </div>
               {opts.duplexEnabled && (
                 <div className="field grow">
@@ -327,7 +338,7 @@ export default function NewJob() {
           </section>
 
           <section className="checkout-card">
-            <div className="checkout-card-head"><h2>Pay at shop</h2><p>Pay the final total shown below directly to the shop by cash or the shop’s merchant UPI. Staff verifies receipt before printing.</p></div>
+            <div className="checkout-card-head"><h2>Pay at shop</h2><p>Pay the total to the shop at the counter, by cash or the shop’s own UPI. Staff checks the payment before printing.</p></div>
             <div className="payment-method on" aria-label="Payment method">
               <strong>Pay at shop</strong>
               <span>Cash or the shop’s own UPI at the counter</span>
@@ -379,7 +390,7 @@ export default function NewJob() {
                 : mode === 'scheduled' ? 'Prepare order & save arrival time' : 'Prepare order'}
             </button>
             <p style={{ margin: '10px 0 0', color: '#939fb5', fontSize: '.7rem', textAlign: 'center' }}>
-              Pay the final total shown above at the counter · status notifications
+              Nothing to pay now. Pay this total at the counter.
             </p>
           </div>
         </aside>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
+import { isPublishedShop, nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 
 describe('public shop discovery', () => {
   it('requires verification and publication; a campus is optional but must be active when present', () => {
@@ -8,6 +8,18 @@ describe('public shop discovery', () => {
       publishedAt: { not: null },
       OR: [{ campusId: null }, { campus: { is: { isActive: true } } }],
     });
+  });
+
+  it('isPublishedShop applies the same rule to loaded rows', () => {
+    const now = new Date();
+    const base = { verificationStatus: 'verified', publishedAt: now, campusId: null, campus: null };
+    expect(isPublishedShop(base)).toBe(true);
+    expect(isPublishedShop({ ...base, publishedAt: null })).toBe(false);
+    expect(isPublishedShop({ ...base, verificationStatus: 'draft' })).toBe(false);
+    expect(isPublishedShop({ ...base, campusId: 'c1', campus: { isActive: true } })).toBe(true);
+    expect(isPublishedShop({ ...base, campusId: 'c1', campus: { isActive: false } })).toBe(false);
+    // a campus id whose campus row was not loaded is never assumed active
+    expect(isPublishedShop({ ...base, campusId: 'c1' })).toBe(false);
   });
 
   it('lists a shop with no campus (campusName null), sorted by distance, anywhere in the world', () => {

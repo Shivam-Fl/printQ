@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, downloadFile, getToken, rupees } from '../../api.js';
 import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import ShopNav from '../../components/ShopNav.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface Row {
   id: string;
@@ -24,7 +25,7 @@ export default function History() {
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     api<{ jobs: Row[] }>('/api/shop/history', { role: 'shop' })

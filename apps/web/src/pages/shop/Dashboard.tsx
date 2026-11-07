@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, getToken, rupees } from '../../api.js';
+import { statusBanner, type SetupSnapshot } from '../../lib/setupSteps.js';
 import { getShopSocket } from '../../socket.js';
 import { flashTitle, playChime } from '../../newOrderAlert.js';
 import ShopNav from '../../components/ShopNav.js';
 import { BandPill, useNow } from '../../components/QueueBand.js';
 import type { QueueBand } from '@printq/shared';
 import { jobActions } from './queueActions.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface QueueJob {
   id: string;
@@ -78,10 +80,7 @@ interface PaymentConfirmation {
   overrideQueue: boolean;
 }
 
-interface SetupStatus {
-  ready: boolean;
-  printerReady: boolean;
-  agentReady: boolean;
+interface SetupStatus extends SetupSnapshot {
   acceptingOrders: boolean;
 }
 
@@ -116,14 +115,14 @@ export default function Dashboard() {
       setPrinters(printersRes.printers);
       setSetup(setupRes.setup);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
+      if ((err as { status?: number }).status === 401) navigate(shopLoginPath());
       else setError(err instanceof Error ? err.message : 'Failed to load');
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     void refresh();
@@ -339,6 +338,8 @@ export default function Dashboard() {
   const prepared = jobs.filter((j) => j.status === 'awaiting_arrival');
   const waiting = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
   const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'finishing', 'ready_for_pickup'].includes(j.status));
+  // Names the real problem: PC offline, paused by PrintQs, campus off, or the next missing setup step.
+  const banner = setup ? statusBanner(setup) : null;
 
   return (
     <div className="page wide shop-page">
@@ -364,16 +365,13 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {setup && !setup.ready && (
+      {banner && (
         <div className="notice setup-notice">
           <div>
-            <strong>Finish setup before accepting student orders</strong>
-            <p>
-              {!setup.agentReady ? 'Connect the counter PC and agent. ' : ''}
-              {!setup.printerReady ? 'Link at least one online printer.' : ''}
-            </p>
+            <strong>{banner.title}</strong>
+            <p>{banner.text}</p>
           </div>
-          <button onClick={() => navigate('/dashboard/setup')}>Continue setup</button>
+          <Link className="button-link" to={banner.to}>{banner.action}</Link>
         </div>
       )}
 

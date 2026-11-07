@@ -1,8 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, getToken } from '../../api.js';
+import { api, getShopRole, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
+import { detectedEmptyState, guessPaperSizes } from './printersView.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface Printer {
   id: string;
@@ -51,15 +53,6 @@ const EMPTY_FORM = {
   avgPagesPerMinute: 15,
 };
 
-/** Best-effort A4/A3 guess from what the OS driver reports. */
-function guessPaperSizes(reported: string[]): string[] {
-  const has = (needle: string) => reported.some((s) => s.toLowerCase().includes(needle));
-  const sizes: string[] = [];
-  if (has('a3')) sizes.push('A3');
-  if (sizes.length === 0 || has('a4') || has('letter')) sizes.unshift('A4');
-  return sizes.length ? sizes : ['A4'];
-}
-
 export default function Printers() {
   const navigate = useNavigate();
   const [printers, setPrinters] = useState<Printer[]>([]);
@@ -72,26 +65,37 @@ export default function Printers() {
   const [mediaDraft, setMediaDraft] = useState<Record<string, DriverMedia>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  // detected printer waiting for the "Colour printer? Yes / No" answer
+  const [askingColour, setAskingColour] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ label: '', colorSupport: false });
+  // From /api/shop/me once loaded (the stored role can be missing on older sessions).
+  const [role, setRole] = useState(getShopRole);
+  // Printer setup is owner-only on the API; staff can still switch a printer's status.
+  const isOwner = role === 'owner';
 
   const refresh = useCallback(async () => {
     try {
       const [p, a, s] = await Promise.all([
         api<{ printers: Printer[] }>('/api/shop/printers', { role: 'shop' }),
         api<{ agents: AgentRow[] }>('/api/shop/agents', { role: 'shop' }),
-        api<{ shop: ShopSettings }>('/api/shop/me', { role: 'shop' }),
+        api<{ shop: ShopSettings; user?: { role: 'owner' | 'staff' } }>('/api/shop/me', { role: 'shop' }),
       ]);
       setPrinters(p.printers);
       setAgents(a.agents);
       setShop(s.shop);
+      if (s.user) setRole(s.user.role);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate('/dashboard/login');
+      if ((err as { status?: number }).status === 401) navigate(shopLoginPath());
       else setError(err instanceof Error ? err.message : 'Failed to load');
     }
   }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     void refresh();
@@ -136,7 +140,9 @@ export default function Printers() {
     }
   }
 
-  async function addDetected(d: DetectedPrinter) {
+  async function addDetected(d: DetectedPrinter, colorSupport: boolean) {
+    setAdding(true);
+    setError('');
     try {
       const paperSizesLoaded = guessPaperSizes(d.paperSizes);
       await api('/api/shop/printers', {
@@ -147,18 +153,23 @@ export default function Printers() {
           osPrinterName: d.name,
           paperSizesLoaded,
           mediaConfig: Object.fromEntries(paperSizesLoaded.map((size) => [size, { paperSize: size, bin: null }])),
-          colorSupport: false,
+          colorSupport,
           finishingOptions: [],
           avgPagesPerMinute: 15,
         },
       });
+      setAskingColour(null);
+      setNotice('');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add printer');
+    } finally {
+      setAdding(false);
     }
   }
 
   async function addPrinter() {
+    setError('');
     try {
       await api('/api/shop/printers', {
         method: 'POST',
@@ -168,6 +179,7 @@ export default function Printers() {
           mediaConfig: Object.fromEntries(form.paperSizesLoaded.map((size) => [size, { paperSize: size, bin: null }])),
         },
       });
+      setNotice(`"${form.label}" is saved but gets no orders until it is linked. Install this printer on your counter PC, then tap Link… next to it in the table below.`);
       setForm(EMPTY_FORM);
       setShowForm(false);
       await refresh();
@@ -176,26 +188,64 @@ export default function Printers() {
     }
   }
 
-  async function linkPrinter(id: string, osPrinterName: string) {
+  /** Send only what changed: staff may change status alone, everything else is owner-only. */
+  async function patchPrinter(printer: Printer, changes: Record<string, unknown>) {
+    await api(`/api/shop/printers/${printer.id}`, { method: 'PATCH', role: 'shop', body: changes });
+  }
+
+  async function linkPrinter(printer: Printer, osPrinterName: string) {
     try {
-      await api(`/api/shop/printers/${id}`, { method: 'PATCH', role: 'shop', body: { osPrinterName } });
+      await patchPrinter(printer, { osPrinterName });
       setLinking(null);
+      setNotice('');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not link printer');
     }
   }
 
-  async function setStatus(id: string, status: string) {
+  async function setStatus(printer: Printer, status: string) {
     try {
-      await api(`/api/shop/printers/${id}`, { method: 'PATCH', role: 'shop', body: { status } });
+      await patchPrinter(printer, { status });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');
     }
   }
 
+  function beginEdit(printer: Printer) {
+    setEditingMedia(null);
+    setEditing(printer.id);
+    setEditDraft({ label: printer.label, colorSupport: printer.colorSupport });
+  }
+
+  async function saveEdit(printer: Printer) {
+    setError('');
+    try {
+      await patchPrinter(printer, { label: editDraft.label.trim(), colorSupport: editDraft.colorSupport });
+      setEditing(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save printer');
+    }
+  }
+
+  async function removePrinter(printer: Printer) {
+    const again = printer.osPrinterName ? ' You can add it again from the printers your counter PC found.' : '';
+    if (!confirm(`Remove "${printer.label}"? Students will no longer be sent to it.${again}`)) return;
+    setError('');
+    try {
+      await api(`/api/shop/printers/${printer.id}`, { method: 'DELETE', role: 'shop' });
+      if (editing === printer.id) setEditing(null);
+      setNotice('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove printer');
+    }
+  }
+
   function beginMediaEdit(printer: Printer) {
+    setEditing(null);
     setEditingMedia(printer.id);
     setMediaDraft(Object.fromEntries(printer.paperSizesLoaded.map((paper) => [
       paper,
@@ -210,13 +260,9 @@ export default function Printers() {
     }));
   }
 
-  async function saveMedia(id: string) {
+  async function saveMedia(printer: Printer) {
     try {
-      await api(`/api/shop/printers/${id}`, {
-        method: 'PATCH',
-        role: 'shop',
-        body: { mediaConfig: mediaDraft },
-      });
+      await patchPrinter(printer, { mediaConfig: mediaDraft });
       setEditingMedia(null);
       await refresh();
     } catch (err) {
@@ -245,6 +291,11 @@ export default function Printers() {
       setTesting(null);
     }
   }
+
+  const agentsOnline = agents.filter((agent) => agent.status === 'online').length;
+  const linkedPrinters = printers.filter((printer) => printer.osPrinterName).length;
+  const needsFirstPrinter = agentsOnline > 0 && linkedPrinters === 0 && unlinkedDetected.length > 0;
+  const emptyCopy = detectedEmptyState({ agentsOnline, agentsTotal: agents.length, linkedPrinters });
 
   function toggleInList(key: 'paperSizesLoaded' | 'finishingOptions', value: string) {
     setForm((f) => {
@@ -281,14 +332,18 @@ export default function Printers() {
       )}
 
       <div className="section-heading">
-        <div><h2>Detected printers</h2><p>Printers reported by your connected counter computers.</p></div>
+        {needsFirstPrinter ? (
+          <div><h2>Your counter PC found these printers — add one to go live</h2><p>Tap Add &amp; configure and say if it prints colour. Students can order as soon as one is added.</p></div>
+        ) : (
+          <div><h2>Detected printers</h2><p>Printers reported by your connected counter computers.</p></div>
+        )}
         {unlinkedDetected.length > 0 && <span className="summary-pill">{unlinkedDetected.length} ready to add</span>}
       </div>
       {unlinkedDetected.length === 0 ? (
         <div className="empty-state">
-          <strong>No unlinked printers found</strong>
-          <p>Connect a counter computer first. Any installed printer will appear here automatically.</p>
-          <Link className="button-link secondary" to="/dashboard/agents" style={{ marginTop: 16 }}>Connect a computer</Link>
+          <strong>{emptyCopy.title}</strong>
+          <p>{emptyCopy.body}</p>
+          {emptyCopy.connect && <Link className="button-link secondary" to="/dashboard/agents" style={{ marginTop: 16 }}>Connect a computer</Link>}
         </div>
       ) : (
         <div className="detected-grid">
@@ -299,7 +354,20 @@ export default function Printers() {
                 <strong>{d.name}</strong>
                 <p>{d.paperSizes.length > 0 ? `Driver reports ${d.paperSizes.join(', ')}` : 'Detected on a connected computer'}</p>
               </div>
-              <button className="small" onClick={() => addDetected(d)}>Add & configure</button>
+              {askingColour === d.name ? (
+                <fieldset className="colour-question">
+                  <legend>Colour printer?</legend>
+                  <div className="row">
+                    <button className="small" disabled={adding} onClick={() => void addDetected(d, true)}>Yes, colour</button>
+                    <button className="small secondary" disabled={adding} onClick={() => void addDetected(d, false)}>No, black &amp; white</button>
+                    <button className="ghost small" disabled={adding} onClick={() => setAskingColour(null)}>Cancel</button>
+                  </div>
+                </fieldset>
+              ) : isOwner ? (
+                <button className="small" onClick={() => setAskingColour(d.name)}>Add &amp; configure</button>
+              ) : (
+                <span className="dim">The owner can add this printer</span>
+              )}
             </div>
           ))}
         </div>
@@ -307,16 +375,19 @@ export default function Printers() {
 
       <div className="section-heading">
         <div><h2>Configured printers</h2><p>Capability and live availability used for routing.</p></div>
-        <button className="small" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Close form' : '+ Add manually'}
-        </button>
+        {isOwner && (
+          <button className="small" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? 'Close form' : '+ Add manually'}
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {isOwner && showForm && (
         <div className="printer-form stack">
           <div className="checkout-card-head"><h2>Add a printer profile</h2><p>
-            Only needed for a printer the agent hasn't detected yet (e.g. it's not connected to this PC).
-            You can link it to a real printer later once it's detected.
+            Only for a printer your counter PC has not found yet. It gets no orders until you link it:
+            install the printer on the counter PC, then tap Link… next to it in the table.
+            To change the name or colour of a printer already in the table, use Edit there instead.
           </p></div>
           <div>
             <label htmlFor="plabel">Label</label>
@@ -374,6 +445,7 @@ export default function Printers() {
         </div>
       )}
 
+      {notice && <p className="warn-note" role="status" style={{ marginBottom: 12 }}>{notice}</p>}
       <div className="table-shell printer-table" tabIndex={0} role="region" aria-label="Printers">
         <table>
           <thead>
@@ -386,7 +458,15 @@ export default function Printers() {
             {printers.map((p) => (
               <Fragment key={p.id}>
                 <tr>
-                  <td>{p.label}</td>
+                  <td>
+                    {p.label}
+                    {isOwner && (
+                      <div className="printer-actions">
+                        <button className="ghost small" onClick={() => beginEdit(p)}>Edit</button>
+                        <button className="ghost small" onClick={() => void removePrinter(p)}>Remove</button>
+                      </div>
+                    )}
+                  </td>
                   <td className="mono">{p.paperSizesLoaded.join(', ')}</td>
                   <td>{p.colorSupport ? 'Yes' : 'B/W'}</td>
                   <td>{p.finishingOptions.map((f) => f.replace('_', ' ')).join(', ') || 'Manual'}</td>
@@ -399,7 +479,7 @@ export default function Printers() {
                         aria-label={`Choose the detected printer for ${p.label}`}
                         autoFocus
                         value=""
-                        onChange={(e) => e.target.value && void linkPrinter(p.id, e.target.value)}
+                        onChange={(e) => e.target.value && void linkPrinter(p, e.target.value)}
                         onBlur={() => setLinking(null)}
                       >
                         <option value="">Pick a detected printer…</option>
@@ -407,13 +487,16 @@ export default function Printers() {
                           <option key={d.name} value={d.name}>{d.name}</option>
                         ))}
                       </select>
-                    ) : unlinkedDetected.length > 0 ? (
+                    ) : isOwner && unlinkedDetected.length > 0 ? (
                       <button className="ghost small" onClick={() => setLinking(p.id)}>Link…</button>
                     ) : (
-                      <span className="stamp red">Not linked</span>
+                      <>
+                        <span className="stamp red">Not linked</span>
+                        <p className="dim" style={{ margin: '6px 0 0' }}>No orders until your counter PC finds this printer.</p>
+                      </>
                     )}
                   </td>
-                  <td><button className="ghost small" onClick={() => beginMediaEdit(p)}>Configure</button></td>
+                  <td>{isOwner ? <button className="ghost small" onClick={() => beginMediaEdit(p)}>Configure</button> : <span className="dim">Owner only</span>}</td>
                   <td>
                     {!p.osPrinterName ? (
                       <span className="dim">Link a Windows printer first</span>
@@ -439,14 +522,40 @@ export default function Printers() {
                     {p.lastTestStatus === 'failed' && <p className="dim" style={{ margin: '6px 0 0' }}>Test failed: {p.lastTestError || 'retry after checking the printer'}</p>}
                   </td>
                   <td>
-                    <select aria-label={`Status of ${p.label}`} value={p.status} onChange={(e) => setStatus(p.id, e.target.value)} style={{ width: 120 }}>
+                    <select aria-label={`Status of ${p.label}`} value={p.status} onChange={(e) => setStatus(p, e.target.value)} style={{ width: 120 }}>
                       <option value="online">online</option>
                       <option value="offline">offline</option>
                       <option value="jammed">jammed</option>
                     </select>
                   </td>
                 </tr>
-                {editingMedia === p.id && (
+                {isOwner && editing === p.id && (
+                  <tr className="media-config-row">
+                    <td colSpan={9}>
+                      <div className="manual-picker">
+                        <strong>Edit printer</strong>
+                        <div className="form-row align-end" style={{ margin: '8px 0 12px' }}>
+                          <div className="field grow">
+                            <label htmlFor={`printer-label-${p.id}`}>Name</label>
+                            <input id={`printer-label-${p.id}`} value={editDraft.label} maxLength={80} onChange={(e) => setEditDraft({ ...editDraft, label: e.target.value })} />
+                          </div>
+                          <fieldset className="colour-question">
+                            <legend>Colour printer?</legend>
+                            <div className="row">
+                              <button className={`chip ${editDraft.colorSupport ? 'on' : ''}`} aria-pressed={editDraft.colorSupport} onClick={() => setEditDraft({ ...editDraft, colorSupport: true })}>Yes, colour</button>
+                              <button className={`chip ${editDraft.colorSupport ? '' : 'on'}`} aria-pressed={!editDraft.colorSupport} onClick={() => setEditDraft({ ...editDraft, colorSupport: false })}>No, black &amp; white</button>
+                            </div>
+                          </fieldset>
+                        </div>
+                        <div className="row">
+                          <button disabled={!editDraft.label.trim()} onClick={() => void saveEdit(p)}>Save</button>
+                          <button className="ghost" onClick={() => setEditing(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {isOwner && editingMedia === p.id && (
                   <tr className="media-config-row">
                     <td colSpan={9}>
                       <div className="manual-picker">
@@ -468,7 +577,7 @@ export default function Printers() {
                           ))}
                         </div>
                         <div className="row">
-                          <button disabled={Object.values(mediaDraft).some((media) => !media.paperSize.trim())} onClick={() => saveMedia(p.id)}>Save mapping</button>
+                          <button disabled={Object.values(mediaDraft).some((media) => !media.paperSize.trim())} onClick={() => saveMedia(p)}>Save mapping</button>
                           <button className="ghost" onClick={() => setEditingMedia(null)}>Cancel</button>
                         </div>
                       </div>

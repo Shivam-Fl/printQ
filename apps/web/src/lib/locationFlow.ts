@@ -1,5 +1,6 @@
 /** Pure helpers behind the shop location editor and setup, kept DOM-free so they are unit-testable. */
-import { addressIsReplaceable, PINNED_LOCATION, type PlaceResult } from './geocode.js';
+import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, type PlaceResult } from './geocode.js';
+import { stillOnboarding, visibilityState, type SetupSnapshot } from './setupSteps.js';
 
 export const SEARCH_FOUND_MESSAGE = 'Choose the closest match, then drag the pin to the exact entrance.';
 export const SEARCH_EMPTY_MESSAGE = 'Nothing found. That is fine: click the map to drop the pin and type your address below.';
@@ -65,10 +66,49 @@ export function takeRegisterPin(store: PinStore | null = defaultStore()): { lati
   }
 }
 
-/** Where to go after a shop login: the setup page when asked (tray link), otherwise the dashboard. Same-site paths only. */
-export function postLoginPath(next: string | null | undefined): string {
-  if (next === '/dashboard/setup') return '/dashboard/setup';
+/** Any same-site /dashboard path: no scheme, no "//", no "..", and never back to login or register. */
+const DASHBOARD_PATH = /^\/dashboard(?:\/[\w-]+)*\/?(?:[?#][^\s\\]*)?$/;
+const AUTH_PATHS = new Set(['/dashboard/login', '/dashboard/register']);
+
+function safeDashboardNext(next: string | null | undefined): string | null {
+  if (!next || !DASHBOARD_PATH.test(next)) return null;
+  const path = (next.split(/[?#]/)[0] ?? '').replace(/\/$/, '');
+  return AUTH_PATHS.has(path) ? null : next;
+}
+
+/**
+ * /dashboard/login that brings the owner back to this page after signing in, so a deep link
+ * like /dashboard/settings#prices still works when the session had ended.
+ */
+export function shopLoginPath(
+  here: string = typeof window === 'undefined' ? '' : `${window.location.pathname}${window.location.search}${window.location.hash}`,
+): string {
+  // ShopNav and the page both guard the session; whichever runs second must keep the first one's ?next.
+  if (/^\/dashboard\/login(?:[?#]|$)/.test(here)) return here;
+  const back = safeDashboardNext(here);
+  return back && back.replace(/\/$/, '') !== '/dashboard' ? `/dashboard/login?next=${encodeURIComponent(back)}` : '/dashboard/login';
+}
+
+/**
+ * Where to go after a shop login. A safe ?next (any /dashboard page) wins. Otherwise a shop
+ * that has never gone live lands on the setup checklist and a live one on the queue.
+ * `setup` is the GET /api/shop/setup-status payload; null/undefined (not loaded) means the queue.
+ */
+export function postLoginPath(
+  next: string | null | undefined,
+  setup?: Pick<SetupSnapshot, 'ready' | 'visibility' | 'verification'> | null,
+): string {
+  const safe = safeDashboardNext(next);
+  if (safe) return safe;
+  if (setup && stillOnboarding(visibilityState(setup))) return '/dashboard/setup';
   return '/dashboard';
+}
+
+/** The address typed at register, as a search to run when the device location is off. Null when not worth a lookup. */
+export function autoSearchQuery(address: string): string | null {
+  const text = address.trim();
+  if (text.length < MIN_QUERY_LENGTH || text === PINNED_LOCATION) return null;
+  return text;
 }
 
 /**

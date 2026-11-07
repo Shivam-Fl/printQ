@@ -77,6 +77,8 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly body?: unknown,
+    /** From Retry-After on a 429, so countdowns can show the real wait (a daily cap is an hour). */
+    public readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
   }
@@ -120,19 +122,107 @@ export async function renewStudentSession(): Promise<string | null> {
   return studentRenewal;
 }
 
+type ErrorBody = { error?: string; details?: { path?: string; message?: string }[] };
+
+export const NETWORK_ERROR_MESSAGE = 'Can’t reach PrintQs. Check your internet and try again.';
+export const BUSY_ERROR_MESSAGE = 'PrintQs is waking up or busy — try again in a few seconds.';
+
+const FIELD_LABELS: Record<string, string> = { otp: 'code', pin: 'PIN' };
+
+function fieldLabel(path: string | undefined): string {
+  const field = (path ?? '').split('.').pop() ?? '';
+  const label = FIELD_LABELS[field] ?? field.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  return label ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : '';
+}
+
+/** Turn zod's developer wording ("Too small: expected string to have >=8 characters") into plain English. */
+function plainIssue(label: string, message: string): string {
+  const name = label || 'This field';
+  let m = /^Too small: expected string to have >=(\d+) characters?/.exec(message);
+  if (m) return `${name} must be at least ${m[1]} characters`;
+  m = /^Too big: expected string to have <=(\d+) characters?/.exec(message);
+  if (m) return `${name} must be at most ${m[1]} characters`;
+  m = /^Too small: expected number to be >=?(\S+)/.exec(message);
+  if (m) return `${name} must be at least ${m[1]}`;
+  m = /^Too big: expected number to be <=?(\S+)/.exec(message);
+  if (m) return `${name} must be at most ${m[1]}`;
+  if (/^Invalid email/i.test(message)) return 'Enter a valid email address';
+  if (/received undefined$/.test(message)) return `${name} is required`;
+  if (/^Invalid (input|string|option|format)/i.test(message)) return `${name} is not valid`;
+  if (!label || message.toLowerCase().includes(label.toLowerCase())) return message;
+  return `${label}: ${message}`;
+}
+
 /**
  * The API answers a failed schema check with `{ error: 'Validation failed',
  * details: [{ path, message }] }`. Show the first detail, named after its field
  * ("Email is invalid"), rather than the useless generic headline.
  */
-function validationMessage(data: { error?: string; details?: { path?: string; message?: string }[] }): string | null {
+function validationMessage(data: ErrorBody): string | null {
   if (data.error !== 'Validation failed') return null;
   const first = data.details?.[0];
   if (!first?.message) return null;
-  const field = (first.path ?? '').split('.').pop() ?? '';
-  const label = field.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
-  if (!label || first.message.toLowerCase().includes(label)) return first.message;
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}: ${first.message}`;
+  return plainIssue(fieldLabel(first.path), first.message);
+}
+
+/**
+ * Every field the API rejected, keyed by field name ("email", "password"), in
+ * plain English. Forms use it to show each message next to its own input.
+ */
+export function fieldErrors(err: unknown): Record<string, string> {
+  if (!(err instanceof ApiError)) return {};
+  const data = (err.body ?? {}) as ErrorBody;
+  if (data.error !== 'Validation failed' || !Array.isArray(data.details)) return {};
+  const out: Record<string, string> = {};
+  for (const detail of data.details) {
+    const field = (detail.path ?? '').split('.').pop() ?? '';
+    if (!field || !detail.message || out[field]) continue;
+    out[field] = plainIssue(fieldLabel(field), detail.message);
+  }
+  return out;
+}
+
+/** Seconds from a Retry-After header (delta-seconds or an HTTP date); null when absent or unreadable. */
+export function retryAfterSeconds(header: string | null): number | null {
+  if (!header) return null;
+  const value = header.trim();
+  const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+export function rateLimitMessage(retryAfter: string | null): string {
+  const seconds = retryAfterSeconds(retryAfter);
+  if (!seconds) return 'Too many attempts. Please wait a minute and try again.';
+  if (seconds < 90) return `Too many attempts. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`;
+  return `Too many attempts. Try again in about ${Math.ceil(seconds / 60)} minutes.`;
+}
+
+/**
+ * The words a person sees for a failed request. Never a raw "Request failed
+ * (502)": gateways and cold starts read as "busy", rate limits say how long to
+ * wait, and schema failures name the field in plain English.
+ */
+export function errorMessageFor(status: number, data: ErrorBody, retryAfter: string | null = null): string {
+  if (status === 429) {
+    // Keep a specific server reason ("…for this number today"); replace the generic limiter text.
+    if (data.error && !/^too many requests/i.test(data.error)) return data.error;
+    return rateLimitMessage(retryAfter);
+  }
+  if (status === 502 || status === 503 || status === 504) return BUSY_ERROR_MESSAGE;
+  const validation = validationMessage(data);
+  if (validation) return validation;
+  if (typeof data.error === 'string' && data.error) return data.error;
+  return 'Something went wrong. Please try again.';
+}
+
+/** fetch() that turns "Failed to fetch" (offline, DNS, CORS, server down) into a friendly ApiError(0). */
+async function send(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (init.signal?.aborted || (err as { name?: string } | null)?.name === 'AbortError') throw err;
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE);
+  }
 }
 
 /** Sign out of the shop dashboard: revoke the session server-side (best effort), then forget the token. */
@@ -165,15 +255,14 @@ async function requestJson<T>(
     body = JSON.stringify(options.body);
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await send(`${API_URL}${path}`, {
     method: options.method ?? 'GET',
     headers,
     body,
     signal: options.signal,
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string; details?: { path?: string; message?: string }[] };
+  const data = (await res.json().catch(() => ({}))) as ErrorBody;
   if (!res.ok) {
-    data.error = validationMessage(data) ?? data.error;
     if (res.status === 401 && options.role === 'student' && allowStudentRenewal) {
       const token = await renewStudentSession();
       if (token) return requestJson<T>(path, options, false);
@@ -184,7 +273,13 @@ async function requestJson<T>(
       expireStudentSession();
       throw new ApiError(401, STUDENT_SESSION_EXPIRED_MESSAGE, data);
     }
-    throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`, data);
+    const retryAfter = res.headers.get('Retry-After');
+    throw new ApiError(
+      res.status,
+      errorMessageFor(res.status, data, retryAfter),
+      data,
+      res.status === 429 ? retryAfterSeconds(retryAfter) : null,
+    );
   }
   return data as T;
 }
@@ -201,22 +296,22 @@ export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}
 /** Authenticated binary fetch (header auth, one silent student renewal). Used by the PDF preview. */
 export async function fetchBytes(path: string, role: Role, signal?: AbortSignal): Promise<ArrayBuffer> {
   const appCheck = await appCheckHeaders();
-  const send = (token: string | null) =>
-    fetch(`${API_URL}${path}`, {
+  const request = (token: string | null) =>
+    send(`${API_URL}${path}`, {
       headers: { ...appCheck, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       signal,
       referrerPolicy: 'no-referrer',
     });
-  let res = await send(getToken(role));
+  let res = await request(getToken(role));
   if (res.status === 401 && role === 'student') {
     const token = await renewStudentSession();
-    if (token) res = await send(token);
+    if (token) res = await request(token);
   }
   if (res.status === 401) {
     clearToken(role);
     if (role === 'student') expireStudentSession();
   }
-  if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(res.status, errorMessageFor(res.status, {}, res.headers.get('Retry-After')));
   return res.arrayBuffer();
 }
 
@@ -224,13 +319,13 @@ export async function fetchBytes(path: string, role: Role, signal?: AbortSignal)
 export async function downloadFile(path: string, role: Role, filename: string): Promise<void> {
   let token = getToken(role);
   const appCheck = await appCheckHeaders();
-  let res = await fetch(`${API_URL}${path}`, {
+  let res = await send(`${API_URL}${path}`, {
     headers: { ...appCheck, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   });
   if (res.status === 401 && role === 'student') {
     token = await renewStudentSession();
     if (token) {
-      res = await fetch(`${API_URL}${path}`, {
+      res = await send(`${API_URL}${path}`, {
         headers: { ...appCheck, Authorization: `Bearer ${token}` },
       });
     }
@@ -239,7 +334,10 @@ export async function downloadFile(path: string, role: Role, filename: string): 
     clearToken(role);
     if (role === 'student') expireStudentSession();
   }
-  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as ErrorBody;
+    throw new ApiError(res.status, errorMessageFor(res.status, data, res.headers.get('Retry-After')));
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

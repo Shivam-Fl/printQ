@@ -7,6 +7,8 @@ interface ShopLocationPickerProps {
   longitude: number | null;
   center: { latitude: number; longitude: number; zoom?: number } | null;
   onChange: (latitude: number, longitude: number) => void;
+  /** What the map calls the pinned spot (reverse lookup), shown so a mismatch with the typed address is visible. */
+  pinLabel?: string | null;
 }
 
 /** No country assumed: until a pin or detected area exists, show the whole world. */
@@ -17,6 +19,7 @@ export default function ShopLocationPicker({
   longitude,
   center,
   onChange,
+  pinLabel,
 }: ShopLocationPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -102,15 +105,15 @@ export default function ShopLocationPicker({
     <div className="location-picker">
       <div className="location-map-wrap">
         <div className="location-map" ref={containerRef} aria-label="Map for selecting the exact shop entrance" />
-        <div className="location-map-hint">Click the map or drag the pin to the exact entrance</div>
+        <div className="location-map-hint">Tap or click the map, or drag the pin to the exact entrance</div>
       </div>
       <div className="location-pin-readout">
         <div>
           <strong>{latitude != null && longitude != null ? 'Entrance pin selected' : 'No entrance pin yet'}</strong>
-          <span>
+          <span title={latitude != null && longitude != null ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : undefined}>
             {latitude != null && longitude != null
-              ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-              : 'Zoom in and click the exact counter or entrance, then drag to adjust.'}
+              ? pinLabel ? `Near ${pinLabel}` : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+              : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
           </span>
         </div>
         <span className={`stamp ${latitude != null && longitude != null ? 'green' : 'yellow'}`}>

@@ -6,7 +6,7 @@ export default function Topbar({ right, tag }: { right?: ReactNode; tag?: string
     <div className="topbar">
       <Link to="/" className="brand">
         Print<em>Q</em>
-        {tag && <small>{tag}</small>}
+        {tag && <small title={tag}>{tag}</small>}
       </Link>
       <div className="row">{right}</div>
     </div>

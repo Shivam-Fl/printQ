@@ -11,8 +11,9 @@ import {
   staffLoginSchema,
   verifyLoginOtpSchema,
 } from '@printq/shared';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, notFound, tooMany, unauthorized } from '../../lib/errors.js';
+import { asyncHandler, badRequest, conflict, notFound, tooMany, unauthorized } from '../../lib/errors.js';
 import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
 import { signShopToken, signStudentToken } from '../../lib/tokens.js';
 import { validateBody } from '../../middleware/validate.js';
@@ -21,6 +22,8 @@ import {
   loginLimiter,
   otpRequestLimiter,
   otpVerifyLimiter,
+  pinLoginFailureLimiter,
+  registerLimiter,
 } from '../../middleware/rateLimit.js';
 import { requireShopUser, requireStudent } from '../../middleware/auth.js';
 import { sendLoginOtp } from '../../providers/notification/index.js';
@@ -87,25 +90,27 @@ authRouter.post(
     const record = await prisma.loginOtp.findFirst({
       where: { phone, consumedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
+      select: { id: true, otpHash: true },
     });
     if (!record) throw badRequest('Code expired or not found — request a new one');
-    if (record.attempts >= MAX_LOGIN_OTP_ATTEMPTS) {
-      throw badRequest('Too many wrong attempts — request a new code');
-    }
 
-    const valid = await verifyOtpHash(record.otpHash, otp);
-    if (!valid) {
-      await prisma.loginOtp.update({
-        where: { id: record.id },
-        data: { attempts: { increment: 1 } },
-      });
-      throw unauthorized('Incorrect code');
-    }
+    // Claim one of the 5 attempts BEFORE checking the code. A read-then-increment
+    // check let a parallel burst evaluate every guess (M1); this conditional
+    // increment is atomic, so at most 5 requests ever reach verifyOtpHash.
+    const claimed = await prisma.loginOtp.updateMany({
+      where: { id: record.id, consumedAt: null, attempts: { lt: MAX_LOGIN_OTP_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (claimed.count !== 1) throw badRequest('Too many wrong attempts — request a new code');
 
-    await prisma.loginOtp.update({
-      where: { id: record.id },
+    if (!(await verifyOtpHash(record.otpHash, otp))) throw unauthorized('Incorrect code');
+
+    // Single use, even when the right code is sent twice at once.
+    const consumed = await prisma.loginOtp.updateMany({
+      where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() } },
       data: { consumedAt: new Date() },
     });
+    if (consumed.count !== 1) throw badRequest('Code expired or already used — request a new one');
     const student = await prisma.student.upsert({
       where: { phone },
       create: { phone },
@@ -184,52 +189,73 @@ authRouter.patch(
   }),
 );
 
+const DUPLICATE_EMAIL = 'An account with this email already exists';
+
 /** Phase 2: self-serve shop onboarding — creates the shop + its owner login. */
 authRouter.post(
   '/shop/register',
-  loginLimiter,
+  registerLimiter,
   validateBody(shopRegisterSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof shopRegisterSchema>;
 
     // Known trade-off: this reveals whether an email is registered (account
     // enumeration). Kept deliberately so a returning owner gets a clear message;
-    // the endpoint is behind loginLimiter.
-    const existing = await prisma.shopUser.findUnique({ where: { email: body.email } });
-    if (existing) throw badRequest('An account with this email already exists');
+    // the endpoint is behind registerLimiter.
+    const emailTaken = async () =>
+      Boolean(await prisma.shopUser.findUnique({ where: { email: body.email }, select: { id: true } }));
+    if (await emailTaken()) throw conflict(DUPLICATE_EMAIL);
 
     const baseSlug = body.shopName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'shop';
-    let slug = baseSlug;
-    for (let i = 2; await prisma.shop.findUnique({ where: { slug } }); i++) {
-      slug = `${baseSlug}-${i}`;
-    }
+    const passwordHash = await argon2.hash(body.password, { type: argon2.argon2id });
 
-    const shop = await prisma.shop.create({
-      data: {
-        slug,
-        name: body.shopName,
-        address: body.address,
-        campusName: body.campusName ?? null,
-        // New shops go live automatically once setup is complete; no campus required.
-        autoLive: true,
-        autoAssignEnabled: true,
-        rateCard: {}, // legacy column, superseded by printOptions
-        printOptions: DEFAULT_PRINT_OPTIONS as unknown as object,
-      },
-    });
-    const user = await prisma.shopUser.create({
-      data: {
-        shopId: shop.id,
-        email: body.email,
-        passwordHash: await argon2.hash(body.password, { type: argon2.argon2id }),
-        name: body.ownerName,
-        role: 'owner',
-      },
-    });
+    // Shop + owner are created together or not at all (S8): a retried or
+    // double submit used to 500 and leave an owner-less auto-live shop behind.
+    // A unique-constraint race is either the same email (clean 409) or two
+    // same-name shops grabbing one slug (pick the next free slug and retry).
+    const createShopWithOwner = (slug: string) =>
+      prisma.$transaction(async (tx) => {
+        const shop = await tx.shop.create({
+          data: {
+            slug,
+            name: body.shopName,
+            address: body.address,
+            campusName: body.campusName ?? null,
+            // New shops go live automatically once setup is complete; no campus required.
+            autoLive: true,
+            autoAssignEnabled: true,
+            rateCard: {}, // legacy column, superseded by printOptions
+            printOptions: DEFAULT_PRINT_OPTIONS as unknown as object,
+          },
+          select: { id: true, slug: true, name: true },
+        });
+        const user = await tx.shopUser.create({
+          data: { shopId: shop.id, email: body.email, passwordHash, name: body.ownerName, role: 'owner' },
+          select: { id: true, name: true, role: true },
+        });
+        return { shop, user };
+      });
+
+    let created: Awaited<ReturnType<typeof createShopWithOwner>> | null = null;
+    for (let attempt = 0; !created; attempt += 1) {
+      let slug = baseSlug;
+      for (let i = 2; await prisma.shop.findUnique({ where: { slug }, select: { id: true } }); i++) {
+        slug = `${baseSlug}-${i}`;
+      }
+      try {
+        created = await createShopWithOwner(slug);
+      } catch (error) {
+        const uniqueRace = error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+        if (!uniqueRace) throw error;
+        if (await emailTaken()) throw conflict(DUPLICATE_EMAIL);
+        if (attempt >= 4) throw error;
+      }
+    }
+    const { shop, user } = created;
 
     res.status(201).json({
       token: signShopToken(user.id, shop.id, 'owner'),
@@ -244,6 +270,8 @@ authRouter.post(
   '/shop/login',
   loginLimiter,
   validateBody(shopLoginSchema),
+  // a staff PIN also works here, so PIN-shaped guesses share the per-account brake
+  pinLoginFailureLimiter,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body as { email: string; password: string };
     const user = await prisma.shopUser.findUnique({ where: { email } });
@@ -268,6 +296,7 @@ authRouter.post(
   '/shop/staff-login',
   loginLimiter,
   validateBody(staffLoginSchema),
+  pinLoginFailureLimiter,
   asyncHandler(async (req, res) => {
     const { email, pin } = req.body as { email: string; pin: string };
     const user = await prisma.shopUser.findUnique({ where: { email } });
@@ -297,57 +326,65 @@ authRouter.post(
   validateBody(requestPasswordResetSchema),
   asyncHandler(async (req, res) => {
     const { email } = req.body as { email: string };
-    const user = await prisma.shopUser.findUnique({ where: { email } });
-
-    if (user) {
-      const now = new Date();
-      const recent = await prisma.passwordResetOtp.findFirst({
-        where: { email, createdAt: { gt: new Date(now.getTime() - RESET_OTP_RESEND_MS) } },
-        select: { id: true },
-      });
-      const sentToday = await prisma.passwordResetOtp.count({
-        where: { email, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
-      });
-      if (recent || sentToday >= MAX_RESET_OTP_SENDS_PER_EMAIL_PER_DAY) {
-        // Preserve the non-enumerating success response. The existing valid
-        // code remains usable, while the per-email ceiling caps sender spend.
-        return res.json({ ok: true });
-      }
-
-      const otp = generateOtp();
-      const reset = await prisma.passwordResetOtp.create({
-        data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(now.getTime() + RESET_OTP_TTL_MS) },
-      });
-      try {
-        const result = await emailProvider.send(
-          email,
-          'Reset your PrintQ password',
-          `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`,
-        );
-        await prisma.passwordResetOtp.update({
-          where: { id: reset.id },
-          data: {
-            deliveryProvider: emailProvider.name,
-            deliveryMessageId: result.providerMessageId ?? null,
-            deliveryAttemptedAt: new Date(),
-            deliveryError: null,
-          },
-        });
-      } catch (error) {
-        await prisma.passwordResetOtp.update({
-          where: { id: reset.id },
-          data: {
-            deliveryProvider: emailProvider.name,
-            deliveryAttemptedAt: new Date(),
-            deliveryError: error instanceof Error ? error.message.slice(0, 300) : 'Email delivery failed',
-          },
-        });
-        logger.error({ error, resetId: reset.id, provider: emailProvider.name }, 'password_reset_email_failed');
-      }
-    }
+    // Answer first (S27/AUTH-8): hashing the code and calling the email
+    // provider took ~200 ms only for registered emails, so the response time
+    // revealed which emails have accounts. Now every caller gets the same
+    // instant {ok:true} and the real work runs after the response is sent.
     res.json({ ok: true });
+    try {
+      await sendPasswordResetCode(email);
+    } catch (error) {
+      logger.error({ error }, 'password_reset_request_failed');
+    }
   }),
 );
+
+async function sendPasswordResetCode(email: string): Promise<void> {
+  const user = await prisma.shopUser.findUnique({ where: { email }, select: { id: true } });
+  if (!user) return;
+
+  const now = new Date();
+  const recent = await prisma.passwordResetOtp.findFirst({
+    where: { email, createdAt: { gt: new Date(now.getTime() - RESET_OTP_RESEND_MS) } },
+    select: { id: true },
+  });
+  const sentToday = await prisma.passwordResetOtp.count({
+    where: { email, createdAt: { gt: new Date(now.getTime() - 24 * 60 * 60_000) } },
+  });
+  // The existing valid code remains usable, while the per-email ceiling caps sender spend.
+  if (recent || sentToday >= MAX_RESET_OTP_SENDS_PER_EMAIL_PER_DAY) return;
+
+  const otp = generateOtp();
+  const reset = await prisma.passwordResetOtp.create({
+    data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(now.getTime() + RESET_OTP_TTL_MS) },
+  });
+  try {
+    const result = await emailProvider.send(
+      email,
+      'Reset your PrintQ password',
+      `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`,
+    );
+    await prisma.passwordResetOtp.update({
+      where: { id: reset.id },
+      data: {
+        deliveryProvider: emailProvider.name,
+        deliveryMessageId: result.providerMessageId ?? null,
+        deliveryAttemptedAt: new Date(),
+        deliveryError: null,
+      },
+    });
+  } catch (error) {
+    await prisma.passwordResetOtp.update({
+      where: { id: reset.id },
+      data: {
+        deliveryProvider: emailProvider.name,
+        deliveryAttemptedAt: new Date(),
+        deliveryError: error instanceof Error ? error.message.slice(0, 300) : 'Email delivery failed',
+      },
+    });
+    logger.error({ error, resetId: reset.id, provider: emailProvider.name }, 'password_reset_email_failed');
+  }
+}
 
 /** Step 2: verify the code and set a new password. */
 authRouter.post(
@@ -360,32 +397,37 @@ authRouter.post(
     const record = await prisma.passwordResetOtp.findFirst({
       where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
+      select: { id: true, otpHash: true },
     });
     if (!record) throw badRequest('Code expired or not found — request a new one');
-    if (record.attempts >= MAX_RESET_OTP_ATTEMPTS) {
-      throw badRequest('Too many wrong attempts — request a new code');
-    }
 
-    const valid = await verifyOtpHash(record.otpHash, otp);
-    if (!valid) {
-      await prisma.passwordResetOtp.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
-      throw unauthorized('Incorrect code');
-    }
+    // Same atomic attempt claim as student verify-otp (M1): at most 5 guesses
+    // per code are ever checked, however many requests arrive in parallel.
+    const claimed = await prisma.passwordResetOtp.updateMany({
+      where: { id: record.id, consumedAt: null, attempts: { lt: MAX_RESET_OTP_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (claimed.count !== 1) throw badRequest('Too many wrong attempts — request a new code');
 
-    const user = await prisma.shopUser.findUnique({ where: { email } });
+    if (!(await verifyOtpHash(record.otpHash, otp))) throw unauthorized('Incorrect code');
+
+    const user = await prisma.shopUser.findUnique({ where: { email }, select: { id: true } });
     if (!user) throw badRequest('Code expired or not found — request a new one');
 
-    await prisma.$transaction([
-      prisma.passwordResetOtp.update({ where: { id: record.id }, data: { consumedAt: new Date() } }),
-      prisma.shopUser.update({
+    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    await prisma.$transaction(async (tx) => {
+      // single use: only the request that flips consumedAt may change the password
+      const consumed = await tx.passwordResetOtp.updateMany({
+        where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() } },
+        data: { consumedAt: new Date() },
+      });
+      if (consumed.count !== 1) throw badRequest('Code expired or already used — request a new one');
+      await tx.shopUser.update({
         where: { id: user.id },
-        data: {
-          passwordHash: await argon2.hash(newPassword, { type: argon2.argon2id }),
-          // every token issued under the old password stops working
-          sessionVersion: { increment: 1 },
-        },
-      }),
-    ]);
+        // every token issued under the old password stops working
+        data: { passwordHash, sessionVersion: { increment: 1 } },
+      });
+    });
     res.json({ ok: true });
   }),
 );

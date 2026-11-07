@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { MAX_BINDING_PRICE_PAISE, MAX_PAGE_PRICE_PAISE } from '@printq/shared';
 import { api, ApiError, getShopRole, getToken } from '../../api.js';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import QueueSettings from '../../components/QueueSettings.js';
 import ShopNav from '../../components/ShopNav.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import {
   buildSettingsPatch,
+  colourPrinterWarning,
   locationChangeNeedsReview,
   coordinateWarning,
   formatRupeesField,
+  markupPercent,
   parseRupees,
   priceText,
+  studentPayText,
   typePrice,
   type OptionsDraft,
   type SettingsDraft,
 } from './settingsForm.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 /** Price inputs hold TEXT while editing; paise is derived on save (OWN-3). */
 interface PaperRow {
@@ -77,6 +81,11 @@ interface ShopProfile {
   counterUpiPayeeName: string | null;
   counterUpiVerifiedAt: string | null;
 }
+interface PrinterSummary {
+  colorSupport: boolean;
+  status: string;
+  osPrinterName: string | null;
+}
 interface Campus {
   id: string;
   slug: string;
@@ -108,17 +117,32 @@ export default function Settings() {
   const [baseline, setBaseline] = useState<{ draft: SettingsDraft; menuVersion: number } | null>(null);
   const [conflict, setConflict] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  // PrintQs fee on top of the shop's price, so the owner sees what students pay (M5)
+  const [markupBps, setMarkupBps] = useState<number | null>(null);
+  const [printers, setPrinters] = useState<PrinterSummary[] | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
+    // Only used for the colour-printer hint; the page works without it.
+    api<{ printers: PrinterSummary[] }>('/api/shop/printers', { role: 'shop' })
+      .then((result) => setPrinters(result.printers))
+      .catch(() => setPrinters(null));
     Promise.all([
-      api<{ shop: ShopProfile & { printOptions: StoredOptions; printOptionsVersion: number; autoAssignEnabled: boolean } }>('/api/shop/me', { role: 'shop' }),
+      api<{
+        shop: ShopProfile & { printOptions: StoredOptions; printOptionsVersion: number; autoAssignEnabled: boolean };
+        platformMarkupBps?: number;
+      }>('/api/shop/me', { role: 'shop' }),
       api<{ campuses: Campus[] }>('/api/public/campuses'),
     ])
       .then(([r, campusResult]) => {
+        const bps = r.platformMarkupBps;
+        setMarkupBps(typeof bps === 'number' && Number.isInteger(bps) && bps >= 0 && bps <= 10_000 ? bps : null);
+        setLoadError('');
         setOpts(toRows(r.shop.printOptions));
         setBaseline({
           menuVersion: r.shop.printOptionsVersion,
@@ -160,8 +184,23 @@ export default function Settings() {
         });
         setAutoAssign(r.shop.autoAssignEnabled);
       })
-      .catch(() => navigate('/dashboard/login'));
+      .catch((err) => {
+        // Only a rejected session goes back to login; a blip or a cold start gets a retry.
+        if (err instanceof ApiError && err.status === 401) navigate(shopLoginPath());
+        else setLoadError('Could not reach PrintQs. Check the internet connection and try again.');
+      });
   }, [navigate, reloadTick]);
+
+  const loaded = opts !== null;
+  useEffect(() => {
+    // Setup's "Check your prices" links to #prices; the section only exists after loading.
+    if (loaded && location.hash === '#prices') document.getElementById('prices')?.scrollIntoView({ block: 'start' });
+  }, [loaded, location.hash]);
+
+  const retryLoad = () => {
+    setLoadError('');
+    setReloadTick((n) => n + 1);
+  };
 
   const setPin = useCallback((latitude: number, longitude: number) => {
     setProfile((current) => current ? { ...current, latitude, longitude, locationUpdatedAt: new Date().toISOString() } : current);
@@ -175,7 +214,12 @@ export default function Settings() {
     return (
       <div className="page wide">
         <ShopNav />
-        <p className="dim">Loading…</p>
+        {loadError ? (
+          <div className="error-box" role="alert">
+            <p style={{ margin: 0 }}>{loadError}</p>
+            <button className="secondary small" style={{ marginTop: 10 }} onClick={retryLoad}>Try again</button>
+          </div>
+        ) : <p className="dim">Loading…</p>}
       </div>
     );
   }
@@ -187,6 +231,11 @@ export default function Settings() {
   const priceErrorsPresent = opts.papers.some((p) => p.label.trim() && Object.values(paperErrors(p)).some(Boolean))
     || opts.bindings.some((b) => b.label.trim() && Object.values(bindingErrors(b)).some(Boolean));
   const locationHint = profile ? coordinateWarning(profile.latitude, profile.longitude) : null;
+  const hasColourPrice = opts.papers.some((p) => {
+    const colour = parseRupees(p.color, { required: false });
+    return p.label.trim() && !colour.error && colour.paise != null;
+  });
+  const colourHint = printers ? colourPrinterWarning(hasColourPrice, printers) : null;
 
   async function save() {
     if (!opts || !profile) return;
@@ -443,39 +492,58 @@ export default function Settings() {
         </section>
       )}
 
-      <div className="settings-surface">
+      <div className="settings-surface" id="prices">
         <div className="row between">
           <h2 style={{ margin: 0 }}>Paper types &amp; price</h2>
           <button className="small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bw: '2.00', color: '' }] })}>+ Add paper</button>
         </div>
         <p className="dim" style={{ marginTop: 4 }}>Leave the colour price blank if that paper is black &amp; white only.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr auto', gap: 10, fontSize: '0.72rem', color: 'var(--pencil)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 8 }}>
+        {markupBps ? (
+          <p className="price-fee-note">
+            Students see one price: your price plus the {markupPercent(markupBps)} PrintQs fee, shown as “Students pay” under each box.
+            They pay that full amount to you at the counter, and the fee part is added to your PrintQs bill on the Earnings page.
+          </p>
+        ) : null}
+        {colourHint && <p className="warn-note" role="status" style={{ marginTop: 10 }}>{colourHint} <Link to="/dashboard/printers">Open Printers</Link></p>}
+        <div className="opt-head" aria-hidden>
           <span>Name</span><span>₹ B/W / page</span><span>₹ Colour / page</span><span></span>
         </div>
         {opts.papers.map((p, i) => {
           const errors = paperErrors(p);
+          const bwPays = studentPayText(p.bw, markupBps);
+          const colourPays = studentPayText(p.color, markupBps);
           return (
-            <div key={i} className="opt-row">
+            <div key={i} className="opt-row priced-row paper-row">
               <input type="text" aria-label="Paper name" placeholder="e.g. College sheet" value={p.label} onChange={(e) => setPaper(i, { label: e.target.value })} />
-              <input
-                type="text"
-                inputMode="decimal"
-                aria-label={`B/W price per page for ${p.label || 'paper'}`}
-                aria-invalid={Boolean(errors.bw)}
-                value={p.bw}
-                onChange={(e) => setPaper(i, { bw: typePrice(p.bw, e.target.value) })}
-                onBlur={() => setPaper(i, { bw: formatRupeesField(p.bw) })}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                aria-label={`Colour price per page for ${p.label || 'paper'}`}
-                aria-invalid={Boolean(errors.color)}
-                placeholder="—"
-                value={p.color}
-                onChange={(e) => setPaper(i, { color: typePrice(p.color, e.target.value) })}
-                onBlur={() => setPaper(i, { color: formatRupeesField(p.color) })}
-              />
+              <div className="opt-price">
+                <span className="opt-price-label" aria-hidden>₹ B/W / page</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`B/W price per page for ${p.label || 'paper'}`}
+                  aria-invalid={Boolean(errors.bw)}
+                  aria-describedby={bwPays ? `paper-${i}-bw-pays` : undefined}
+                  value={p.bw}
+                  onChange={(e) => setPaper(i, { bw: typePrice(p.bw, e.target.value) })}
+                  onBlur={() => setPaper(i, { bw: formatRupeesField(p.bw) })}
+                />
+                {bwPays && <span className="student-pays" id={`paper-${i}-bw-pays`}>{bwPays}</span>}
+              </div>
+              <div className="opt-price">
+                <span className="opt-price-label" aria-hidden>₹ Colour / page</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`Colour price per page for ${p.label || 'paper'}`}
+                  aria-invalid={Boolean(errors.color)}
+                  aria-describedby={colourPays ? `paper-${i}-colour-pays` : undefined}
+                  placeholder="—"
+                  value={p.color}
+                  onChange={(e) => setPaper(i, { color: typePrice(p.color, e.target.value) })}
+                  onBlur={() => setPaper(i, { color: formatRupeesField(p.color) })}
+                />
+                {colourPays && <span className="student-pays" id={`paper-${i}-colour-pays`}>{colourPays}</span>}
+              </div>
               <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, papers: opts.papers.filter((_, idx) => idx !== i) })}>×</button>
               {(errors.bw || errors.color) && <p className="opt-error" role="alert">{errors.bw ?? errors.color}</p>}
             </div>
@@ -491,18 +559,23 @@ export default function Settings() {
         <p className="dim" style={{ marginTop: 4 }}>"None" is always offered. Add extras like stapling or spiral.</p>
         {opts.bindings.map((b, i) => {
           const errors = bindingErrors(b);
+          const pays = studentPayText(b.price, markupBps);
           return (
-            <div key={i} className="opt-row" style={{ gridTemplateColumns: '1.4fr 1fr auto' }}>
+            <div key={i} className="opt-row priced-row" style={{ gridTemplateColumns: '1.4fr 1fr auto' }}>
               <input type="text" aria-label="Binding name" placeholder="e.g. Spiral binding" value={b.label} onChange={(e) => setBinding(i, { label: e.target.value })} />
-              <input
-                type="text"
-                inputMode="decimal"
-                aria-label={`Price for ${b.label || 'binding'}`}
-                aria-invalid={Boolean(errors.price)}
-                value={b.price}
-                onChange={(e) => setBinding(i, { price: typePrice(b.price, e.target.value) })}
-                onBlur={() => setBinding(i, { price: formatRupeesField(b.price) })}
-              />
+              <div className="opt-price">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`Price for ${b.label || 'binding'}`}
+                  aria-invalid={Boolean(errors.price)}
+                  aria-describedby={pays ? `binding-${i}-pays` : undefined}
+                  value={b.price}
+                  onChange={(e) => setBinding(i, { price: typePrice(b.price, e.target.value) })}
+                  onBlur={() => setBinding(i, { price: formatRupeesField(b.price) })}
+                />
+                {pays && <span className="student-pays" id={`binding-${i}-pays`}>{pays}</span>}
+              </div>
               <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, bindings: opts.bindings.filter((_, idx) => idx !== i) })}>×</button>
               {errors.price && <p className="opt-error" role="alert">{errors.price}</p>}
             </div>
@@ -523,6 +596,12 @@ export default function Settings() {
         {saved && <span className="stamp green">saved ✓</span>}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
+      {loadError && (
+        <div className="row" style={{ marginTop: 6 }}>
+          <span className="error" role="alert">{loadError}</span>
+          <button className="secondary small" onClick={retryLoad}>Try again</button>
+        </div>
+      )}
       {conflict && (
         <div className="row" style={{ marginTop: 6 }}>
           <button className="secondary small" onClick={() => setReloadTick((n) => n + 1)}>Reload latest settings</button>

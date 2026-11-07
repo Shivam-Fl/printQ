@@ -8,6 +8,18 @@ export const publishedShopWhere = {
   OR: [{ campusId: null }, { campus: { is: { isActive: true } } }],
 };
 
+/** In-memory twin of publishedShopWhere, for rows already loaded. Keep the two in step. */
+export function isPublishedShop(shop: {
+  verificationStatus: string;
+  publishedAt: Date | null;
+  campusId: string | null;
+  campus?: { isActive: boolean } | null;
+}): boolean {
+  return shop.verificationStatus === 'verified'
+    && shop.publishedAt != null
+    && (shop.campusId == null || shop.campus?.isActive === true);
+}
+
 export interface NearbyCandidate {
   slug: string;
   name: string;

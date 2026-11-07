@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordProblem } from './password.js';
 import { JOB_MODES, PRINTER_STATUSES } from './types.js';
 
 /** Indian mobile normalized to E.164 (+91XXXXXXXXXX). Accepts 10-digit input. */
@@ -139,6 +140,12 @@ const required = (message: string) => ({
   error: (issue: { input?: unknown }) => (issue.input === undefined ? message : undefined),
 });
 
+const newPassword = (label: string) =>
+  z.string(required(`${label} is required`)).superRefine((value, ctx) => {
+    const problem = passwordProblem(value, label);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  });
+
 /** Self-serve shop onboarding. Messages name the field so the form can show them verbatim. */
 export const shopRegisterSchema = z.object({
   shopName: z
@@ -163,27 +170,36 @@ export const shopRegisterSchema = z.object({
     .toLowerCase()
     .email('Email is invalid')
     .max(254, 'Email must be at most 254 characters'),
+  password: newPassword('Password'),
+});
+
+const shopEmail = z
+  .string(required('Enter your email'))
+  .trim()
+  .toLowerCase()
+  .email('Enter a valid email address')
+  .max(254, 'Enter a valid email address');
+/** Short numeric PIN — fast entry on a shared counter PC, not a full password. */
+const staffPin = z.string(required('Enter your PIN')).trim().regex(/^\d{4,6}$/, 'PIN is 4-6 digits');
+
+/**
+ * Login checks the password itself, not the sign-up rule: a too-short value is
+ * just a wrong password (often a staff PIN typed in the password box).
+ */
+export const shopLoginSchema = z.object({
+  email: shopEmail,
   password: z
-    .string(required('Password is required'))
-    .min(8, 'Password must be at least 8 characters')
+    .string(required('Enter your password'))
+    .min(1, 'Enter your password')
     .max(128, 'Password must be at most 128 characters'),
 });
-
-export const shopLoginSchema = z.object({
-  email: z.string().trim().toLowerCase().email().max(254),
-  password: z.string().min(8).max(128),
-});
-
-const shopEmail = z.string().trim().toLowerCase().email().max(254);
-/** Short numeric PIN — fast entry on a shared counter PC, not a full password. */
-const staffPin = z.string().trim().regex(/^\d{4,6}$/, 'PIN is 4-6 digits');
 
 export const requestPasswordResetSchema = z.object({ email: shopEmail });
 
 export const confirmPasswordResetSchema = z.object({
   email: shopEmail,
-  otp: z.string().trim().regex(/^\d{6}$/, 'Code is 6 digits'),
-  newPassword: z.string().min(8).max(128),
+  otp: z.string(required('Enter the 6-digit code')).trim().regex(/^\d{6}$/, 'Code is 6 digits'),
+  newPassword: newPassword('New password'),
 });
 
 export const createStaffSchema = z.object({

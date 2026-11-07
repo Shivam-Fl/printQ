@@ -6,8 +6,11 @@ import ShopNav from '../../components/ShopNav.js';
 import { enableShopPush } from '../../push.js';
 import { getShopSocket } from '../../socket.js';
 import { outcomeMessage, payFees, type FeeOverview } from '../../lib/fees.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface CommissionData {
+  /** Open balance the shop owes PrintQs (the fee part of what students paid at the counter). */
+  amountDuePaise: number;
   accountCreditPaise: number;
   entries: {
     id: string;
@@ -19,6 +22,17 @@ interface CommissionData {
     jobId: string | null;
   }[];
 }
+
+/** Plain words for the ledger: "receivable" is PrintQs's view, not the shop's. */
+function activityText(entry: CommissionData['entries'][number]): string {
+  if (entry.type !== 'print_commission') return entry.description;
+  return entry.shopFundedDiscountPaise > 0
+    ? 'Completed print (a coupon took it below your price)'
+    : 'PrintQs fee on a completed print';
+}
+
+/** Owed amounts are plain; credits and payments that reduce what you owe show a minus. */
+const dueText = (paise: number) => (paise < 0 ? `−${rupees(-paise)}` : rupees(paise));
 
 const when = (iso: string) => new Date(iso).toLocaleString([], {
   day: '2-digit',
@@ -48,7 +62,7 @@ export default function Earnings() {
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     if (getShopRole() === 'staff') {
@@ -95,7 +109,7 @@ export default function Earnings() {
       <div className="page-heading">
         <div>
           <h1>{fees?.enabled ? 'Earnings and fees' : 'Earnings'}</h1>
-          <p>{fees?.enabled ? 'Students pay you at the counter. PrintQs earns a commission on each completed print, summed into a weekly statement that you pay here.' : 'Students pay you at the counter. PrintQs posts one commission entry for each completed print.'}</p>
+          <p>{fees?.enabled ? 'Students pay you at the counter. PrintQs earns a commission on each completed print, summed into a weekly statement that you pay here.' : 'Students pay you at the counter, and their price includes the PrintQs fee. The fee from each completed print is listed here as money due to PrintQs.'}</p>
         </div>
       </div>
 
@@ -103,6 +117,23 @@ export default function Earnings() {
       {!data || !fees ? <p className="dim">Loading…</p> : (
         <>
           {fees.enabled && <FeeCard fees={fees} paying={paying} message={message} onPay={pay} />}
+          {!fees.enabled && (
+            <section className={`fee-card ${data.amountDuePaise > 0 ? 'fee-due' : ''}`} aria-labelledby="due-title">
+              <div>
+                <h2 id="due-title" style={{ margin: 0, fontSize: '1.05rem' }}>Due to PrintQs</h2>
+                <div className="fee-amount">{rupees(data.amountDuePaise)}</div>
+                <p className="fee-sub">
+                  {data.amountDuePaise > 0
+                    ? 'This is money you owe PrintQs: the fee part of what students paid you at the counter.'
+                    : 'Nothing due right now.'}
+                </p>
+                {data.accountCreditPaise > 0 && <p className="fee-note">You have {rupees(data.accountCreditPaise)} credit with PrintQs.</p>}
+              </div>
+              <div className="fee-card-action">
+                <p className="dim fee-terms">Online fee payment is not switched on yet. PrintQs will tell you before the first bill is due.</p>
+              </div>
+            </section>
+          )}
           {fees.enabled && pushState !== 'on' && (
             <p className="dim fee-push">
               <button
@@ -128,16 +159,16 @@ export default function Earnings() {
           <div className="section-head"><h2>Commission activity</h2></div>
           <div className="table-shell">
             <table>
-              <thead><tr><th>Date</th><th>Activity</th><th>Print reference</th><th>Commission</th><th>Discount below base</th></tr></thead>
+              <thead><tr><th>Date</th><th>Activity</th><th>Print reference</th><th>Due to PrintQs</th><th>Discount below base</th></tr></thead>
               <tbody>
                 {data.entries.length === 0 && <tr><td colSpan={5} className="dim">Completed prints will appear here.</td></tr>}
                 {data.entries.map((entry) => (
                   <tr key={entry.id}>
                     <td>{when(entry.createdAt)}</td>
-                    <td>{entry.description}</td>
+                    <td>{activityText(entry)}</td>
                     <td className="mono">{entry.jobId ? entry.jobId.slice(0, 8).toUpperCase() : '—'}</td>
-                    <td className={`mono ledger-amount ${entry.amountPaise > 0 ? 'positive' : ''}`}>
-                      {entry.amountPaise > 0 ? '+' : ''}{rupees(entry.amountPaise)}
+                    <td className={`mono ledger-amount ${entry.amountPaise < 0 ? 'positive' : ''}`}>
+                      {dueText(entry.amountPaise)}
                     </td>
                     <td className="mono">{entry.shopFundedDiscountPaise > 0 ? rupees(entry.shopFundedDiscountPaise) : '—'}</td>
                   </tr>

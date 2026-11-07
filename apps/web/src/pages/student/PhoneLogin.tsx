@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api, setToken } from '../../api.js';
+import {
+  extractOtp,
+  formatWait,
+  isValidIndianMobile,
+  normalizeIndianMobile,
+  phoneHint,
+  waitSecondsFromError,
+} from '../../lib/phone.js';
 
 const firebasePhoneAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase'
   && Boolean(
@@ -18,21 +27,43 @@ function loadFirebasePhoneAuth() {
 
 type Stage = 'phone' | 'otp' | 'name';
 
+/** Seconds before another code may be requested (matches the API's per-phone resend window). */
+const RESEND_SECONDS = 60;
+/** A sent code stays usable this long (the API's LOGIN_OTP_TTL_MS). */
+const CODE_VALID_MS = 5 * 60_000;
+
+/** A 1-second countdown; set it to N to count down from N. */
+function useCountdown(): [number, (seconds: number) => void] {
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (left <= 0) return;
+    const timer = setTimeout(() => setLeft((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [left]);
+  return [left, setLeft];
+}
+
+const spaced = (national: string) => `${national.slice(0, 5)} ${national.slice(5)}`.trim();
+
 /** Passwordless login; first verification doubles as account creation. */
 export default function PhoneLogin({ onDone }: { onDone: () => void }) {
   const [phone, setPhone] = useState('');
+  const [phoneFinished, setPhoneFinished] = useState(false);
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
   const [stage, setStage] = useState<Stage>('phone');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [resendIn, setResendIn] = useState(0);
+  const [sent, setSent] = useState<{ phone: string; at: number } | null>(null);
+  const [resendIn, setResendIn] = useCountdown();
+  const [verifyWait, setVerifyWait] = useCountdown();
 
+  // A "please wait" error is stale once its countdown has run out.
   useEffect(() => {
-    if (resendIn <= 0) return;
-    const timer = setTimeout(() => setResendIn((value) => value - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [resendIn]);
+    if (resendIn === 0 && verifyWait === 0) {
+      setError((current) => (/wait|too many|slow down/i.test(current) ? '' : current));
+    }
+  }, [resendIn, verifyWait]);
 
   useEffect(() => {
     let active = true;
@@ -65,7 +96,11 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const phoneE164 = `+91${phone.replace(/\D/g, '')}`;
+  const phoneValid = isValidIndianMobile(phone);
+  const hint = phoneHint(phone, phoneFinished);
+  // Back on the phone step with the same number and a code that still works:
+  // reuse it instead of asking for (and waiting on) a new one.
+  const codeStillValid = sent !== null && sent.phone === phone && Date.now() - sent.at < CODE_VALID_MS;
 
   async function requestOtp() {
     setBusy(true);
@@ -73,19 +108,41 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
     try {
       if (firebasePhoneAuthEnabled) {
         const { requestFirebasePhoneOtp } = await loadFirebasePhoneAuth();
-        await requestFirebasePhoneOtp(phoneE164);
+        await requestFirebasePhoneOtp(`+91${phone}`);
       }
       else await api('/api/auth/student/request-otp', { method: 'POST', body: { phone } });
+      setSent({ phone, at: Date.now() });
+      setOtp('');
       setStage('otp');
-      setResendIn(60);
+      setResendIn(RESEND_SECONDS);
     } catch (err) {
+      const wait = waitSecondsFromError(err);
+      if (wait) setResendIn(wait);
       setError(err instanceof Error ? err.message : 'Could not send the code');
     } finally {
       setBusy(false);
     }
   }
 
-  async function verify() {
+  function submitPhone(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (!phoneValid) {
+      setPhoneFinished(true);
+      return;
+    }
+    if (codeStillValid) {
+      setError('');
+      setStage('otp');
+      return;
+    }
+    if (resendIn > 0) return;
+    void requestOtp();
+  }
+
+  async function verify(event: FormEvent) {
+    event.preventDefault();
+    if (busy || otp.length !== 6 || verifyWait > 0) return;
     setBusy(true);
     setError('');
     try {
@@ -106,13 +163,17 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       if (result.student.name) onDone();
       else setStage('name');
     } catch (err) {
+      const wait = waitSecondsFromError(err);
+      if (wait) setVerifyWait(wait);
       setError(err instanceof Error ? err.message : 'Wrong code');
     } finally {
       setBusy(false);
     }
   }
 
-  async function saveName() {
+  async function saveName(event: FormEvent) {
+    event.preventDefault();
+    if (busy || !name.trim()) return;
     setBusy(true);
     setError('');
     try {
@@ -142,11 +203,12 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
       </div>
 
       {stage === 'phone' && (
-        <div className="stack">
+        <form className="stack" onSubmit={submitPhone} noValidate>
           <div>
             <span className="eyebrow-label">Student account</span>
             <h2>Continue with your phone</h2>
             <p className="dim">New here? We’ll create your account automatically.</p>
+            <p className="auth-pay-note">No online payment. You pay the shop by cash or UPI at the counter.</p>
           </div>
           <div className="field">
             <label htmlFor="phone">Mobile number</label>
@@ -158,63 +220,81 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
                 inputMode="numeric"
                 placeholder="98765 43210"
                 value={phone}
-                onChange={(event) => setPhone(event.target.value.replace(/[^\d\s-]/g, '').slice(0, 12))}
+                onChange={(event) => setPhone(normalizeIndianMobile(event.target.value))}
+                onBlur={() => setPhoneFinished(true)}
+                onKeyDown={(event) => { if (event.key === 'Enter') setPhoneFinished(true); }}
                 autoComplete="tel"
+                enterKeyHint="send"
+                aria-invalid={hint ? true : undefined}
+                aria-describedby={hint ? 'phone-hint' : undefined}
                 autoFocus
               />
             </div>
+            {hint && <span id="phone-hint" className="field-help phone-hint" role="status">{hint}</span>}
           </div>
-          <button className="full-button" disabled={busy || phone.replace(/\D/g, '').length !== 10} onClick={requestOtp}>
-            {busy ? 'Sending…' : 'Send secure code'}
+          <button
+            type="submit"
+            className="full-button"
+            disabled={busy || !phoneValid || (resendIn > 0 && !codeStillValid)}
+          >
+            {busy
+              ? 'Sending…'
+              : codeStillValid
+                ? 'Enter the code we sent'
+                : resendIn > 0
+                  ? `Send code in ${formatWait(resendIn)}`
+                  : 'Send secure code'}
           </button>
-          <p className="form-footnote">By continuing, you agree to receive login and order-status messages from PrintQ.</p>
-        </div>
+          <p className="form-footnote">
+            By continuing you agree to the <Link to="/terms">Terms</Link> and{' '}
+            <Link to="/privacy">Privacy Policy</Link>, and to receive login and order-status messages from PrintQ.
+          </p>
+        </form>
       )}
 
       {stage === 'otp' && (
-        <div className="stack">
+        <form className="stack" onSubmit={verify} noValidate>
           <div>
             <span className="eyebrow-label">Verify number</span>
             <h2>Enter the six-digit code</h2>
-            <p className="dim">Sent to +91 {phone.replace(/\D/g, '')}</p>
+            <p className="dim">Sent to +91 {spaced(phone)}</p>
           </div>
           <input
             className="big-otp-input otp-boxes"
             type="text"
             inputMode="numeric"
-            maxLength={6}
             value={otp}
-            onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))}
-            onKeyDown={(event) => event.key === 'Enter' && otp.length === 6 && void verify()}
+            onChange={(event) => setOtp(extractOtp(event.target.value))}
             autoFocus
             autoComplete="one-time-code"
+            enterKeyHint="go"
             aria-label="Six-digit verification code"
           />
-          <button className="full-button" disabled={busy || otp.length !== 6} onClick={verify}>
-            {busy ? 'Checking…' : 'Verify and continue'}
+          <button type="submit" className="full-button" disabled={busy || otp.length !== 6 || verifyWait > 0}>
+            {busy ? 'Checking…' : verifyWait > 0 ? `Try again in ${formatWait(verifyWait)}` : 'Verify and continue'}
           </button>
           <div className="auth-inline-actions">
             <button
+              type="button"
               className="text-button"
               onClick={() => {
-                if (firebasePhoneAuthEnabled) {
-                  void loadFirebasePhoneAuth().then(({ resetFirebasePhoneAuth }) => resetFirebasePhoneAuth());
-                }
-                setOtp('');
+                // Keep the sent code (and, on Firebase, its confirmation): coming
+                // back with the same number goes straight to this step again.
+                setError('');
                 setStage('phone');
               }}
             >
               Change number
             </button>
-            <button className="text-button" disabled={busy || resendIn > 0} onClick={requestOtp}>
-              {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+            <button type="button" className="text-button" disabled={busy || resendIn > 0} onClick={() => void requestOtp()}>
+              {resendIn > 0 ? `Resend in ${formatWait(resendIn)}` : 'Resend code'}
             </button>
           </div>
-        </div>
+        </form>
       )}
 
       {stage === 'name' && (
-        <div className="stack">
+        <form className="stack" onSubmit={saveName} noValidate>
           <div>
             <span className="eyebrow-label">Almost done</span>
             <h2>What should the shop call you?</h2>
@@ -229,15 +309,14 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
               value={name}
               maxLength={80}
               onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && name.trim() && void saveName()}
               autoComplete="name"
               autoFocus
             />
           </div>
-          <button className="full-button" disabled={busy || !name.trim()} onClick={saveName}>
+          <button type="submit" className="full-button" disabled={busy || !name.trim()}>
             {busy ? 'Saving…' : 'Finish setup'}
           </button>
-        </div>
+        </form>
       )}
 
       {error && <div className="error-box" role="alert">{error}</div>}
