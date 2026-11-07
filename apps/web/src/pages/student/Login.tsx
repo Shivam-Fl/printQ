@@ -1,4 +1,6 @@
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { getToken } from '../../api.js';
 import Topbar from '../../components/Topbar.js';
 import { studentReturnPath } from '../../lib/studentReturn.js';
 import PhoneLogin from './PhoneLogin.js';
@@ -10,6 +12,10 @@ export default function Login() {
   const notice = state?.notice;
   // Back to the page that sent the student here (?next= or router state), never off-site.
   const returnTo = studentReturnPath(params.get('next') ?? state?.from);
+  // Already signed in when the page opened: carry on instead of showing the phone form again.
+  // Read once, so the token PhoneLogin saves mid-sign-up (before the name step) doesn't skip that step.
+  const [signedInOnEntry] = useState(() => Boolean(getToken('student')));
+  if (signedInOnEntry) return <Navigate to={returnTo} replace />;
   return (
     <main className="auth-page">
       <div className="auth-page-main">

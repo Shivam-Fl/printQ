@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ago, api, getToken, rupees } from '../../api.js';
 import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { nothingCharged } from './jobPayment.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { studentLoginPath } from '../../lib/studentReturn.js';
@@ -17,6 +18,8 @@ interface JobRow {
   specs: SpecsLite;
   shop: { name: string; slug: string };
   file: { originalName: string };
+  /** Present once the list API returns it; used to say "Nothing charged" on cancelled orders. */
+  paymentStatus?: string;
 }
 
 function JobCard({ job }: { job: JobRow }) {
@@ -38,7 +41,7 @@ function JobCard({ job }: { job: JobRow }) {
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <span className={`stamp ${m.tone}`}>{m.label}</span>
-          <div className="dim mono" style={{ marginTop: 6 }}>{rupees(job.totalPaise)}</div>
+          <div className="dim mono" style={{ marginTop: 6 }}>{nothingCharged(job.status, job.paymentStatus) ? 'Nothing charged' : rupees(job.totalPaise)}</div>
         </div>
       </div>
     </Link>

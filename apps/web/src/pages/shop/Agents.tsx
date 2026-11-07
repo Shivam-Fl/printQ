@@ -164,7 +164,7 @@ export default function Agents() {
           {phone && <PcLinkShare withQr />}
           <PcSteps />
           {!phone && <a className="button-link" href={WINDOWS_DOWNLOAD_URL}>Download PrintQs Shop for Windows</a>}
-          <p className="field-help">No printer yet? The app also has a test printer, so you can try a full order first.</p>
+          <p className="field-help">The app also has a practice simulator. It never prints and never takes real student orders, so connect your real printer to go live.</p>
         </section>
       )}
 
@@ -191,13 +191,13 @@ export default function Agents() {
             </div>
           </div>
           <div className="mode-cards" role="radiogroup" aria-label="Printer mode">
-            <button className={`mode-card${mode === 'real' ? ' selected' : ''}`} onClick={() => setMode('real')}>
-              <strong>Real printers</strong>
-              <span>Detect and use devices installed on this PC</span>
+            <button className={`mode-card${mode === 'real' ? ' selected' : ''}`} role="radio" aria-checked={mode === 'real'} onClick={() => setMode('real')}>
+              <strong>Real printer</strong>
+              <span>Use the printers installed on this PC. You need this to go live.</span>
             </button>
-            <button className={`mode-card${mode === 'simulate' ? ' selected' : ''}`} onClick={() => setMode('simulate')}>
-              <strong>Safe simulator</strong>
-              <span>Test full print flows without physical hardware</span>
+            <button className={`mode-card${mode === 'simulate' ? ' selected' : ''}`} role="radio" aria-checked={mode === 'simulate'} onClick={() => setMode('simulate')}>
+              <strong>Practice simulator</strong>
+              <span>Only for practice. It never prints and never takes real student orders.</span>
             </button>
           </div>
           <div className="form-row align-end">
@@ -217,7 +217,7 @@ export default function Agents() {
           <div className="wizard-header">
             <div>
               <span className="eyebrow-label">Automatic setup</span>
-              <h2>{mode === 'simulate' ? 'Printer simulator' : 'Windows printer engine'}</h2>
+              <h2>{mode === 'simulate' ? 'Practice simulator' : 'Windows printer engine'}</h2>
               <p>No command, token copy or separate agent installation is required.</p>
             </div>
             <span className={`status-dot${waitingAgent?.status === 'online' || desktopStatus?.state === 'online' ? ' done' : ''}`}>
@@ -230,7 +230,10 @@ export default function Agents() {
                 <strong>This computer is ready</strong>
                 <p>{waitingAgent?.detectedPrinters?.length
                   ? `${waitingAgent.detectedPrinters.length} printer${waitingAgent.detectedPrinters.length === 1 ? '' : 's'} detected.`
-                  : mode === 'simulate' ? 'The safe printer simulator is connected.' : 'Scanning Windows for installed printers.'}</p>
+                  : mode === 'simulate' ? 'The practice simulator is connected.' : 'Scanning Windows for installed printers.'}</p>
+                {mode === 'simulate' && (
+                  <p>The simulator never takes real student orders. To go live, connect this computer again in Real printer mode.</p>
+                )}
               </div>
               <Link className="button-link" to="/dashboard/printers">Configure printers</Link>
             </div>

@@ -84,7 +84,7 @@ export async function getFirebaseMessagingToken(
       const data = payload.data ?? {};
       window.dispatchEvent(new CustomEvent('printq:firebase-notification', {
         detail: {
-          title: payload.notification?.title ?? 'PrintQ',
+          title: payload.notification?.title ?? 'PrintQs',
           body: payload.notification?.body ?? '',
           url: data.url,
           eventKey: data.eventKey,

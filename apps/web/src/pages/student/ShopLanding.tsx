@@ -193,7 +193,8 @@ export default function ShopLanding() {
       <div className="shop-hero">
         <div>
           <span className="eyebrow-label">Order online · collect at counter</span>
-          <h1>{shop.name}</h1>
+          {/* long names get a smaller size instead of being cut off (names can be up to 120 characters) */}
+          <h1 className={shop.name.length > 28 ? 'long-name' : undefined}>{shop.name}</h1>
           <p className="dim">
             {shop.address}
             {shop.campusName ? ` · ${shop.campusName}` : ''}
@@ -206,7 +207,7 @@ export default function ShopLanding() {
             )}
           </div>
         </div>
-        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'Taking orders' : shop.temporarilyUnavailable ? 'Unavailable' : 'Currently closed'}</span>
+        <span className={`stamp ${shop.open ? 'green' : 'red'}`}>{shop.open ? 'Taking orders' : shop.temporarilyUnavailable ? 'Unavailable' : 'Closed now'}</span>
       </div>
 
       {!loggedIn ? (

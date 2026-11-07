@@ -9,7 +9,9 @@ import Topbar from '../../components/Topbar.js';
 import { looksLikePin, maskEmail, PASSWORD_MIN } from '../../lib/authForm.js';
 import { extractOtp } from '../../lib/phone.js';
 import { postLoginPath } from '../../lib/locationFlow.js';
+import { passwordHint, passwordHintClass } from '../../lib/passwordHint.js';
 import type { SetupSnapshot } from '../../lib/setupSteps.js';
+import { SESSION_ENDED_NOTICE, takeShopSessionNotice, wasRevoked } from '../../lib/shopSessionNotice.js';
 
 type Mode = 'password' | 'pin' | 'forgot-request' | 'forgot-confirm';
 
@@ -19,7 +21,7 @@ function ShopAuthLayout({ title, subtitle, children }: { title: string; subtitle
       <div className="auth-page-main">
         <Topbar tag="shop counter" />
         <div className="auth-copy">
-          <span className="eyebrow-label">PrintQ for shops</span>
+          <span className="eyebrow-label">PrintQs for shops</span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>
@@ -48,7 +50,6 @@ export default function ShopLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
-  const next = postLoginPath(params.get('next'));
   /** "Forgot password?" lives at ?reset=1, so the phone's Back button returns to sign-in instead of leaving. */
   const resetting = params.get('reset') === '1';
   const [mode, setMode] = useState<Mode>(resetting ? 'forgot-request' : 'password');
@@ -65,6 +66,29 @@ export default function ShopLogin() {
   const [message, setMessage] = useState('');
   const [signedIn, setSignedIn] = useState(() => Boolean(getToken('shop')));
   const handleSignedOut = useCallback(() => setSignedIn(false), []);
+  // "Go to dashboard" follows the login rule: a shop that is not live yet goes to Setup.
+  const [signedInSetup, setSignedInSetup] = useState<SetupSnapshot | null>(null);
+  // Shown once when another device's sign-out or a password reset ended this session.
+  const [sessionNotice, setSessionNotice] = useState('');
+
+  useEffect(() => {
+    const notice = takeShopSessionNotice();
+    if (notice) setSessionNotice(notice);
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    const token = getToken('shop');
+    let cancelled = false;
+    api<{ setup: SetupSnapshot }>('/api/shop/setup-status', { role: 'shop' })
+      .then((r) => { if (!cancelled) setSignedInSetup(r.setup); })
+      .catch((err) => {
+        if (cancelled || !(err instanceof ApiError) || err.status !== 401) return;
+        if (wasRevoked(token)) setSessionNotice(SESSION_ENDED_NOTICE);
+        setSignedIn(false);
+      });
+    return () => { cancelled = true; };
+  }, [signedIn]);
 
   // Back button (or any URL change) away from ?reset=1 returns to the sign-in form.
   const wasResetting = useRef(resetting);
@@ -127,7 +151,7 @@ export default function ShopLogin() {
     event.preventDefault();
     if (busy) return;
     if (!email.trim()) {
-      setError('Enter your work email.');
+      setError('Enter your email.');
       focusInput('email');
       return;
     }
@@ -160,7 +184,7 @@ export default function ShopLogin() {
     event.preventDefault();
     if (busy) return;
     if (!email.trim()) {
-      setError('Enter the owner email for this shop.');
+      setError('Enter the email you sign in with.');
       focusInput('remail');
       return;
     }
@@ -179,10 +203,9 @@ export default function ShopLogin() {
 
   async function confirmReset(event: FormEvent) {
     event.preventDefault();
-    if (busy || otp.length !== 6 || newPassword.length < PASSWORD_MIN) return;
-    const problem = passwordProblem(newPassword, 'New password');
-    if (problem) {
-      setError(problem);
+    if (busy || otp.length !== 6) return;
+    if (passwordProblem(newPassword, 'New password')) {
+      // the red line under the box already says what is wrong
       focusInput('rnew');
       return;
     }
@@ -208,23 +231,24 @@ export default function ShopLogin() {
   if (signedIn) {
     return (
       <ShopAuthLayout title="You’re already signed in." subtitle="This device is signed in to a shop dashboard.">
-        <ShopSignedIn to={next} hint="To use a different account, sign out first." onSignedOut={handleSignedOut} />
+        <ShopSignedIn to={postLoginPath(params.get('next'), signedInSetup)} hint="To use a different account, sign out first." onSignedOut={handleSignedOut} />
       </ShopAuthLayout>
     );
   }
 
   if (mode === 'forgot-request') {
     return (
-      <ShopAuthLayout title="Reset your password" subtitle="We’ll send a six-digit code to the owner email on this account.">
+      <ShopAuthLayout title="Reset your password" subtitle="We’ll send a six-digit code to the email you sign in with.">
         <form className="auth-card stack" onSubmit={requestReset} noValidate>
           <div>
-            <label htmlFor="remail">Owner email</label>
+            <label htmlFor="remail">Your sign-in email</label>
             <input id="remail" type="email" inputMode="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(''); }} autoComplete="email" autoFocus />
           </div>
+          {/* above the button, so a phone keyboard never hides it */}
+          {error && <div className="error-box" role="alert">{error}</div>}
           <button type="submit" className="full-button" disabled={busy}>
             {busy ? 'Sending…' : 'Send reset code'}
           </button>
-          {error && <div className="error-box" role="alert">{error}</div>}
           <button type="button" className="text-button" onClick={() => switchMode('password')}>← Back to sign in</button>
         </form>
       </ShopAuthLayout>
@@ -232,6 +256,7 @@ export default function ShopLogin() {
   }
 
   if (mode === 'forgot-confirm') {
+    const newHint = passwordHint(newPassword, 'New password');
     return (
       <ShopAuthLayout title="Choose a new password" subtitle="Enter the code from your email, then create a password you don’t use elsewhere.">
         <form className="auth-card stack" onSubmit={confirmReset} noValidate>
@@ -259,18 +284,19 @@ export default function ShopLogin() {
             <PasswordInput
               id="rnew"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => { setNewPassword(e.target.value); setError(''); }}
               autoComplete="new-password"
               aria-describedby="rnew-help"
+              aria-invalid={newHint.state === 'weak' ? true : undefined}
             />
-            <span id="rnew-help" className={`field-help password-rule${newPassword.length >= PASSWORD_MIN ? ' ok' : ''}`}>
-              {newPassword.length >= PASSWORD_MIN ? '✓ At least 8 characters' : 'At least 8 characters'}
-            </span>
+            {/* same rule as the API: a password it will refuse never gets a green tick */}
+            <span id="rnew-help" className={passwordHintClass(newHint)} aria-live="polite">{newHint.text}</span>
           </div>
-          <button type="submit" className="full-button" disabled={busy || otp.length !== 6 || newPassword.length < PASSWORD_MIN}>
+          {/* above the button, so it is not pushed off the bottom of a phone screen */}
+          {error && <div className="error-box" role="alert">{error}</div>}
+          <button type="submit" className="full-button" disabled={busy || otp.length !== 6 || newHint.state !== 'ok'}>
             {busy ? 'Saving…' : 'Reset password'}
           </button>
-          {error && <div className="error-box" role="alert">{error}</div>}
           <div className="auth-inline-actions">
             <button type="button" className="text-button" onClick={() => switchMode('password')}>← Back to sign in</button>
             <button type="button" className="text-button" onClick={() => { setError(''); setOtp(''); setMode('forgot-request'); }}>Send a new code</button>
@@ -284,8 +310,9 @@ export default function ShopLogin() {
     <ShopAuthLayout title="Run your print queue." subtitle="Sign in to release jobs, watch every printer and keep the counter moving.">
       <form className="auth-card stack" onSubmit={submitLogin} noValidate>
         {message && <div className="notice success-notice" role="status"><span>{message}</span></div>}
+        {sessionNotice && !message && <div className="notice setup-notice" role="status"><span>{sessionNotice}</span></div>}
         <div>
-          <label htmlFor="email">Work email</label>
+          <label htmlFor="email">Email</label>
           <input id="email" name="email" type="email" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" autoFocus={!email} />
         </div>
         {mode === 'pin' ? (
@@ -301,7 +328,9 @@ export default function ShopLogin() {
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               autoComplete="current-password"
               autoFocus={Boolean(email)}
+              aria-describedby="pin-help"
             />
+            <span id="pin-help" className="field-help">Staff: ask the owner for your 4-6 digit PIN.</span>
           </div>
         ) : (
           <div>

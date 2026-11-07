@@ -20,8 +20,8 @@ export function PcSteps({ onPcPage = false }: { onPcPage?: boolean }) {
         <span>Open the downloaded file to install it. Sign in with your shop email and password.</span>
       </li>
       <li>
-        <strong>Connect your printer</strong>
-        <span>In the app, open Computers and press Connect this computer. Your printers are found by themselves. Press Configure printers to add yours.</span>
+        <strong>Connect the PC and add your printer</strong>
+        <span>In the app, open Computers, choose Real printer and press Connect this computer. Your printers show up by themselves. Press Configure printers, then Add &amp; configure next to your printer.</span>
       </li>
     </ol>
   );
@@ -68,7 +68,7 @@ export function PcLinkShare({ withQr = false }: { withQr?: boolean }) {
     <div className="pc-share">
       <div className="pc-share-copy">
         <strong>Open <span className="mono">{link}</span> on your counter computer</strong>
-        <p>This phone can’t run the Windows app. Send the link to the computer next to your printer.</p>
+        <p>The PrintQs Shop app runs only on a Windows computer. Send the link to the computer next to your printer.</p>
         <div className="row">
           <button className="secondary small" onClick={copyLink}>{copy === 'copied' ? 'Copied' : 'Copy link'}</button>
           {canShare

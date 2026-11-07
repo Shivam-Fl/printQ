@@ -14,10 +14,12 @@ export default function Welcome() {
   return (
     <main className="welcome-page">
       <nav className="public-nav">
-        <Link to="/" className="brand brand-large">Print<em>Q</em></Link>
+        <Link to="/" className="brand brand-large"><span>Print<em>Q</em>s</span></Link>
         <div className="public-nav-links">
           <Link to="/shops">Find a shop</Link>
           <Link to="/dashboard/login">Shop sign in</Link>
+          {/* desktop only: on phones the hero's owner line is already above the fold */}
+          <Link to="/dashboard/register" className="public-nav-cta">Register your shop</Link>
         </div>
       </nav>
 
@@ -43,7 +45,7 @@ export default function Welcome() {
           </div>
         </div>
 
-        <div className="queue-demo" aria-label="Example PrintQ order status">
+        <div className="queue-demo" aria-label="Example PrintQs order status">
           <div className="queue-demo-head">
             <div>
               <span className="queue-demo-kicker">CURRENT ORDER</span>
@@ -98,7 +100,7 @@ export default function Welcome() {
       </section>
 
       <footer className="public-footer">
-        <span>PrintQ</span>
+        <span>PrintQs</span>
         <span>Less waiting. Better printing.</span>
         <Link to="/shops">Find a shop</Link>
         <PolicyLinks />

@@ -1658,3 +1658,59 @@ div.role-card:hover { transform: none; border-color: var(--rule); box-shadow: va
 /* /shops: distance on its own line, outside the 2-line address clamp (S20) */
 .directory-distance { display: block; margin-top: 3px; color: var(--ink); font-size: .76rem; font-weight: 600; }
 /* === end qa-fix:pc-checkout-web === */
+
+/* === qa-fix2:web-location === */
+/* Register and reset password hints: a password the API will refuse reads red, never green (PSO-4, PSLS-3) */
+.password-rule.bad { color: var(--danger); }
+/* === end qa-fix2:web-location === */
+
+/* === qa-fix2:web-public === */
+/* Keyboard focus on text fields: a clear 2px ring (>= 3:1 on white), not only a border tint (PA-5) */
+input:is(:not([type]), [type='text'], [type='tel'], [type='email'], [type='password'], [type='number'], [type='search'], [type='datetime-local']):focus-visible,
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
+:is(.release-panel, .checkout-total, .share-panel) :is(input, select, textarea):focus-visible { outline-color: var(--highlight); }
+/* the phone field rings its +91 wrapper instead of the bare input */
+.phone-field input:focus-visible { outline: none; }
+.phone-field:focus-within { outline: 2px solid var(--stamp); outline-offset: 2px; }
+
+/* /s/:slug: the shop name gets the full width and wraps between words, never "Onboardin / g" or "…" (PSJ-2) */
+.shop-hero { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 14px; }
+.shop-hero > .stamp { justify-self: start; }
+.shop-hero h1 { display: block; overflow: visible; -webkit-line-clamp: unset; line-clamp: none; overflow-wrap: break-word; font-size: clamp(2.2rem, 8vw, 3rem); }
+.shop-hero h1.long-name { font-size: clamp(1.6rem, 6vw, 2.1rem); }
+
+/* Checkout: same gap between every settings row (Paper -> Ink, Sides -> Binding) (PSJ-7) */
+.checkout-card > :is(.form-row, .field) + :is(.form-row, .field) { margin-top: 14px; }
+
+/* Landing: "Register your shop" in the top nav on desktop (PSO-2); phones have it in the hero */
+.public-nav-links a.public-nav-cta { padding: 0 16px; border: 1.5px solid var(--stamp); border-radius: 999px; color: var(--stamp-dark); }
+.public-nav-links a.public-nav-cta:hover { background: var(--stamp-soft); }
+@media (max-width: 620px) { .public-nav-links a.public-nav-cta { display: none; } }
+
+/* /pc: installer size + SmartScreen help (PA-1); footnote links underlined (PA-4) */
+.pc-download-facts { margin: 8px 0 0; color: var(--pencil); font-size: .86rem; }
+.pc-smartscreen { max-width: 60ch; margin: 10px 0 0; padding: 10px 12px; border-left: 3px solid var(--highlight); border-radius: 0 8px 8px 0; background: var(--highlight-soft); font-size: .86rem; line-height: 1.5; }
+.pc-download-alt { margin: 0; font-size: .92rem; }
+.pc-download-alt a { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.pc-foot a { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Profile while /me loads: quiet placeholders instead of '?', '—', 'Not set' (PSJ-5) */
+.avatar.skeleton-avatar { background: #e9edf4; }
+.profile-skeleton { display: grid; gap: 8px; }
+.skeleton-line { display: block; width: 7em; height: .9em; margin-top: 6px; border-radius: 6px; background: #e9edf4; }
+.profile-skeleton .skeleton-line { margin-top: 0; }
+.skeleton-line.wide { width: 11em; height: 1.3em; }
+/* === end qa-fix2:web-public === */
+
+/* === qa-fix2:web-shop === */
+/* Printers heading (PSO-7): on a phone the "Connected computers" button moves under the title
+   instead of being squeezed into a 4-line column */
+.printers-heading { flex-wrap: wrap; row-gap: 14px; }
+.printers-heading > div { flex: 1 1 280px; min-width: 0; }
+.printers-heading > .button-link { flex: 0 0 auto; white-space: nowrap; }
+/* "Printer added — your shop is live" (PSO-6) */
+.printer-added-notice { margin: 0 0 18px; }
+.printer-added-notice .row { flex-wrap: wrap; gap: 10px; }
+/* one-time "you were signed out" notice inside the login card (PSLS-1) */
+.auth-card > .setup-notice { margin: 0; }
+/* === end qa-fix2:web-shop === */

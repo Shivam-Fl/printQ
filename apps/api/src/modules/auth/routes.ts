@@ -339,6 +339,20 @@ authRouter.post(
   }),
 );
 
+/** Subject and plain-text body of the reset email (PSLS-8: brand is PrintQs; say what to do if it was not you). */
+export function passwordResetEmail(otp: string): [subject: string, text: string] {
+  return [
+    'Reset your PrintQs password',
+    [
+      `Your PrintQs password reset code is ${otp}. It expires in 15 minutes.`,
+      '',
+      "Didn't ask for this? You can ignore this email. Your password stays the same.",
+      '',
+      'PrintQs',
+    ].join('\n'),
+  ];
+}
+
 async function sendPasswordResetCode(email: string): Promise<void> {
   const user = await prisma.shopUser.findUnique({ where: { email }, select: { id: true } });
   if (!user) return;
@@ -359,11 +373,7 @@ async function sendPasswordResetCode(email: string): Promise<void> {
     data: { email, otpHash: await hashOtp(otp), expiresAt: new Date(now.getTime() + RESET_OTP_TTL_MS) },
   });
   try {
-    const result = await emailProvider.send(
-      email,
-      'Reset your PrintQ password',
-      `Your PrintQ password reset code is ${otp}. It expires in 15 minutes.`,
-    );
+    const result = await emailProvider.send(email, ...passwordResetEmail(otp));
     await prisma.passwordResetOtp.update({
       where: { id: reset.id },
       data: {
@@ -394,11 +404,17 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { email, otp, newPassword } = req.body as { email: string; otp: string; newPassword: string };
 
-    const record = await prisma.passwordResetOtp.findFirst({
-      where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, otpHash: true },
-    });
+    // PSLS-2 (9.8 s on prod): independent reads go out together, and the final
+    // write is two guarded statements instead of an interactive transaction
+    // (each production round trip is ~230 ms). Both argon2 steps stay as they were.
+    const [record, user] = await Promise.all([
+      prisma.passwordResetOtp.findFirst({
+        where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, otpHash: true },
+      }),
+      prisma.shopUser.findUnique({ where: { email }, select: { id: true } }),
+    ]);
     if (!record) throw badRequest('Code expired or not found — request a new one');
 
     // Same atomic attempt claim as student verify-otp (M1): at most 5 guesses
@@ -410,23 +426,24 @@ authRouter.post(
     if (claimed.count !== 1) throw badRequest('Too many wrong attempts — request a new code');
 
     if (!(await verifyOtpHash(record.otpHash, otp))) throw unauthorized('Incorrect code');
-
-    const user = await prisma.shopUser.findUnique({ where: { email }, select: { id: true } });
     if (!user) throw badRequest('Code expired or not found — request a new one');
 
-    const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
-    await prisma.$transaction(async (tx) => {
-      // single use: only the request that flips consumedAt may change the password
-      const consumed = await tx.passwordResetOtp.updateMany({
+    // The code is verified, so hashing the new password and spending the code can
+    // run side by side. Single use: only the request that flips consumedAt may
+    // change the password. If anything below then failed, the code is simply spent
+    // and the owner asks for a new one; one code can never change the password twice.
+    const [passwordHash, consumed] = await Promise.all([
+      argon2.hash(newPassword, { type: argon2.argon2id }),
+      prisma.passwordResetOtp.updateMany({
         where: { id: record.id, consumedAt: null, expiresAt: { gt: new Date() } },
         data: { consumedAt: new Date() },
-      });
-      if (consumed.count !== 1) throw badRequest('Code expired or already used — request a new one');
-      await tx.shopUser.update({
-        where: { id: user.id },
-        // every token issued under the old password stops working
-        data: { passwordHash, sessionVersion: { increment: 1 } },
-      });
+      }),
+    ]);
+    if (consumed.count !== 1) throw badRequest('Code expired or already used — request a new one');
+    await prisma.shopUser.update({
+      where: { id: user.id },
+      // every token issued under the old password stops working
+      data: { passwordHash, sessionVersion: { increment: 1 } },
     });
     res.json({ ok: true });
   }),

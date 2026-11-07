@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PINNED_LOCATION } from './geocode.js';
 import {
-  addressAfterReverse, autoSearchQuery,
-  buildLocationSave, postLoginPath, REGISTER_PIN_KEY, shopLoginPath, SEARCH_EMPTY_MESSAGE, SEARCH_FOUND_MESSAGE,
+  accuracyText, addressAfterReverse, autoSearchQuery,
+  buildLocationSave, desktopLocationTip, deviceFixMessage, isPreciseFix, locationFailureLead, postLoginPath,
+  REGISTER_PIN_KEY, registerFillNote, registerPinFromFix, shopLoginPath, SEARCH_EMPTY_MESSAGE, SEARCH_FOUND_MESSAGE,
   searchMessage, stashRegisterPin, takeRegisterPin,
 } from './locationFlow.js';
 
@@ -140,5 +141,62 @@ describe('shopLoginPath (SLS-7)', () => {
     expect(shopLoginPath('/dashboard/login')).toBe('/dashboard/login');
     expect(shopLoginPath('/dashboard/x/../login')).toBe('/dashboard/login');
     expect(shopLoginPath('//evil.example')).toBe('/dashboard/login');
+  });
+});
+
+describe('coarse device fixes are never pinned by themselves (LOC-3)', () => {
+  it('treats 100 m or better as precise, anything rougher (or junk) as an area', () => {
+    expect(isPreciseFix(5)).toBe(true);
+    expect(isPreciseFix(100)).toBe(true);
+    expect(isPreciseFix(100.4)).toBe(false);
+    expect(isPreciseFix(209)).toBe(false);
+    expect(isPreciseFix(25_000)).toBe(false);
+    expect(isPreciseFix(Number.NaN)).toBe(false);
+    expect(isPreciseFix(-1)).toBe(false);
+  });
+  it('writes the accuracy in m or km', () => {
+    expect(accuracyText(0.2)).toBe('about 1 m');
+    expect(accuracyText(209.4)).toBe('about 209 m');
+    expect(accuracyText(999.7)).toBe('about 1 km');
+    expect(accuracyText(2_480)).toBe('about 2.5 km');
+    expect(accuracyText(25_300)).toBe('about 25 km');
+  });
+  it('asks the owner to tap the entrance for a rough fix and to fine-tune a precise one', () => {
+    expect(deviceFixMessage(209)).toBe('We found your area (about 209 m). Tap your shop entrance on the map.');
+    expect(deviceFixMessage(12_000)).toBe('We found your area (about 12 km). Tap your shop entrance on the map.');
+    expect(deviceFixMessage(Number.NaN)).toBe('We found your area. Tap your shop entrance on the map.');
+    expect(deviceFixMessage(40)).toBe('Location found (about 40 m accuracy). Drag the pin if it is a little off.');
+  });
+});
+
+describe('register "Fill from my location" (LOC-4)', () => {
+  it('hands a precise fix to setup, rounded to 6 places', () => {
+    expect(registerPinFromFix({ latitude: 19.21834567, longitude: 72.97812349, accuracy: 30 }))
+      .toEqual({ latitude: 19.218346, longitude: 72.978123 });
+  });
+  it('keeps a rough fix to itself, so setup detects again', () => {
+    expect(registerPinFromFix({ latitude: 19.2, longitude: 72.9, accuracy: 209 })).toBeNull();
+  });
+  it('never overwrites a typed address, but may refresh its own earlier fill', () => {
+    expect(addressAfterReverse('Shop 7, Janpath Market', 'Janpath Road, New Delhi')).toBe('Shop 7, Janpath Market');
+    expect(addressAfterReverse('Shop 7, Janpath Market', 'Janpath Road', 'Connaught Place')).toBe('Shop 7, Janpath Market');
+    expect(addressAfterReverse('Connaught Place', 'Janpath Road', 'Connaught Place')).toBe('Janpath Road');
+    expect(addressAfterReverse('', 'Janpath Road')).toBe('Janpath Road');
+  });
+  it('says "off" only when access was refused', () => {
+    expect(locationFailureLead(true)).toBe('Location access is off');
+    expect(locationFailureLead(false)).toBe('Could not get a location');
+  });
+  it('explains what happened to the address', () => {
+    expect(registerFillNote('kept', 30)).toMatch(/^Kept the address you typed/);
+    expect(registerFillNote('filled', 30)).toMatch(/shop number/);
+    expect(registerFillNote('filled', 2_400)).toMatch(/about 2\.4 km/);
+    expect(registerFillNote('not_found', 30)).toMatch(/Type it in/);
+  });
+});
+
+describe('desktop app location fallback', () => {
+  it('points at this site in Chrome', () => {
+    expect(desktopLocationTip('printqs.com')).toBe('Or open printqs.com/dashboard/setup in Chrome on this PC to use its location.');
   });
 });

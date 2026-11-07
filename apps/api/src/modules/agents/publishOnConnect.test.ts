@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const agentUpdate = vi.hoisted(() => vi.fn());
 const printerFindMany = vi.hoisted(() => vi.fn());
 const publishIfReady = vi.hoisted(() => vi.fn());
+const restorePrintersReachedAgain = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/prisma.js', () => ({
   prisma: { agent: { update: agentUpdate }, printer: { findMany: printerFindMany }, $disconnect: vi.fn() },
 }));
@@ -17,7 +18,7 @@ vi.mock('../../middleware/auth.js', () => ({
   },
 }));
 vi.mock('../queue/engine.js', () => ({ advanceShopQueues: vi.fn(), emitQueueUpdate: vi.fn() }));
-vi.mock('../shops/availability.js', () => ({ notifyShopReopened: vi.fn() }));
+vi.mock('../shops/availability.js', () => ({ notifyShopReopened: vi.fn(), restorePrintersReachedAgain }));
 vi.mock('../../realtime/events.js', () => ({ publishEvent: vi.fn() }));
 vi.mock('../../providers/storage/index.js', () => ({ storage: {} }));
 vi.mock('../jobs/transitions.js', () => ({ applyTransition: vi.fn() }));
@@ -46,6 +47,7 @@ describe('agent routes publish a ready auto-live shop', () => {
     agentUpdate.mockReset().mockResolvedValue({});
     printerFindMany.mockReset().mockResolvedValue([]);
     publishIfReady.mockReset().mockResolvedValue(true);
+    restorePrintersReachedAgain.mockReset().mockResolvedValue(undefined);
   });
 
   const post = (path: string, body: unknown) =>
@@ -59,6 +61,12 @@ describe('agent routes publish a ready auto-live shop', () => {
   it('tries to publish when an agent reports its printers', async () => {
     expect((await post('/printers', { printers: [{ name: 'HP' }] })).status).toBe(200);
     expect(publishIfReady).toHaveBeenCalledWith('s1');
+  });
+
+  it('hands printers this PC links for the first time to the offline-restore step', async () => {
+    printerFindMany.mockResolvedValue([{ id: 'p1' }]);
+    expect((await post('/printers', { printers: [{ name: 'HP' }] })).status).toBe(200);
+    expect(restorePrintersReachedAgain).toHaveBeenCalledWith('s1', 'a1', ['p1']);
   });
 
   it('never fails the agent call when publishing throws', async () => {

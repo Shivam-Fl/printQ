@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import express from 'express';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../realtime/events.js', () => ({
   publishEvent: vi.fn(),
@@ -18,6 +18,9 @@ import { prisma } from '../../lib/prisma.js';
 import { signShopToken } from '../../lib/tokens.js';
 import { errorHandler } from '../../middleware/error.js';
 import { env } from '../../config/env.js';
+import { generateAgentToken } from '../../lib/otp.js';
+import { agentRouter } from '../agents/routes.js';
+import { publicRouter } from '../public/routes.js';
 import { shopRouter } from './routes.js';
 
 const dbReady = await (async () => {
@@ -53,7 +56,8 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
     });
 
   /** A published auto-live shop with one linked printer and a PC that sees it plus one unlinked printer. */
-  async function makeShop(opts: { agentOnline?: boolean; campusActive?: boolean; published?: boolean } = {}) {
+  async function makeShop(opts: { agentOnline?: boolean; campusActive?: boolean; published?: boolean; osPrinterName?: string } = {}) {
+    const osPrinterName = opts.osPrinterName ?? 'HP LaserJet';
     const campus = opts.campusActive === undefined
       ? null
       : await prisma.campus.create({ data: { slug: `vis-${randomUUID().slice(0, 8)}`, name: 'Vis Campus', address: 'X', isActive: opts.campusActive } });
@@ -77,7 +81,7 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
     });
     shopIds.push(shop.id);
     const printer = await prisma.printer.create({
-      data: { shopId: shop.id, label: 'Front', paperSizesLoaded: ['A4'], finishingOptions: ['spiral'], osPrinterName: 'HP LaserJet' },
+      data: { shopId: shop.id, label: 'Front', paperSizesLoaded: ['A4'], finishingOptions: ['spiral'], osPrinterName },
     });
     await prisma.agent.create({
       data: {
@@ -86,7 +90,7 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
         tokenHash: randomUUID(),
         status: opts.agentOnline === false ? 'offline' : 'online',
         connectedPrinterIds: [printer.id],
-        detectedPrinters: [{ name: 'HP LaserJet', paperSizes: ['A4'] }, { name: 'Canon G3000', paperSizes: ['A4'] }],
+        detectedPrinters: [{ name: osPrinterName, paperSizes: ['A4'] }, { name: 'Canon G3000', paperSizes: ['A4'] }],
       },
     });
     const ownerId = randomUUID();
@@ -110,9 +114,17 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
     expect(res.status).toBe(200);
     return (await res.json()).setup as {
       ready: boolean;
+      agentReady: boolean;
       platformMarkupBps: number;
       visibility: { state: string; reason: string | null };
-      counts: { detectedPrinters: number };
+      counts: {
+        detectedPrinters: number;
+        linkedPrinters: number;
+        onlinePrinters: number;
+        agents: number;
+        onlineAgents: number;
+        simulatorPrinters: number;
+      };
     };
   };
 
@@ -120,6 +132,8 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
     const app = express();
     app.use(express.json());
     app.use('/api/shop', shopRouter);
+    app.use('/api/agent', agentRouter);
+    app.use('/api/public', publicRouter);
     app.use(errorHandler);
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -196,5 +210,94 @@ describe.runIf(dbReady)('setup-status visibility + printer field ownership (data
     const { printer, owner, staff } = await makeShop();
     expect((await call(`/api/shop/printers/${printer.id}`, staff, { method: 'PATCH', body })).status).toBe(403);
     expect((await call(`/api/shop/printers/${printer.id}`, owner, { method: 'PATCH', body })).status).toBe(200);
+  });
+
+  describe('the PrintQ Simulator is practice only in production (PSO-1)', () => {
+    const saved = { NODE_ENV: env.NODE_ENV, ALLOW: env.ALLOW_SIMULATED_PRINT_COMPLETION };
+    afterEach(() => {
+      env.NODE_ENV = saved.NODE_ENV;
+      env.ALLOW_SIMULATED_PRINT_COMPLETION = saved.ALLOW;
+    });
+
+    it('production: a simulator-only shop is not published, not ready, and the simulator is counted apart', async () => {
+      env.NODE_ENV = 'production';
+      env.ALLOW_SIMULATED_PRINT_COMPLETION = false;
+      const { shop, owner } = await makeShop({ published: false, osPrinterName: 'PrintQ Simulator' });
+      const status = await setup(owner);
+      expect(status.ready).toBe(false);
+      expect(status.agentReady).toBe(false);
+      expect(status.visibility.state).toBe('not_ready');
+      // the real Canon the PC can see is still offered; the simulator is not a "printer found"
+      expect(status.counts).toMatchObject({ simulatorPrinters: 1, linkedPrinters: 0, onlinePrinters: 0, onlineAgents: 1, detectedPrinters: 1 });
+      expect((await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).publishedAt).toBeNull();
+    });
+
+    it('production: an already-published simulator-only shop is closed to students', async () => {
+      env.NODE_ENV = 'production';
+      env.ALLOW_SIMULATED_PRINT_COMPLETION = false;
+      const { shop, owner } = await makeShop({ osPrinterName: 'PrintQ Simulator' });
+      expect((await setup(owner)).visibility.state).toBe('live_pc_offline');
+      const isOpen = async () =>
+        ((await (await fetch(`${base}/api/public/shops/${shop.slug}`)).json()) as { shop: { open: boolean } }).shop.open;
+      expect(await isOpen()).toBe(false);
+
+      env.NODE_ENV = saved.NODE_ENV;
+      env.ALLOW_SIMULATED_PRINT_COMPLETION = saved.ALLOW;
+      // development keeps today's behaviour: the simulator opens the shop
+      expect(await isOpen()).toBe(true);
+    });
+
+    it('development: the simulator still takes the shop live, as before', async () => {
+      const { shop, owner } = await makeShop({ published: false, osPrinterName: 'PrintQ Simulator' });
+      const status = await setup(owner);
+      expect(status.counts.simulatorPrinters).toBe(0);
+      expect(status.agentReady).toBe(true);
+      expect((await prisma.shop.findUniqueOrThrow({ where: { id: shop.id } })).publishedAt).not.toBeNull();
+    });
+  });
+
+  describe('removing a counter PC (cleanup audit: printer stayed online with 0 PCs)', () => {
+    it('switches its printer offline, setup stops counting it, and a re-installed PC brings it back', async () => {
+      const { shop, printer, owner } = await makeShop();
+      const pc = await prisma.agent.findFirstOrThrow({ where: { shopId: shop.id } });
+      expect((await call(`/api/shop/agents/${pc.id}`, owner, { method: 'DELETE' })).status).toBe(200);
+
+      expect((await prisma.printer.findUniqueOrThrow({ where: { id: printer.id } })).status).toBe('offline');
+      const gone = await setup(owner);
+      expect(gone.counts).toMatchObject({ agents: 0, onlinePrinters: 0 });
+      expect(gone.visibility.state).toBe('live_pc_offline');
+
+      // the owner installs PrintQs Shop again: the new PC reports the same Windows printer
+      const { token, tokenHash } = generateAgentToken();
+      await prisma.agent.create({ data: { shopId: shop.id, machineLabel: 'New PC', tokenHash, status: 'online' } });
+      const report = await fetch(`${base}/api/agent/printers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-agent-token': token },
+        body: JSON.stringify({ printers: [{ name: 'HP LaserJet', paperSizes: ['A4'] }] }),
+      });
+      expect(report.status).toBe(200);
+      expect((await prisma.printer.findUniqueOrThrow({ where: { id: printer.id } })).status).toBe('online');
+      const back = await setup(owner);
+      expect(back.counts).toMatchObject({ agents: 1, onlinePrinters: 1 });
+      expect(back.visibility.state).toBe('live');
+    });
+
+    it('leaves a printer online when another PC (even one off for the night) still reaches it', async () => {
+      const { shop, printer, owner } = await makeShop();
+      const pc = await prisma.agent.findFirstOrThrow({ where: { shopId: shop.id } });
+      await prisma.agent.create({
+        data: { shopId: shop.id, machineLabel: 'Back PC', tokenHash: randomUUID(), status: 'offline', connectedPrinterIds: [printer.id] },
+      });
+      expect((await call(`/api/shop/agents/${pc.id}`, owner, { method: 'DELETE' })).status).toBe(200);
+      expect((await prisma.printer.findUniqueOrThrow({ where: { id: printer.id } })).status).toBe('online');
+    });
+
+    it('another shop cannot delete this PC (404) and nothing changes', async () => {
+      const mine = await makeShop();
+      const other = await makeShop();
+      const pc = await prisma.agent.findFirstOrThrow({ where: { shopId: mine.shop.id } });
+      expect((await call(`/api/shop/agents/${pc.id}`, other.owner, { method: 'DELETE' })).status).toBe(404);
+      expect((await prisma.printer.findUniqueOrThrow({ where: { id: mine.printer.id } })).status).toBe('online');
+    });
   });
 });

@@ -10,6 +10,8 @@ import { isListed, setupSteps, statusBanner, visibilityState, type SetupSnapshot
 
 interface SetupStatus extends SetupSnapshot {
   profileReady: boolean;
+  /** False while the owner has paused new orders from the Queue page. */
+  acceptingOrders?: boolean;
   counts: SetupSnapshot['counts'] & { printers: number };
   studentUrl: string;
   verification: {
@@ -25,7 +27,8 @@ interface SetupStatus extends SetupSnapshot {
 
 /** Signed-out visits (the desktop tray link) come back here after login. */
 const LOGIN_THEN_SETUP = '/dashboard/login?next=/dashboard/setup';
-const STEP_COUNT = 4;
+/** Location, prices, counter PC + printer. The "live" card is the result, not a step. */
+const STEP_COUNT = 3;
 
 export default function ShopSetup() {
   const navigate = useNavigate();
@@ -97,11 +100,13 @@ export default function ShopSetup() {
   }, [setup?.studentUrl]);
 
   const steps = useMemo(() => (setup ? setupSteps(setup) : []), [setup]);
-  const completeCount = steps.filter((step) => step.done).length;
+  const completeCount = steps.filter((step) => step.key !== 'live' && step.done).length;
   const state = setup ? visibilityState(setup) : null;
   const listed = state ? isListed(state) : false;
-  // A live shop with its PC off, or a paused / campus-hidden shop, gets a plain notice instead of onboarding copy.
-  const banner = setup && state !== 'live' && state !== 'not_ready' && state !== 'pending_review' ? statusBanner(setup) : null;
+  // A live shop with its PC off, a simulator-only live shop, or a shop paused by PrintQs / campus-hidden
+  // gets a plain notice instead of onboarding copy (statusBanner is null for a normal live shop).
+  const banner = setup && state !== 'not_ready' && state !== 'pending_review' ? statusBanner(setup) : null;
+  const pausedByOwner = listed && setup?.acceptingOrders === false;
 
   async function copyLink() {
     if (!setup) return;
@@ -157,7 +162,7 @@ export default function ShopSetup() {
         <div>
           <span className="eyebrow-label">Launch checklist</span>
           <h1>Get your counter ready</h1>
-          <p>Four short steps. No campus needed.</p>
+          <p>Three steps to go live. No campus needed.</p>
         </div>
         <div className="setup-score" aria-label={setup ? `${completeCount} of ${STEP_COUNT} setup steps complete` : 'Loading setup'}>
           <strong>{setup ? `${completeCount}/${STEP_COUNT}` : '–'}</strong>
@@ -171,13 +176,23 @@ export default function ShopSetup() {
         </div>
       )}
 
-      {state === 'live' && (
+      {state === 'live' && !banner && !pausedByOwner && (
         <div className="notice success-notice">
           <div>
             <strong>You’re live.</strong>
             <p>Students nearby can find your shop now. Keep PrintQs Shop running on the counter PC and share your student link.</p>
           </div>
           <Link className="button-link" to="/dashboard">Open live queue</Link>
+        </div>
+      )}
+
+      {pausedByOwner && (
+        <div className="notice setup-notice" role="status">
+          <div>
+            <strong>New orders are paused</strong>
+            <p>Students see your shop as closed and can’t place new orders. Orders already placed still work.</p>
+          </div>
+          <Link className="button-link" to="/dashboard">Resume on the Queue page</Link>
         </div>
       )}
 
@@ -194,7 +209,7 @@ export default function ShopSetup() {
       {!setup && !error && (
         <div className="setup-grid" aria-busy="true">
           <p className="dim" role="status" style={{ gridColumn: '1 / -1', margin: 0 }}>Loading your checklist…</p>
-          {Array.from({ length: STEP_COUNT }, (_, index) => (
+          {Array.from({ length: STEP_COUNT + 1 }, (_, index) => (
             <div className="skeleton-card" key={index} style={{ height: 190 }} aria-hidden />
           ))}
         </div>
@@ -295,15 +310,6 @@ export default function ShopSetup() {
           </div>
         </section>
       )}
-
-      <section className="simulator-note">
-        <div>
-          <span className="eyebrow-label">No printer nearby?</span>
-          <h2>Test the entire flow in simulation mode</h2>
-          <p>The simulated agent still claims jobs, downloads the real PDF and reports print completion. No paper or hardware is used. The Safe simulator connects through the PrintQs Shop desktop app, like printers do.</p>
-        </div>
-        <Link className="button-link secondary" to="/dashboard/agents">Set up a simulator in the desktop app</Link>
-      </section>
 
       {error && <div className="error-box">{error}</div>}
     </main>

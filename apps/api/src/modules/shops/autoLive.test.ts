@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findUnique = vi.hoisted(() => vi.fn());
 const updateMany = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/prisma.js', () => ({ prisma: { shop: { findUnique, updateMany }, $disconnect: vi.fn() } }));
 vi.mock('../public/cache.js', () => ({ invalidatePublicCaches: vi.fn() }));
 
+import { env } from '../../config/env.js';
 import { publishIfReady } from './autoLive.js';
 
 const menu = { papers: [{ id: 'A4', label: 'A4', bwPaise: 200, colorPaise: 1000 }], bindings: [], duplexEnabled: false };
@@ -50,5 +51,47 @@ describe('publishIfReady (new shops go live automatically)', () => {
     findUnique.mockResolvedValue(readyShop(over));
     expect(await publishIfReady('s1')).toBe(false);
     expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('publishIfReady with the PrintQ Simulator (PSO-1)', () => {
+  const saved = { NODE_ENV: env.NODE_ENV, ALLOW: env.ALLOW_SIMULATED_PRINT_COMPLETION };
+  const simulatorShop = () => readyShop({ printers: [{ id: 'p1', osPrinterName: 'PrintQ Simulator', status: 'online' }] });
+  beforeEach(() => {
+    findUnique.mockReset();
+    updateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+  afterEach(() => {
+    env.NODE_ENV = saved.NODE_ENV;
+    env.ALLOW_SIMULATED_PRINT_COMPLETION = saved.ALLOW;
+  });
+  const asProduction = () => {
+    env.NODE_ENV = 'production';
+    env.ALLOW_SIMULATED_PRINT_COMPLETION = false;
+  };
+
+  it('never takes a simulator-only shop live in production (its orders could not finish)', async () => {
+    asProduction();
+    findUnique.mockResolvedValue(simulatorShop());
+    expect(await publishIfReady('s1')).toBe(false);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('takes the shop live in production once a real printer is connected next to the simulator', async () => {
+    asProduction();
+    findUnique.mockResolvedValue(readyShop({
+      printers: [
+        { id: 'p1', osPrinterName: 'PrintQ Simulator', status: 'online' },
+        { id: 'p2', osPrinterName: 'HP LaserJet', status: 'online' },
+      ],
+      agents: [{ status: 'online', connectedPrinterIds: ['p1', 'p2'] }],
+    }));
+    expect(await publishIfReady('s1')).toBe(true);
+  });
+
+  it('still lets the simulator take a shop live in development', async () => {
+    env.NODE_ENV = 'development';
+    findUnique.mockResolvedValue(simulatorShop());
+    expect(await publishIfReady('s1')).toBe(true);
   });
 });

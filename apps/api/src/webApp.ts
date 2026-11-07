@@ -1,5 +1,28 @@
 import path from 'node:path';
-import express from 'express';
+import express, { type RequestHandler } from 'express';
+
+/** Paths the API host always answers itself: the API, the health check and sockets. */
+const API_HOST_PATH = /^\/(api|healthz|socket\.io)(\/|$)/i;
+
+/**
+ * PA-7: split-domain production (web on printqs.com, API on api.printqs.com).
+ * A page opened on any other host (api.printqs.com/pc, the Render URL) gets a
+ * 301 to the same path on the public web address, so owners and students only
+ * ever see one site. Only GET/HEAD page loads move; API calls, webhooks, the
+ * health check and socket.io are never redirected. A single-domain deploy
+ * (PUBLIC_WEB_URL is this host) is untouched.
+ */
+export function redirectPagesToWebHost(publicWebUrl: string): RequestHandler {
+  const web = new URL(publicWebUrl);
+  const webHost = web.hostname.toLowerCase();
+  return (req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (API_HOST_PATH.test(req.path) || !req.originalUrl.startsWith('/')) return next();
+    if (!req.hostname || req.hostname.toLowerCase() === webHost) return next();
+    // origin + path (never new URL(path, origin)): "//other.site" stays a path on the web host
+    res.redirect(301, `${web.origin}${req.originalUrl}`);
+  };
+}
 
 /**
  * Single-domain production deploy: serve the built web app (PWA, push and API

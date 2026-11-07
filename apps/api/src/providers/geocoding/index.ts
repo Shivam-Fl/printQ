@@ -32,6 +32,13 @@ const CACHE_MAX = 500;
 const RESULT_LIMIT = 10;
 /** Bias box half-size in degrees (~55 km): prefer, but never restrict to, results near the caller. */
 const BIAS_DELTA = 0.5;
+/**
+ * LOC-6: with no bias point, prefer India (where PrintQs shops are) without
+ * forbidding the rest of the world (#67): Nominatim is asked for Indian matches
+ * first and worldwide only when there are none; Photon is biased to India's centre.
+ */
+const DEFAULT_COUNTRY = 'in';
+const DEFAULT_BIAS: SearchBias = { latitude: 22.5, longitude: 79 };
 
 const cache = new Map<string, { expiresAt: number; value: unknown }>();
 
@@ -159,7 +166,8 @@ async function getJson(request: (url: URL) => Promise<Response>, url: URL): Prom
 }
 
 /**
- * Worldwide address / shop / POI search. Primary: Nominatim. Fallback: Photon
+ * Worldwide address / shop / POI search, India first when there is no bias
+ * point (LOC-6). Primary: Nominatim. Fallback: Photon
  * (both OSM-based, free, no key) when the primary errors or finds nothing.
  * Never throws: any provider failure yields an empty list so setup is never blocked.
  */
@@ -180,20 +188,27 @@ async function searchLocationsUncached(query: string, bias?: SearchBias): Promis
   const cached = cacheGet<GeocodingResult[]>(cacheKey);
   if (cached) return cached;
 
-  let results: GeocodingResult[] = [];
-  let failed = false;
-  try {
+  const nominatimUrl = (countryCode?: string) => {
     const url = new URL('/search', env.GEOCODING_BASE_URL);
     url.searchParams.set('q', normalized);
     url.searchParams.set('format', 'jsonv2');
     url.searchParams.set('addressdetails', '0');
     url.searchParams.set('limit', String(RESULT_LIMIT));
+    if (countryCode) url.searchParams.set('countrycodes', countryCode);
     if (b) {
       // viewbox is left,top,right,bottom; bounded stays 0 so it only biases ranking.
       url.searchParams.set('viewbox', [b.longitude - BIAS_DELTA, b.latitude + BIAS_DELTA, b.longitude + BIAS_DELTA, b.latitude - BIAS_DELTA].join(','));
       url.searchParams.set('bounded', '0');
     }
-    results = fromNominatim(await getJson(primaryRequest, url));
+    return url;
+  };
+
+  let results: GeocodingResult[] = [];
+  let failed = false;
+  try {
+    // No bias point: Indian matches first, then worldwide if India has none.
+    results = fromNominatim(await getJson(primaryRequest, nominatimUrl(b ? undefined : DEFAULT_COUNTRY)));
+    if (results.length === 0 && !b) results = fromNominatim(await getJson(primaryRequest, nominatimUrl()));
   } catch {
     failed = true;
   }
@@ -203,10 +218,9 @@ async function searchLocationsUncached(query: string, bias?: SearchBias): Promis
       const url = new URL('/api', env.GEOCODING_FALLBACK_BASE_URL);
       url.searchParams.set('q', normalized);
       url.searchParams.set('limit', String(RESULT_LIMIT));
-      if (b) {
-        url.searchParams.set('lat', String(b.latitude));
-        url.searchParams.set('lon', String(b.longitude));
-      }
+      const near = b ?? DEFAULT_BIAS;
+      url.searchParams.set('lat', String(near.latitude));
+      url.searchParams.set('lon', String(near.longitude));
       results = fromPhoton(await getJson(fallbackRequest, url));
     } catch {
       failed = true;

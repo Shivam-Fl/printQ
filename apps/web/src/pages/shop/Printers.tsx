@@ -5,6 +5,7 @@ import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
 import { detectedEmptyState, guessPaperSizes } from './printersView.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
+import { afterPrinterAdded, isSimulatorPrinterName, type AfterPrinterAdded, type SetupAfterAdd } from './printerAddedNotice.js';
 
 interface Printer {
   id: string;
@@ -66,6 +67,8 @@ export default function Printers() {
   const [testing, setTesting] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // What adding a printer changed for students ("your shop is live", or what is still missing).
+  const [added, setAdded] = useState<AfterPrinterAdded | null>(null);
   // detected printer waiting for the "Colour printer? Yes / No" answer
   const [askingColour, setAskingColour] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -140,6 +143,16 @@ export default function Printers() {
     }
   }
 
+  /** After a printer is linked, ask the server whether the shop is now live (it publishes itself). */
+  async function showWhatChanged(addedName: string) {
+    try {
+      const { setup } = await api<{ setup: SetupAfterAdd }>('/api/shop/setup-status', { role: 'shop' });
+      setAdded(afterPrinterAdded(setup, addedName));
+    } catch {
+      setAdded(null); // the printer is still added; the table shows it
+    }
+  }
+
   async function addDetected(d: DetectedPrinter, colorSupport: boolean) {
     setAdding(true);
     setError('');
@@ -160,7 +173,7 @@ export default function Printers() {
       });
       setAskingColour(null);
       setNotice('');
-      await refresh();
+      await Promise.all([refresh(), showWhatChanged(d.name)]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add printer');
     } finally {
@@ -198,7 +211,7 @@ export default function Printers() {
       await patchPrinter(printer, { osPrinterName });
       setLinking(null);
       setNotice('');
-      await refresh();
+      await Promise.all([refresh(), showWhatChanged(osPrinterName)]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not link printer');
     }
@@ -238,6 +251,7 @@ export default function Printers() {
       await api(`/api/shop/printers/${printer.id}`, { method: 'DELETE', role: 'shop' });
       if (editing === printer.id) setEditing(null);
       setNotice('');
+      setAdded(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove printer');
@@ -295,6 +309,8 @@ export default function Printers() {
   const agentsOnline = agents.filter((agent) => agent.status === 'online').length;
   const linkedPrinters = printers.filter((printer) => printer.osPrinterName).length;
   const needsFirstPrinter = agentsOnline > 0 && linkedPrinters === 0 && unlinkedDetected.length > 0;
+  // The PC runs the practice simulator only: adding it never lets students order.
+  const onlySimulatorFound = unlinkedDetected.length > 0 && unlinkedDetected.every((d) => isSimulatorPrinterName(d.name));
   const emptyCopy = detectedEmptyState({ agentsOnline, agentsTotal: agents.length, linkedPrinters });
 
   function toggleInList(key: 'paperSizesLoaded' | 'finishingOptions', value: string) {
@@ -308,14 +324,27 @@ export default function Printers() {
     <div className="page wide">
       <ShopNav />
 
-      <div className="page-heading">
+      <div className="page-heading printers-heading">
         <div>
           <span className="eyebrow-label">Hardware</span>
           <h1>Printers</h1>
-          <p>Match each physical printer to what it can produce. PrintQ uses these details to prevent impossible orders.</p>
+          <p>Match each physical printer to what it can produce. PrintQs uses these details to prevent impossible orders.</p>
         </div>
         <Link className="button-link secondary" to="/dashboard/agents">Connected computers</Link>
       </div>
+
+      {added && (
+        <div className={`notice ${added.kind === 'live' ? 'success-notice' : 'setup-notice'} printer-added-notice`} role="status">
+          <div>
+            <strong>{added.title}</strong>
+            <p>{added.text}</p>
+          </div>
+          <div className="row">
+            {added.studentUrl && <a className="button-link secondary" href={added.studentUrl} target="_blank" rel="noreferrer">Open student page</a>}
+            <Link className="button-link" to={added.to}>{added.action}</Link>
+          </div>
+        </div>
+      )}
 
       {shop && (
         <div className="automation-panel">
@@ -332,7 +361,9 @@ export default function Printers() {
       )}
 
       <div className="section-heading">
-        {needsFirstPrinter ? (
+        {onlySimulatorFound ? (
+          <div><h2>Only the practice simulator was found</h2><p>The simulator never prints and never takes real student orders. Switch on your real printer and connect the counter PC in Real printer mode to go live.</p></div>
+        ) : needsFirstPrinter ? (
           <div><h2>Your counter PC found these printers — add one to go live</h2><p>Tap Add &amp; configure and say if it prints colour. Students can order as soon as one is added.</p></div>
         ) : (
           <div><h2>Detected printers</h2><p>Printers reported by your connected counter computers.</p></div>
@@ -352,7 +383,9 @@ export default function Printers() {
               <div>
                 <span className="detected-icon" aria-hidden>OS</span>
                 <strong>{d.name}</strong>
-                <p>{d.paperSizes.length > 0 ? `Driver reports ${d.paperSizes.join(', ')}` : 'Detected on a connected computer'}</p>
+                <p>{isSimulatorPrinterName(d.name)
+                  ? 'For practice only. Never takes real student orders.'
+                  : d.paperSizes.length > 0 ? `Driver reports ${d.paperSizes.join(', ')}` : 'Detected on a connected computer'}</p>
               </div>
               {askingColour === d.name ? (
                 <fieldset className="colour-question">
