@@ -7,6 +7,7 @@ import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { IconBell, IconLogout } from '../../components/Icons.js';
 import { studentLoginPath } from '../../lib/studentReturn.js';
+import { displayIndianPhone } from './phoneFormat.js';
 
 interface Me {
   name: string | null;
@@ -64,18 +65,27 @@ export default function Profile() {
     navigate('/', { replace: true });
   }
 
-  const initial = (me?.name?.trim()?.[0] ?? '?').toUpperCase();
+  // Until /me answers, show quiet placeholders rather than '?', '—' and 'Not set' that then change.
+  const loading = me === null && !error;
+  const initial = loading ? '' : (me?.name?.trim()?.[0] ?? '?').toUpperCase();
 
   return (
     <StudentShell>
       <div className="page">
         <Topbar tag="profile" />
         <div className="row" style={{ gap: 14, margin: '8px 0 4px' }}>
-          <div className="avatar">{initial}</div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.4rem' }}>{me?.name ?? '—'}</h1>
-            <div className="dim mono">{me?.phone ?? ''}</div>
-          </div>
+          <div className={`avatar${loading ? ' skeleton-avatar' : ''}`} aria-hidden={loading || undefined}>{initial}</div>
+          {loading ? (
+            <div className="profile-skeleton" role="status" aria-label="Loading your profile">
+              <span className="skeleton-line wide" />
+              <span className="skeleton-line" />
+            </div>
+          ) : (
+            <div>
+              <h1 style={{ margin: 0, fontSize: '1.4rem' }}>{me?.name || 'Your profile'}</h1>
+              <div className="dim mono">{me ? displayIndianPhone(me.phone) : ''}</div>
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -94,9 +104,11 @@ export default function Profile() {
             <div className="row between">
               <div>
                 <strong>Name</strong>
-                <p className="dim" style={{ margin: '2px 0 0' }}>{me?.name ?? 'Not set'}</p>
+                {loading
+                  ? <span className="skeleton-line" aria-hidden />
+                  : <p className="dim" style={{ margin: '2px 0 0' }}>{me?.name || 'Not set'}</p>}
               </div>
-              <button className="ghost small" onClick={() => setEditing(true)}>Edit</button>
+              <button className="ghost small" onClick={() => setEditing(true)} disabled={loading}>Edit</button>
             </div>
           )}
           {saved && <span className="stamp green" style={{ marginTop: 10 }}>saved ✓</span>}
@@ -138,7 +150,7 @@ export default function Profile() {
           </button>
         </div>
 
-        <p className="dim" style={{ textAlign: 'center', marginTop: 12 }}>PrintQ · add to home screen for the full app</p>
+        <p className="dim" style={{ textAlign: 'center', marginTop: 12 }}>PrintQs · add to home screen for the full app</p>
         <p className="dim" style={{ textAlign: 'center', margin: 0 }}><Link to="/support">Help &amp; policies</Link></p>
       </div>
     </StudentShell>

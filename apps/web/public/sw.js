@@ -1,4 +1,4 @@
-/* PrintQ service worker: push notifications + app-shell/asset caching. */
+/* PrintQs service worker: push notifications + app-shell/asset caching. */
 const SHELL_CACHE = 'printq-shell-v3';
 const ASSET_CACHE = 'printq-assets-v3';
 const OFFLINE_URL = '/offline.html';
@@ -24,7 +24,7 @@ if (fcmEnabled) {
   firebase.initializeApp(fcmConfig);
   firebase.messaging().onBackgroundMessage((payload) => {
     const data = payload.data || {};
-    return self.registration.showNotification(payload.notification?.title || 'PrintQ', {
+    return self.registration.showNotification(payload.notification?.title || 'PrintQs', {
       body: payload.notification?.body || '',
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
@@ -109,7 +109,7 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   if (fcmEnabled) return;
-  let data = { title: 'PrintQ', body: '', url: '/' };
+  let data = { title: 'PrintQs', body: '', url: '/' };
   try {
     data = { ...data, ...event.data.json() };
   } catch {

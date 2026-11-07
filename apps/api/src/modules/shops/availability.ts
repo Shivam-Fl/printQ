@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 
 /** Printer profiles are sellable only while an online agent can reach them. */
@@ -17,7 +18,8 @@ export interface OperationalShopRows {
   latitude: number | null;
   longitude: number | null;
   agents: { connectedPrinterIds: string[] }[];
-  printers: { id: string; status: string }[];
+  /** osPrinterName is needed so the simulator never opens a shop in production (PSO-1). */
+  printers: { id: string; status: string; osPrinterName: string | null }[];
 }
 
 /** Pure form of isShopOperational for callers that already loaded the rows (saves 3 round trips). */
@@ -25,7 +27,7 @@ export function isShopOperationalFrom(shop: OperationalShopRows | null | undefin
   // A fee block cannot be bypassed by the owner's own acceptingOrders toggle.
   if (!shop?.acceptingOrders || shop.feeBlockedAt || shop.latitude == null || shop.longitude == null) return false;
   const reachable = new Set(shop.agents.flatMap((agent) => agent.connectedPrinterIds));
-  return shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id));
+  return shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id) && canPrintForStudents(printer));
 }
 
 export async function isShopOperational(shopId: string): Promise<boolean> {
@@ -38,7 +40,7 @@ export async function isShopOperational(shopId: string): Promise<boolean> {
       longitude: true,
       feeBlockedAt: true,
       agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
-      printers: { select: { id: true, status: true } },
+      printers: { select: { id: true, status: true, osPrinterName: true } },
     },
   });
   return isShopOperationalFrom(shop);
@@ -63,6 +65,46 @@ export async function connectPrinterToDetectingAgents(
       });
     }
   }
+}
+
+/**
+ * After a counter PC is removed: a printer that no remaining PC is connected to
+ * cannot print, so it is switched offline (the Printers page and setup counts
+ * stop calling it online). A printer another PC still reaches, even one that
+ * is off for the night, is left alone. Returns how many were switched offline.
+ */
+export async function markUnreachablePrintersOffline(shopId: string, printerIds: string[]): Promise<number> {
+  if (printerIds.length === 0) return 0;
+  const remaining = await prisma.agent.findMany({ where: { shopId }, select: { connectedPrinterIds: true } });
+  const stillReached = new Set(remaining.flatMap((agent) => agent.connectedPrinterIds));
+  const orphaned = printerIds.filter((id) => !stillReached.has(id));
+  if (orphaned.length === 0) return 0;
+  const { count } = await prisma.printer.updateMany({
+    where: { shopId, id: { in: orphaned }, status: 'online' },
+    data: { status: 'offline' },
+  });
+  return count;
+}
+
+/**
+ * The other half of markUnreachablePrintersOffline: when a PC links a printer
+ * that no other PC reaches and it sits 'offline', switch it back online so a
+ * re-installed PC opens the shop again without a trip to the Printers page.
+ * 'jammed' and printers another PC already reaches (a staff choice) are kept.
+ */
+export async function restorePrintersReachedAgain(shopId: string, agentId: string, newlyConnectedIds: string[]): Promise<void> {
+  if (newlyConnectedIds.length === 0) return;
+  const others = await prisma.agent.findMany({
+    where: { shopId, id: { not: agentId } },
+    select: { connectedPrinterIds: true },
+  });
+  const reachedElsewhere = new Set(others.flatMap((agent) => agent.connectedPrinterIds));
+  const firstLink = newlyConnectedIds.filter((id) => !reachedElsewhere.has(id));
+  if (firstLink.length === 0) return;
+  await prisma.printer.updateMany({
+    where: { shopId, id: { in: firstLink }, status: 'offline' },
+    data: { status: 'online' },
+  });
 }
 
 /** Tell students waiting on a closed shop once the full printer path is live again. */

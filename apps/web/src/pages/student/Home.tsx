@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError, ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../api.js';
 import { statusMeta } from '../../jobStatus.js';
+import { nothingCharged } from './jobPayment.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import InstallPrompt from '../../components/InstallPrompt.js';
@@ -18,6 +19,8 @@ interface JobRow {
   scheduledTime: string | null;
   shop: { name: string; slug: string };
   file: { originalName: string };
+  /** Present once the list API returns it; used to say "Nothing charged" on cancelled orders. */
+  paymentStatus?: string;
 }
 interface Me {
   name: string | null;
@@ -235,7 +238,7 @@ export default function Home() {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <span className={`stamp ${m.tone}`}>{m.label}</span>
-                    <div className="dim mono">{rupees(j.totalPaise)}</div>
+                    <div className="dim mono">{nothingCharged(j.status, j.paymentStatus) ? 'Nothing charged' : rupees(j.totalPaise)}</div>
                   </div>
                 </Link>
               );

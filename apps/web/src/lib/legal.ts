@@ -11,7 +11,7 @@
 export const LEGAL_PRODUCT_NAME = 'PrintQs';
 
 /** Shown at the top of every policy page. ISO date, rendered as written. */
-export const LEGAL_LAST_UPDATED = '2026-10-10';
+export const LEGAL_LAST_UPDATED = '2026-11-07';
 
 // Individual proprietor, operating as PrintQs. Must match the business name on
 // the payment-provider account (Razorpay: Business Type "Individual").

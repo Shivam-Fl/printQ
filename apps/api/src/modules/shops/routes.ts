@@ -42,7 +42,7 @@ import { describePrintProblem } from '../../lib/printProblem.js';
 import { istDayKey, lastIstDayKeys, startOfIstDay } from '../../lib/istDay.js';
 import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
-import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
+import { connectPrinterToDetectingAgents, markUnreachablePrintersOffline, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
 import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
@@ -50,6 +50,7 @@ import { reverseLocation, searchLocations } from '../../providers/geocoding/inde
 import { selectPrinterTestAgent } from './printerTest.js';
 import { csvCell } from './csv.js';
 import { countDetectedPrinters, hasOnlinePrinterPath, shopVisibility, VISIBILITY_ADMIN_ACTIONS } from './visibility.js';
+import { canPrintForStudents, simulatorIsPracticeOnly } from '../../lib/simulatorPrinters.js';
 
 export const shopRouter = Router();
 
@@ -193,15 +194,20 @@ shopRouter.get(
         })
       : null;
 
-    const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
-    const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
+    // In production the simulator printer is practice only (PSO-1): it is counted
+    // apart and never makes the shop ready, so the owner is told to add a real printer.
+    const practiceOnly = simulatorIsPracticeOnly();
+    const allLinked = printers.filter((printer) => Boolean(printer.osPrinterName));
+    const linkedPrinters = allLinked.filter((printer) => canPrintForStudents(printer, practiceOnly));
+    const simulatorPrinters = allLinked.length - linkedPrinters.length;
     const onlineAgents = agents.filter((agent) => agent.status === 'online');
+    const reachable = new Set(onlineAgents.flatMap((agent) => agent.connectedPrinterIds));
+    // Ready = switched on AND an online PC reaches it; a deleted or offline PC means not ready.
+    const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online' && reachable.has(printer.id));
     const options = shopOptions(shop);
     const pricingReady = options.papers.length > 0;
     const locationReady = shop.latitude != null && shop.longitude != null;
-    const agentReady = onlineAgents.some((agent) =>
-      agent.connectedPrinterIds.some((id) => readyPrinters.some((printer) => printer.id === id)),
-    );
+    const agentReady = readyPrinters.length > 0;
 
     res.json({
       setup: {
@@ -231,7 +237,7 @@ shopRouter.get(
         },
         acceptingOrders: shop.acceptingOrders,
         // What students see right now; separate from "is setup complete" (ready).
-        visibility: shopVisibility({ ...shop, printerPathOnline: hasOnlinePrinterPath(agents, printers), lastAdminAction }),
+        visibility: shopVisibility({ ...shop, printerPathOnline: hasOnlinePrinterPath(agents, printers, practiceOnly), lastAdminAction }),
         platformMarkupBps: env.PLATFORM_MARKUP_BPS,
         counts: {
           printers: printers.length,
@@ -240,7 +246,10 @@ shopRouter.get(
           agents: agents.length,
           onlineAgents: onlineAgents.length,
           // OS printers an online PC can see that are not added as a PrintQs printer yet.
-          detectedPrinters: countDetectedPrinters(agents, printers),
+          detectedPrinters: countDetectedPrinters(agents, printers, practiceOnly),
+          // Linked 'PrintQ Simulator' printers that do not count here (production only; 0 in development):
+          // "Simulator connected — practice only. Add a real printer to go live."
+          simulatorPrinters,
         },
         studentUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, '')}/s/${shop.slug}`,
       },
@@ -1367,11 +1376,14 @@ shopRouter.delete(
   '/agents/:id',
   requireShopOwner,
   asyncHandler(async (req, res) => {
+    const shopId = req.shopUser!.shopId;
     const agent = await prisma.agent.findFirst({
-      where: { id: param(req, 'id'), shopId: req.shopUser!.shopId },
+      where: { id: param(req, 'id'), shopId },
     });
     if (!agent) throw notFound();
     await prisma.agent.delete({ where: { id: agent.id } });
+    // A printer only this PC reached can no longer print: stop showing it online.
+    if (await markUnreachablePrintersOffline(shopId, agent.connectedPrinterIds)) await emitQueueUpdate(shopId);
     res.json({ ok: true });
   }),
 );

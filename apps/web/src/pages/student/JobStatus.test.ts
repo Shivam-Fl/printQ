@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyCheckInResult, counterUpiIntentUri, paymentSummary, type JobDetail } from './JobStatus.js';
+import { applyCheckInResult, counterUpiIntentUri, type JobDetail } from './JobStatus.js';
+import { nothingCharged, paymentSummary } from './jobPayment.js';
 
 describe('optimistic check-in', () => {
   it('shows the position and band from the check-in response immediately', () => {
@@ -39,6 +40,25 @@ describe('payment summary', () => {
     expect(summary.receiptAvailable).toBe(false);
   });
 
+  it('calls a cancelled pay-at-shop order "nothing was charged", not "Payment failed" (PSJ-1)', () => {
+    // POST /jobs/:id/cancel sets paymentStatus 'failed' on a counter_due order
+    expect(paymentSummary('failed', 'cancelled')).toMatchObject({
+      label: 'Cancelled — nothing was charged',
+      nothingCharged: true,
+      receiptAvailable: false,
+    });
+    expect(paymentSummary('counter_due', 'expired').label).toBe('Expired — nothing was charged');
+    // money that was taken and returned is still described as a refund
+    expect(paymentSummary('refunded', 'cancelled').label).toBe('Refunded');
+    expect(paymentSummary('failed', 'awaiting_arrival').label).toBe('Payment failed');
+  });
+
+  it('only says "nothing charged" in lists when the payment status is known', () => {
+    expect(nothingCharged('cancelled', 'failed')).toBe(true);
+    expect(nothingCharged('cancelled', undefined)).toBe(false);
+    expect(nothingCharged('cancelled', 'refunded')).toBe(false);
+    expect(nothingCharged('completed', 'paid')).toBe(false);
+  });
 });
 
 describe('counter UPI intent', () => {

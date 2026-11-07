@@ -52,6 +52,7 @@ import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
 import { isShopOperationalFrom } from '../shops/availability.js';
+import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
 import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
 
@@ -79,7 +80,7 @@ function loadFileForOrder(fileId: string, studentId: string) {
         include: {
           agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
           printers: {
-            select: { id: true, status: true, paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
+            select: { id: true, status: true, osPrinterName: true, paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
           },
         },
       },
@@ -108,7 +109,7 @@ jobsRouter.post(
     // Student-facing pricing is intentionally one final amount. The shop base,
     // platform markup and line-item split remain private server-side data.
     // Hardware capability is checked here, not first at the counter: the student is told now.
-    const unsupported = unsupportedSpecs(file.shop.printers, specs);
+    const unsupported = unsupportedSpecs(file.shop.printers.filter((printer) => canPrintForStudents(printer)), specs);
     res.json({
       quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise },
       pages: file.pages,
@@ -198,7 +199,7 @@ jobsRouter.post(
     assertFileCanBackNewJobFrom(file, fileJobs.some(isPrintedFileJob));
 
     if (!isShopOperationalFrom(file.shop)) throw conflict(SHOP_PAUSED_MESSAGE);
-    const unsupported = unsupportedSpecs(file.shop.printers, specs);
+    const unsupported = unsupportedSpecs(file.shop.printers.filter((printer) => canPrintForStudents(printer)), specs);
     if (unsupported.length > 0) throw conflict(unsupported.map((u) => u.message).join(' '));
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
@@ -277,6 +278,8 @@ jobsRouter.get(
       select: {
         id: true,
         status: true,
+        // My Jobs / Home say 'Nothing charged' for a cancelled or expired order that was never paid (PSJ-1).
+        paymentStatus: true,
         totalPaise: true,
         pagesPerCopy: true,
         specs: true,

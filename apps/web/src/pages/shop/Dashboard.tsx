@@ -135,7 +135,7 @@ export default function Dashboard() {
       const isNew = [...waitingIds].some((id) => !seenWaitingIds.current!.has(id));
       if (isNew) {
         playChime();
-        if (document.hidden) flashTitle('🔔 New print job — PrintQ');
+        if (document.hidden) flashTitle('🔔 New print job — PrintQs');
       }
     }
     seenWaitingIds.current = waitingIds;
@@ -307,7 +307,7 @@ export default function Dashboard() {
   async function toggleAvailability() {
     if (!setup) return;
     const next = !setup.acceptingOrders;
-    if (!next && !confirm('Pause new student orders? Existing prepared orders and counter codes will continue to work.')) return;
+    if (!next && !confirm('Pause new orders? Students will see your shop as closed. Orders already placed and their counter codes keep working.')) return;
     setError('');
     try {
       await api('/api/shop/availability', {
@@ -315,10 +315,10 @@ export default function Dashboard() {
         role: 'shop',
         body: { acceptingOrders: next },
       });
-      setMessage(next ? 'Storefront reopened' : 'New orders paused');
+      setMessage(next ? 'New orders resumed' : 'New orders paused');
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change storefront availability');
+      setError(err instanceof Error ? err.message : 'Could not change new orders. Please try again.');
     }
   }
 
@@ -357,13 +357,22 @@ export default function Dashboard() {
           <span><strong>{waiting.length - atCounter - comingUp}</strong> waiting</span>
           <span><strong>{prepared.length}</strong> prepared remotely</span>
           <span><strong>{inFlight.length}</strong> printing / pickup</span>
-          {setup && (
-            <button className={setup.acceptingOrders ? 'ghost small' : 'small'} onClick={toggleAvailability}>
-              {setup.acceptingOrders ? 'Pause new orders' : 'Reopen storefront'}
-            </button>
+          {/* while paused, "Resume new orders" sits in the paused notice below */}
+          {setup?.acceptingOrders && (
+            <button className="ghost small" onClick={toggleAvailability}>Pause new orders</button>
           )}
         </div>
       </header>
+
+      {setup && !setup.acceptingOrders && (
+        <div className="notice setup-notice" role="status">
+          <div>
+            <strong>New orders are paused</strong>
+            <p>Students see your shop as closed and can’t place new orders. Orders already placed and their counter codes still work.</p>
+          </div>
+          <button onClick={toggleAvailability}>Resume new orders</button>
+        </div>
+      )}
 
       {banner && (
         <div className="notice setup-notice">

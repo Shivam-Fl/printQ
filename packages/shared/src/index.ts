@@ -8,3 +8,4 @@ export * from './schemas.js';
 export * from './password.js';
 export * from './queueBands.js';
 export * from './capability.js';
+export * from './simulator.js';

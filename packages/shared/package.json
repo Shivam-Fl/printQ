@@ -13,6 +13,10 @@
     "./password": {
       "types": "./dist/password.d.ts",
       "import": "./dist/password.js"
+    },
+    "./simulator": {
+      "types": "./dist/simulator.d.ts",
+      "import": "./dist/simulator.js"
     }
   },
   "scripts": {

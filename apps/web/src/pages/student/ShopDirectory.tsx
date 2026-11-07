@@ -6,6 +6,7 @@ import { createLatestRequest, isAbortError } from '../../lib/latestRequest.js';
 import Topbar from '../../components/Topbar.js';
 import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
 import { useResource } from '../../lib/useResource.js';
+import { detectPhoneLike } from '../../lib/pcDownload.js';
 
 interface ShopRow {
   slug: string;
@@ -33,6 +34,8 @@ export default function ShopDirectory() {
   const [locating, setLocating] = useState(false);
   const [nearby, setNearby] = useState(false);
   const [locationMessage, setLocationMessage] = useState('');
+  // Phones: no autofocus, or the keyboard opens over the list before anyone asked to search.
+  const [focusSearch] = useState(() => !detectPhoneLike());
 
   // One guard for text search and "near me": whichever started last wins, and
   // an older response (or an aborted one) never overwrites it.
@@ -110,7 +113,7 @@ export default function ShopDirectory() {
     <main className="page">
       <Topbar />
       <div className="directory-heading"><span className="eyebrow-label">Print counters near you</span><h1>Find a shop</h1><p>Choose a connected shop now, or scan the QR displayed at your usual counter.</p></div>
-      <div className="search-field"><span aria-hidden>⌕</span><input type="search" placeholder="Search shop, area or campus" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus /></div>
+      <div className="search-field"><span aria-hidden>⌕</span><input type="search" aria-label="Search shops" placeholder="Search shop, area or campus" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus={focusSearch} /></div>
       <div className="row between" style={{ margin: '10px 0 18px' }}>
         <span className="dim">{locationMessage || 'Open shops are listed first.'}</span>
         <button className="ghost small" onClick={findNearby} disabled={locating}>⌖ Near me</button>
@@ -132,7 +135,7 @@ export default function ShopDirectory() {
                 {/* outside the 2-line address clamp, so a long address never hides it */}
                 {s.distanceM != null && <span className="directory-distance">{formatDistance(s.distanceM)}</span>}
               </div>
-              <span className={`status-dot${s.open ? ' done' : ''}`}>{s.open ? 'Open' : 'Offline'}</span>
+              <span className={`status-dot${s.open ? ' done' : ''}`}>{s.open ? 'Open' : 'Closed now'}</span>
             </Link>
           ))}
         </div>

@@ -1,5 +1,11 @@
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+// Type-only on purpose: the agent ships as a standalone npm tarball and an Electron
+// app without @printq/shared, so the name is copied here and the compiler checks it
+// still matches the shared constant the API uses to spot simulator-only shops.
+import type { SimulatorPrinterName } from '@printq/shared';
+
+export const SIMULATOR_PRINTER_NAME: SimulatorPrinterName = 'PrintQ Simulator';
 
 export interface DetectedPrinter {
   name: string;
@@ -32,7 +38,7 @@ function simulatedPrinters(): DetectedPrinter[] {
       // Fall through to the safe default; startup should remain easy.
     }
   }
-  return [{ name: 'PrintQ Simulator', paperSizes: ['A4', 'A3'] }];
+  return [{ name: SIMULATOR_PRINTER_NAME, paperSizes: ['A4', 'A3'] }];
 }
 
 export async function detectPrinters(): Promise<DetectedPrinter[]> {

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ShopLocationPicker from './ShopLocationPicker.js';
-import { autoSearchQuery, searchMessage, SEARCH_FAILED_MESSAGE } from '../lib/locationFlow.js';
+import {
+  autoSearchQuery, desktopLocationTip, deviceFixMessage, isPreciseFix, locationFailureLead, searchMessage, SEARCH_FAILED_MESSAGE,
+} from '../lib/locationFlow.js';
 import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, searchPlaces, type PlaceResult } from '../lib/geocode.js';
 
 interface Props {
@@ -24,6 +26,10 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [center, setCenter] = useState<{ latitude: number; longitude: number; zoom?: number } | null>(null);
+  /** A rough device fix (> 100 m): shown as a circle, never pinned by itself. */
+  const [area, setArea] = useState<{ latitude: number; longitude: number; radius: number } | null>(null);
+  /** The device gave no location; inside the desktop app we also point at the PC's Chrome. */
+  const [locationFailed, setLocationFailed] = useState(false);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -81,47 +87,48 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   };
 
   const detect = useCallback(() => {
+    setArea(null);
     if (!navigator.geolocation) {
+      setLocationFailed(true);
       if (autoSearchRef.current('This device cannot share its location, so we searched for your address. ')) return;
       setMessage('This device cannot share its location. Search for your address or click the map.');
       return;
     }
     setBusy(true);
     setMessage('');
+    setLocationFailed(false);
     const mine = ++detectSeq.current;
-    const applyPosition = (position: GeolocationPosition, approximate: boolean) => {
-      if (mine !== detectSeq.current) return; // cancelled
+    const applyPosition = (position: GeolocationPosition) => {
+      if (mine !== detectSeq.current) return; // cancelled, or the owner already placed the pin
       const lat = Number(position.coords.latitude.toFixed(6));
       const lng = Number(position.coords.longitude.toFixed(6));
       const accuracy = position.coords.accuracy;
-      const zoom = accuracy <= 250 ? 17 : accuracy <= 2_000 ? 14 : accuracy <= 10_000 ? 12 : 10;
-      setCenter({ latitude: lat, longitude: lng, zoom });
-      if (accuracy > 100 || approximate) {
-        setMessage(`Found your area (about ${Math.round(accuracy)} m accuracy). Click the map or drag the pin to the exact entrance.`);
-      } else {
-        setMessage(`Location found (about ${Math.round(accuracy)} m accuracy). Drag the pin if it is a little off.`);
-      }
-      // Even an approximate fix gives a starting pin to drag; the owner confirms it.
-      place(lat, lng);
       setBusy(false);
+      setMessage(deviceFixMessage(accuracy));
+      if (isPreciseFix(accuracy)) {
+        setCenter({ latitude: lat, longitude: lng, zoom: 17 });
+        place(lat, lng);
+        return;
+      }
+      // Too rough to pin by itself (students check in near the saved pin): show the area and let the
+      // owner tap the entrance. Save stays off until they do, because there is no pin yet.
+      setArea({ latitude: lat, longitude: lng, radius: Number.isFinite(accuracy) && accuracy > 0 ? accuracy : 1_000 });
     };
     const fallback = (denied: boolean) => {
       if (mine !== detectSeq.current) return;
       setBusy(false);
-      if (autoSearchRef.current(denied
-        ? 'Location access is off, so we searched for the address you typed. '
-        : 'Could not get a location, so we searched for the address you typed. ')) return;
-      setMessage(denied
-        ? 'Location access is off. Search your address below or click the map to drop the pin.'
-        : 'Could not get a location. Search your address below or click the map to drop the pin.');
+      setLocationFailed(true);
+      const lead = locationFailureLead(denied);
+      if (autoSearchRef.current(`${lead}, so we searched for the address you typed. `)) return;
+      setMessage(`${lead}. Search your address below or click the map to drop the pin.`);
     };
     navigator.geolocation.getCurrentPosition(
-      (position) => applyPosition(position, false),
+      applyPosition,
       (reason) => {
         if (mine !== detectSeq.current) return;
         if (reason.code === reason.PERMISSION_DENIED) { fallback(true); return; }
         navigator.geolocation.getCurrentPosition(
-          (position) => applyPosition(position, true),
+          applyPosition,
           () => fallback(false),
           { enableHighAccuracy: false, timeout: 6_000, maximumAge: 300_000 },
         );
@@ -134,6 +141,21 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     detectSeq.current += 1;
     setBusy(false);
     setMessage('Location lookup cancelled. Search your address below or click the map to drop the pin.');
+  }
+
+  /** The owner's own pin beats any device lookup still running: a late fix must never move it. */
+  function stopDetect() {
+    detectSeq.current += 1;
+    setBusy(false);
+    setArea(null);
+    setLocationFailed(false);
+  }
+
+  /** Map click or pin drag. */
+  function placeByHand(lat: number, lng: number) {
+    if (busy || area || locationFailed) setMessage('Pin placed. You can still drag it to your exact shop entrance.');
+    stopDetect();
+    place(lat, lng);
   }
 
   useEffect(() => {
@@ -155,7 +177,8 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     setSearching(true);
     setResults([]);
     try {
-      const found = await searchPlaces(text, hasPin ? { latitude, longitude } : null);
+      // Bias towards the pin, or towards the rough area the device found, so nearby matches come first.
+      const found = await searchPlaces(text, hasPin ? { latitude, longitude } : area);
       setResults(found);
       setMessage(intro + searchMessage(found));
       if (intro && found[0]) setCenter({ latitude: found[0].latitude, longitude: found[0].longitude, zoom: 16 });
@@ -176,7 +199,8 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   }
 
   function choose(result: PlaceResult) {
-    // A choice beats any lookup still in flight for an earlier pin.
+    // A choice beats any lookup still in flight for an earlier pin, and any device fix still coming.
+    stopDetect();
     reverseSeq.current += 1;
     if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     setCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 18 });
@@ -199,6 +223,9 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
         {busy && <button type="button" className="ghost" onClick={cancelDetect}>Cancel</button>}
       </div>
       {message && <p className="dim" style={{ margin: 0 }} role="status">{message}</p>}
+      {locationFailed && typeof window !== 'undefined' && window.printqsDesktop && (
+        <p className="dim" style={{ margin: 0 }}>{desktopLocationTip(window.location.host)}</p>
+      )}
       <form className="location-search" onSubmit={(event) => { event.preventDefault(); void search(); }}>
         <div className="field grow">
           <label htmlFor="location-search">Search an address <span className="optional-label">optional</span></label>
@@ -227,7 +254,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
           ))}
         </ul>
       )}
-      <ShopLocationPicker latitude={latitude} longitude={longitude} center={center} onChange={place} pinLabel={pinLabel} />
+      <ShopLocationPicker latitude={latitude} longitude={longitude} center={center} area={area} onChange={placeByHand} pinLabel={pinLabel} />
       <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
       {!hideAddress && (
         <div className="field">

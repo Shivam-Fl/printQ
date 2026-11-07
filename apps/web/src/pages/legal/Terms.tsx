@@ -2,6 +2,9 @@ import { Link } from 'react-router-dom';
 import LegalLayout from '../../components/LegalLayout.js';
 import { GOVERNING_LAW_CITY, LEGAL_ENTITY_DESCRIPTION, LEGAL_PRODUCT_NAME } from '../../lib/legal.js';
 
+/** The PrintQs fee added on top of the shop's price (the API's PLATFORM_MARKUP_BPS, 2500 = 25%). */
+export const PLATFORM_FEE_PERCENT = 25;
+
 export default function Terms() {
   return (
     <LegalLayout
@@ -14,8 +17,8 @@ export default function Terms() {
         <p>
           {LEGAL_PRODUCT_NAME}
           {LEGAL_ENTITY_DESCRIPTION ? ` (operated by ${LEGAL_ENTITY_DESCRIPTION})` : ''} lets you prepare a print order online and collect it from a
-          participating campus print shop. The printing is done by the shop, which is an independent business. By using the app you
-          accept these terms.
+          print shop that uses {LEGAL_PRODUCT_NAME}. Any print shop can register, on a campus or not. The printing is done by the shop,
+          which is an independent business. By using the app, or by registering a shop, you accept these terms.
         </p>
       </section>
 
@@ -23,6 +26,7 @@ export default function Terms() {
         <h2>Your account</h2>
         <ul>
           <li>Students sign in with a phone number you control. Keep your phone and codes to yourself.</li>
+          <li>Shop owners register with an email and password. Keep the password private.</li>
           <li>Give accurate details, and tell us if you think someone else is using your account.</li>
         </ul>
       </section>
@@ -31,6 +35,10 @@ export default function Terms() {
         <h2>How an order works</h2>
         <ul>
           <li>You upload a file, choose options and see a price. {LEGAL_PRODUCT_NAME} calculates the price from the shop's rates and your options.</li>
+          <li>
+            The price is the shop's rate plus a {LEGAL_PRODUCT_NAME} fee, currently {PLATFORM_FEE_PERCENT}% of the shop's rate. You see the
+            full price before you place the order, and you pay nothing more than that.
+          </li>
           <li>Your place in the live line starts only after you check in at the shop.</li>
           <li>You pay the shop at the counter, by cash or the shop's own UPI. {LEGAL_PRODUCT_NAME} does not take student payments online.</li>
           <li>If you miss your turn, the order can be moved back or cancelled.</li>
@@ -49,9 +57,16 @@ export default function Terms() {
       <section>
         <h2>Print shops</h2>
         <ul>
-          <li>Shops run their own counter, printers and rates, and are responsible for print quality and for handling documents properly.</li>
-          <li>{LEGAL_PRODUCT_NAME} charges shops a commission under the arrangement agreed with each shop. The commission rate is the one the shop owner supplied or agreed to.</li>
-          <li>Commission is totalled into a weekly statement. The shop owner pays it online from the shop dashboard within 7 days of the statement date.</li>
+          <li>Any print shop can register itself online. Shops run their own counter, printers and rates, and are responsible for print quality and for handling documents properly.</li>
+          <li>
+            Students pay the shop's rate plus a {LEGAL_PRODUCT_NAME} platform fee, currently {PLATFORM_FEE_PERCENT}% of the shop's rate.
+            Students see this full price before they order. By registering, the shop owner accepts this fee.
+          </li>
+          <li>
+            The shop collects the full price from the student at the counter. For each paid and printed order, the {LEGAL_PRODUCT_NAME} fee
+            is added to the shop's account. Fees are totalled into a weekly statement, which the owner pays from the shop dashboard
+            within 7 days of the statement date.
+          </li>
           <li>If a statement stays unpaid after its due date, {LEGAL_PRODUCT_NAME} may temporarily pause the shop for new orders. Orders already placed continue, and the shop reopens as soon as the unpaid amount is paid.</li>
           <li>Shops must not keep, copy or share a customer's document.</li>
         </ul>

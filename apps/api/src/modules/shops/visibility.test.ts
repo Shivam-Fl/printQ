@@ -74,3 +74,22 @@ describe('countDetectedPrinters', () => {
     expect(countDetectedPrinters(agents, [{ osPrinterName: 'HP LaserJet' }, { osPrinterName: null }])).toBe(1);
   });
 });
+
+describe('the PrintQ Simulator in production (PSO-1)', () => {
+  const agents = [{ status: 'online', connectedPrinterIds: ['sim', 'hp'] }];
+  const simulator = { id: 'sim', status: 'online', osPrinterName: 'PrintQ Simulator' };
+  const real = { id: 'hp', status: 'online', osPrinterName: 'HP LaserJet' };
+
+  it('does not count as an online printer path when practice only', () => {
+    expect(hasOnlinePrinterPath(agents, [simulator], true)).toBe(false);
+    expect(hasOnlinePrinterPath(agents, [simulator, real], true)).toBe(true);
+    expect(hasOnlinePrinterPath(agents, [simulator], false)).toBe(true);
+  });
+
+  it('is not offered as a printer found on the PC when practice only', () => {
+    const pc = [{ status: 'online', detectedPrinters: [{ name: 'PrintQ Simulator' }, { name: 'Canon G3000' }] }];
+    expect(countDetectedPrinters(pc, [], true)).toBe(1);
+    expect(countDetectedPrinters(pc, [], false)).toBe(2);
+  });
+});
+

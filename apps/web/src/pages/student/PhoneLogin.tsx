@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, setToken } from '../../api.js';
 import {
@@ -9,6 +9,7 @@ import {
   phoneHint,
   waitSecondsFromError,
 } from '../../lib/phone.js';
+import { caretAfterDigits, spacedMobile } from './phoneFormat.js';
 
 const firebasePhoneAuthEnabled = import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase'
   && Boolean(
@@ -43,8 +44,6 @@ function useCountdown(): [number, (seconds: number) => void] {
   return [left, setLeft];
 }
 
-const spaced = (national: string) => `${national.slice(0, 5)} ${national.slice(5)}`.trim();
-
 /** Passwordless login; first verification doubles as account creation. */
 export default function PhoneLogin({ onDone }: { onDone: () => void }) {
   const [phone, setPhone] = useState('');
@@ -57,6 +56,24 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
   const [sent, setSent] = useState<{ phone: string; at: number } | null>(null);
   const [resendIn, setResendIn] = useCountdown();
   const [verifyWait, setVerifyWait] = useCountdown();
+  const phoneInput = useRef<HTMLInputElement>(null);
+  /** Digits before the caret at the last edit, so re-spacing the number doesn't throw the caret to the end. */
+  const phoneCaretDigits = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const input = phoneInput.current;
+    const digits = phoneCaretDigits.current;
+    phoneCaretDigits.current = null;
+    if (!input || digits === null || document.activeElement !== input) return;
+    const at = caretAfterDigits(input.value, digits);
+    input.setSelectionRange(at, at);
+  }, [phone]);
+
+  function onPhoneChange(event: ChangeEvent<HTMLInputElement>) {
+    const { value, selectionStart } = event.target;
+    phoneCaretDigits.current = selectionStart === null ? null : value.slice(0, selectionStart).replace(/\D/g, '').length;
+    setPhone(normalizeIndianMobile(value));
+  }
 
   // A "please wait" error is stale once its countdown has run out.
   useEffect(() => {
@@ -216,11 +233,12 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
               <span>+91</span>
               <input
                 id="phone"
+                ref={phoneInput}
                 type="tel"
                 inputMode="numeric"
                 placeholder="98765 43210"
-                value={phone}
-                onChange={(event) => setPhone(normalizeIndianMobile(event.target.value))}
+                value={spacedMobile(phone)}
+                onChange={onPhoneChange}
                 onBlur={() => setPhoneFinished(true)}
                 onKeyDown={(event) => { if (event.key === 'Enter') setPhoneFinished(true); }}
                 autoComplete="tel"
@@ -247,7 +265,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
           </button>
           <p className="form-footnote">
             By continuing you agree to the <Link to="/terms">Terms</Link> and{' '}
-            <Link to="/privacy">Privacy Policy</Link>, and to receive login and order-status messages from PrintQ.
+            <Link to="/privacy">Privacy Policy</Link>, and to receive login and order-status messages from PrintQs.
           </p>
         </form>
       )}
@@ -257,7 +275,7 @@ export default function PhoneLogin({ onDone }: { onDone: () => void }) {
           <div>
             <span className="eyebrow-label">Verify number</span>
             <h2>Enter the six-digit code</h2>
-            <p className="dim">Sent to +91 {spaced(phone)}</p>
+            <p className="dim">Sent to +91 {spacedMobile(phone)}</p>
           </div>
           <input
             className="big-otp-input otp-boxes"

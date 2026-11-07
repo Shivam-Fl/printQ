@@ -23,6 +23,11 @@ import {
 } from './secureConfig.js';
 import { restartDelayMs } from './restartPolicy.js';
 import { shouldGrantPermission } from './desktopPermissions.js';
+import { WINDOWS_LOCATION_FEATURE, shouldRegisterAutostart, withEnabledFeature } from './desktopStartup.js';
+
+// Must run before app is ready: without it Chromium asks Google's location API (no key, 401)
+// and shop setup can never find the shop's location.
+app.commandLine.appendSwitch('enable-features', withEnabledFeature(app.commandLine.getSwitchValue('enable-features'), WINDOWS_LOCATION_FEATURE));
 
 interface AgentStatus {
   state: 'setup_required' | 'connecting' | 'online' | 'offline' | 'error';
@@ -296,7 +301,9 @@ else {
   app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus(); });
   app.whenReady().then(async () => {
     app.setAppUserModelId('com.printqs.shop');
-    app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
+    if (shouldRegisterAutostart(app.isPackaged, process.env)) {
+      app.setLoginItemSettings({ openAtLogin: true, openAsHidden: true });
+    }
     mainWindow = createWindow();
     tray = createTray();
     await startAgent();

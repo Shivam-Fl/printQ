@@ -6,6 +6,7 @@ import { param } from '../../lib/http.js';
 import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
+import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
 import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 import { publicCampusesCache, publicShopsCache, setPublicListCacheHeaders } from './cache.js';
@@ -64,7 +65,7 @@ publicRouter.get(
         acceptingOrders: true,
         feeBlockedAt: true,
         campus: { select: { name: true } },
-        printers: { select: { id: true, status: true } },
+        printers: { select: { id: true, status: true, osPrinterName: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
       },
     });
@@ -81,7 +82,7 @@ publicRouter.get(
           open: shop.acceptingOrders && !shop.feeBlockedAt
             && shop.latitude != null
             && shop.longitude != null
-            && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
+            && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id) && canPrintForStudents(printer)),
         };
       }),
     };
@@ -129,7 +130,7 @@ publicRouter.post(
         acceptingOrders: true,
         feeBlockedAt: true,
         campus: { select: { name: true } },
-        printers: { select: { id: true, status: true } },
+        printers: { select: { id: true, status: true, osPrinterName: true } },
         agents: { select: { status: true, connectedPrinterIds: true } },
       },
     });
@@ -147,7 +148,7 @@ publicRouter.post(
         open: shop.acceptingOrders && !shop.feeBlockedAt
           && shop.latitude != null
           && shop.longitude != null
-          && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id)),
+          && shop.printers.some((printer) => printer.status === 'online' && reachable.has(printer.id) && canPrintForStudents(printer)),
       };
     });
     res.json({ shops: nearbyShops({ latitude, longitude }, candidates, maxDistanceM) });
@@ -182,6 +183,7 @@ publicRouter.get(
             colorSupport: true,
             finishingOptions: true,
             status: true,
+            osPrinterName: true,
           },
         },
       },
@@ -189,7 +191,8 @@ publicRouter.get(
     if (!shop) throw notFound();
 
     const reachable = await reachablePrinterIds(shop.id);
-    const online = shop.printers.filter((p) => p.status === 'online' && reachable.has(p.id));
+    // in production the simulator never opens a shop or offers options (PSO-1)
+    const online = shop.printers.filter((p) => p.status === 'online' && reachable.has(p.id) && canPrintForStudents(p));
     const options = shopOptions(shop);
     // only surface options at least one online printer can actually produce
     const loadedPapers = new Set(online.flatMap((p) => p.paperSizesLoaded));
