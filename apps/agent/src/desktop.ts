@@ -22,6 +22,7 @@ import {
   type StoredDesktopConfig,
 } from './secureConfig.js';
 import { restartDelayMs } from './restartPolicy.js';
+import { shouldGrantPermission } from './desktopPermissions.js';
 
 interface AgentStatus {
   state: 'setup_required' | 'connecting' | 'online' | 'offline' | 'error';
@@ -160,6 +161,18 @@ function isAllowedUrl(raw: string): boolean {
   }
 }
 
+/** Permissions go to the production origins and the packaged page; localhost only in development builds. */
+function isPermissionOrigin(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'file:') return true;
+    if (url.origin === productionWebUrl || url.origin === 'https://www.printqs.com') return true;
+    return !app.isPackaged && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   if (!event.senderFrame || !isAllowedUrl(event.senderFrame.url)) {
     throw new Error('This action is only available inside the PrintQs Shop app.');
@@ -192,6 +205,14 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  // First-run setup asks the device for its location to pin the shop; trusted pages only.
+  // If the OS/Chromium cannot provide one, the web setup falls back to address search and the map.
+  window.webContents.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    callback(shouldGrantPermission(permission, details.requestingUrl, isPermissionOrigin));
+  });
+  window.webContents.session.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    shouldGrantPermission(permission, requestingOrigin, isPermissionOrigin));
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedUrl(url)) void window.loadURL(url);
@@ -228,6 +249,10 @@ function createTray(): Tray {
   value.setToolTip('PrintQs Shop');
   value.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open shop dashboard', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+    {
+      label: 'Finish shop setup in my browser',
+      click: () => { void dashboardUrl().then((base) => shell.openExternal(`${base}/dashboard/setup`)).catch(() => undefined); },
+    },
     { label: 'Restart printer engine', click: () => void startAgent({ resetRestartAttempts: true }) },
     { type: 'separator' },
     { label: 'Quit PrintQs Shop', click: () => { shuttingDown = true; app.quit(); } },

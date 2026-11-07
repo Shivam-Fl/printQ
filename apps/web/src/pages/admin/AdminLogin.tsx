@@ -75,7 +75,7 @@ export default function AdminLogin() {
         {recovery === 'login' && <form className="stack" onSubmit={submit}>
           <div className="field"><label htmlFor="admin-email">Email</label><input id="admin-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></div>
           <div className="field"><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></div>
-          {error && <p className="error">{error}</p>}
+          {error && <p className="error" role="alert">{error}</p>}
           <button className="button-link" disabled={busy}>{busy ? 'Signing in…' : 'Sign in securely'}</button>
         </form>
         }

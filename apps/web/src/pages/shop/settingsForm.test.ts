@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSettingsPatch,
+  colourPrinterWarning,
   coordinateWarning,
+  markupPercent,
+  studentPaise,
+  studentPayText,
   locationChangeNeedsReview,
   formatRupeesField,
   parseRupees,
@@ -134,15 +138,14 @@ describe('changed-fields-only settings save (OWN-1 / OWN-5, client)', () => {
 
 describe('coordinate sanity warning (OWN-10, UI only)', () => {
   it('warns for 0,0', () => expect(coordinateWarning(0, 0)).toMatch(/0, 0/));
-  it('warns when latitude/longitude look swapped for India', () => {
-    expect(coordinateWarning(77.209, 28.6139)).toMatch(/swapped/i);
-  });
   it('is quiet for a normal Indian location and for nulls', () => {
     expect(coordinateWarning(28.6139, 77.209)).toBeNull();
     expect(coordinateWarning(null, null)).toBeNull();
   });
-  it('warns for a location outside India', () => {
-    expect(coordinateWarning(51.5, -0.12)).toMatch(/outside India/);
+  it('accepts locations anywhere in the world (no India-only check)', () => {
+    expect(coordinateWarning(51.5, -0.12)).toBeNull();
+    expect(coordinateWarning(-33.87, 151.21)).toBeNull();
+    expect(coordinateWarning(40.7, -74)).toBeNull();
   });
 });
 
@@ -158,5 +161,50 @@ describe('locationChangeNeedsReview', () => {
   });
   it('is false when there was no pin before', () => {
     expect(locationChangeNeedsReview(at(null, null), at(28.6, 77.2))).toBe(false);
+  });
+});
+
+describe('what students pay (M5)', () => {
+  it('adds the PrintQs fee per page with the checkout rounding', () => {
+    expect(studentPaise(200, 2500)).toBe(250);
+    expect(studentPaise(1000, 2500)).toBe(1250);
+    expect(studentPaise(3000, 2500)).toBe(3750);
+    expect(studentPaise(199, 2500)).toBe(249); // 248.75 rounds like the API
+    expect(studentPaise(0, 2500)).toBe(0);
+    expect(studentPaise(200, 0)).toBe(200);
+  });
+
+  it('formats the fee percentage', () => {
+    expect(markupPercent(2500)).toBe('25%');
+    expect(markupPercent(1250)).toBe('12.5%');
+    expect(markupPercent(0)).toBe('0%');
+  });
+
+  it('labels a price field, and stays quiet when empty, invalid or the fee is unknown', () => {
+    expect(studentPayText('2.00', 2500)).toBe('Students pay ₹2.50');
+    expect(studentPayText('2.5', 2500)).toBe('Students pay ₹3.13');
+    expect(studentPayText('0', 2500)).toBe('Free for students');
+    expect(studentPayText('', 2500)).toBeNull();
+    expect(studentPayText('abc', 2500)).toBeNull();
+    expect(studentPayText('2.00', null)).toBeNull();
+    expect(studentPayText('2.00', 0)).toBeNull();
+  });
+});
+
+describe('colour printer warning', () => {
+  const linked = { osPrinterName: 'HP LaserJet' };
+  it('is quiet with no colour price, no printers, or an online linked colour printer', () => {
+    expect(colourPrinterWarning(false, [{ colorSupport: false, status: 'online', ...linked }])).toBeNull();
+    expect(colourPrinterWarning(true, [])).toBeNull();
+    expect(colourPrinterWarning(true, [{ colorSupport: true, status: 'online', ...linked }])).toBeNull();
+  });
+
+  it('says no printer is set as colour', () => {
+    expect(colourPrinterWarning(true, [{ colorSupport: false, status: 'online', ...linked }])).toMatch(/none of your printers is set as a colour printer/);
+  });
+
+  it('says why the colour printer cannot take orders', () => {
+    expect(colourPrinterWarning(true, [{ colorSupport: true, status: 'jammed', ...linked }])).toMatch(/offline or jammed/);
+    expect(colourPrinterWarning(true, [{ colorSupport: true, status: 'online', osPrinterName: null }])).toMatch(/not linked/);
   });
 });

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Prisma } from '@prisma/client';
 import argon2 from 'argon2';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
@@ -13,6 +14,7 @@ import { emailProvider } from '../../providers/email/index.js';
 import { logger } from '../../lib/logger.js';
 import { invalidatePublicCaches } from '../public/cache.js';
 import { isWithinIndia, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
+import { latestUnpublishReasons, SHOP_VIEWS, shopListState, shopViewWhere } from './shopViews.js';
 
 import { computeFeeAccount } from '../fees/account.js';
 import { UNPAID_STATEMENT_STATUSES } from '../fees/feeConfig.js';
@@ -36,40 +38,50 @@ const ADMIN_RESET_RESEND_MS = 60_000;
 const ADMIN_RESET_DAILY_LIMIT = 10;
 const ADMIN_RESET_MAX_ATTEMPTS = 5;
 const coordinatesSchema = z.object({
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
+// "IIT  Delhi " and "IIT Delhi" are the same campus.
+const campusNameSchema = z.string().trim().min(2).max(160).transform((value) => value.replace(/\s+/g, ' '));
 const campusInputSchema = z.object({
-  name: z.string().trim().min(2).max(160),
+  name: campusNameSchema,
   address: z.string().trim().min(3).max(300),
   slug: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
 }).and(coordinatesSchema);
 const campusPatchSchema = z.object({
-  name: z.string().trim().min(2).max(160).optional(),
+  name: campusNameSchema.optional(),
   address: z.string().trim().min(3).max(300).optional(),
   slug: z.string().trim().min(2).max(120).optional(),
   isActive: z.boolean().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
 }).superRefine((value, context) => {
   if ((value.latitude === undefined) !== (value.longitude === undefined)
     || (value.latitude != null) !== (value.longitude != null)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Latitude and longitude must be updated together' });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: 'Latitude and longitude must be updated together' });
   }
   if (typeof value.latitude === 'number' && typeof value.longitude === 'number' && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
+    context.addIssue({ code: 'custom', path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
   }
 });
 const reviewSchema = z.object({ notes: z.string().trim().max(2_000).optional() });
+// Optional; older clients send no body at all.
+const unpublishSchema = z.object({ reason: z.string().trim().max(500).optional() }).strict().optional();
+const SHOP_PAGE_SIZE = 50;
+const shopListQuerySchema = z.object({
+  // 'fees' feeds the Platform fees section: only shops that owe money or are blocked.
+  view: z.enum([...SHOP_VIEWS, 'fees']).default('all'),
+  cursor: z.string().min(1).max(64).optional(),
+});
 const liftBlockSchema = z.object({
   reason: z.string().trim().min(10).max(500),
   // The evaluator will not re-block before the override ends.
@@ -99,6 +111,18 @@ async function uniqueCampusSlug(preferred: string, excludeId?: string): Promise<
 
 function audit(adminId: string, action: string, subjectType: string, subjectId: string, metadata?: object) {
   return { adminId, action, subjectType, subjectId, metadata: metadata ?? undefined };
+}
+
+/** Exact duplicates (ignoring case) confuse owners picking a campus, so refuse them. */
+async function assertCampusNameFree(name: string, excludeId?: string): Promise<void> {
+  const clash = await prisma.campus.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' }, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+    select: { name: true, isActive: true },
+  });
+  if (!clash) return;
+  throw conflict(clash.isActive
+    ? `A campus called "${clash.name}" already exists.`
+    : `A campus called "${clash.name}" already exists but is inactive. Activate it instead of adding it again.`);
 }
 
 /** Separately authenticated platform-admin login. Shop credentials cannot reach this route. */
@@ -212,6 +236,19 @@ adminRouter.get(
   }),
 );
 
+/** Sign out: bumping sessionVersion makes requireAdmin refuse every token issued before now. */
+adminRouter.post(
+  '/auth/logout',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await prisma.adminUser.updateMany({
+      where: { id: req.admin!.id },
+      data: { sessionVersion: { increment: 1 } },
+    });
+    res.json({ ok: true });
+  }),
+);
+
 /** The canonical campus catalogue. Deactivation hides all related shops from public discovery. */
 adminRouter.get(
   '/campuses',
@@ -231,6 +268,7 @@ adminRouter.post(
   validateBody(campusInputSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof campusInputSchema>;
+    await assertCampusNameFree(body.name);
     const slug = await uniqueCampusSlug(body.slug ?? body.name);
     const campus = await prisma.$transaction(async (tx) => {
       const created = await tx.campus.create({
@@ -248,6 +286,7 @@ adminRouter.post(
       });
       return created;
     });
+    invalidatePublicCaches();
     res.status(201).json({ campus });
   }),
 );
@@ -261,6 +300,7 @@ adminRouter.patch(
     const body = req.body as z.infer<typeof campusPatchSchema>;
     const existing = await prisma.campus.findUnique({ where: { id } });
     if (!existing) throw notFound();
+    if (body.name !== undefined) await assertCampusNameFree(body.name, id);
     const slug = body.slug === undefined ? undefined : await uniqueCampusSlug(body.slug, id);
     const campus = await prisma.$transaction(async (tx) => {
       const updated = await tx.campus.update({
@@ -268,10 +308,12 @@ adminRouter.patch(
         data: { ...body, ...(slug ? { slug } : {}) },
       });
       await tx.adminAuditEvent.create({
-        data: audit(req.admin!.id, 'campus.updated', 'campus', id, { active: updated.isActive }),
+        data: audit(req.admin!.id, 'campus.updated', 'campus', id, { active: updated.isActive, changed: Object.keys(body) }),
       });
       return updated;
     });
+    // A rename or (de)activation changes public campus lists and hides/shows its shops.
+    invalidatePublicCaches();
     res.json({ campus });
   }),
 );
@@ -280,38 +322,85 @@ adminRouter.get(
   '/shops',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-    if (status && !['draft', 'submitted', 'verified', 'rejected'].includes(status)) throw badRequest('Unknown verification status');
-    const shops = await prisma.shop.findMany({
-      where: status ? { verificationStatus: status as 'draft' | 'submitted' | 'verified' | 'rejected' } : undefined,
-      orderBy: [{ verificationSubmittedAt: 'asc' }, { createdAt: 'asc' }],
-      take: 200,
-      select: {
-        id: true, slug: true, name: true, address: true, campusId: true,
-        verificationStatus: true, verificationSubmittedAt: true, verifiedAt: true, publishedAt: true,
-        campus: { select: { name: true, isActive: true } },
-        printers: { select: { id: true, status: true, osPrinterName: true } },
-        agents: { select: { id: true, status: true } },
-        feeBlockedAt: true, feeBlockReason: true, feeBlockOverrideUntil: true,
-      },
-    });
-    // One query for every listed shop's unpaid statements (no per-shop fan-out).
-    const unpaid = await prisma.shopCommissionStatement.findMany({
-      where: { shopId: { in: shops.map((s) => s.id) }, status: { in: UNPAID_STATEMENT_STATUSES }, amountDuePaise: { gt: 0 } },
-      select: { shopId: true, amountDuePaise: true, paidPaise: true, dueAt: true },
-    });
+    const parsed = shopListQuerySchema.safeParse(req.query);
+    if (!parsed.success) throw badRequest('Unknown shop filter');
+    const { view, cursor } = parsed.data;
+
+    let where: Prisma.ShopWhereInput;
+    if (view === 'fees') {
+      // Shops with money still owed on a statement (a small set) or a fee block.
+      const owing = await prisma.shopCommissionStatement.findMany({
+        where: { status: { in: UNPAID_STATEMENT_STATUSES }, amountDuePaise: { gt: 0 } },
+        select: { shopId: true, amountDuePaise: true, paidPaise: true },
+      });
+      const owingIds = [...new Set(owing.filter((s) => s.amountDuePaise > s.paidPaise).map((s) => s.shopId))];
+      where = { OR: [{ feeBlockedAt: { not: null } }, { id: { in: owingIds } }] };
+    } else {
+      where = shopViewWhere(view);
+    }
+
+    const [rows, all, live, hidden, setup] = await Promise.all([
+      prisma.shop.findMany({
+        where,
+        // Newest first so fresh self-registrations are always on page one.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: SHOP_PAGE_SIZE + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: {
+          id: true, slug: true, name: true, address: true, createdAt: true, autoLive: true,
+          verificationStatus: true, verifiedAt: true, publishedAt: true, latitude: true, longitude: true,
+          campus: { select: { name: true, isActive: true } },
+          users: { where: { role: 'owner' }, orderBy: { createdAt: 'asc' }, take: 1, select: { name: true, email: true } },
+          printers: { select: { osPrinterName: true } },
+          agents: { select: { status: true, lastHeartbeatAt: true } },
+          feeBlockedAt: true, feeBlockReason: true, feeBlockOverrideUntil: true,
+        },
+      }),
+      prisma.shop.count(),
+      prisma.shop.count({ where: shopViewWhere('live') }),
+      prisma.shop.count({ where: shopViewWhere('hidden') }),
+      prisma.shop.count({ where: shopViewWhere('setup') }),
+    ]);
+    const shops = rows.slice(0, SHOP_PAGE_SIZE);
+    const nextCursor = rows.length > SHOP_PAGE_SIZE ? shops[shops.length - 1]!.id : null;
+
+    // One query each for the listed shops' unpaid statements and unpublish reasons (no per-shop fan-out).
+    const [unpaid, reasons] = await Promise.all([
+      prisma.shopCommissionStatement.findMany({
+        where: { shopId: { in: shops.map((s) => s.id) }, status: { in: UNPAID_STATEMENT_STATUSES }, amountDuePaise: { gt: 0 } },
+        select: { shopId: true, amountDuePaise: true, paidPaise: true, dueAt: true },
+      }),
+      latestUnpublishReasons(shops.filter((s) => s.verificationStatus === 'verified' && !s.publishedAt).map((s) => s.id)),
+    ]);
     const now = new Date();
     res.json({
-      shops: shops.map((shop) => {
+      counts: { all, live, hidden, setup },
+      nextCursor,
+      shops: shops.map(({ users, printers, agents, latitude, longitude, ...shop }) => {
         const mine = unpaid.filter((s) => s.shopId === shop.id && s.amountDuePaise > s.paidPaise);
         const overdue = mine.filter((s) => s.dueAt && s.dueAt <= now);
+        const heartbeats = agents.map((a) => a.lastHeartbeatAt?.getTime() ?? 0).filter(Boolean);
+        let feeState: 'blocked' | 'overdue' | 'due' | 'paid_up' = 'paid_up';
+        if (shop.feeBlockedAt) feeState = 'blocked';
+        else if (overdue.length) feeState = 'overdue';
+        else if (mine.length) feeState = 'due';
         return {
           ...shop,
+          state: shopListState(shop),
+          hiddenReason: reasons.get(shop.id) ?? null,
+          owner: users[0] ?? null,
+          setup: {
+            location: latitude != null && longitude != null,
+            printerLinked: printers.some((p) => p.osPrinterName),
+            pcOnline: agents.some((a) => a.status === 'online'),
+            pcCount: agents.length,
+          },
+          lastHeartbeatAt: heartbeats.length ? new Date(Math.max(...heartbeats)) : null,
           fees: {
             statementsDuePaise: mine.reduce((sum, s) => sum + s.amountDuePaise - s.paidPaise, 0),
             overdueStatements: overdue.length,
             overduePaise: overdue.reduce((sum, s) => sum + s.amountDuePaise - s.paidPaise, 0),
-            state: shop.feeBlockedAt ? 'blocked' : overdue.length ? 'overdue' : mine.length ? 'due' : 'paid_up',
+            state: feeState,
           },
         };
       }),
@@ -395,8 +484,8 @@ adminRouter.post(
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
     if (shop.verificationStatus !== 'submitted') throw conflict('Only submitted shops can be verified');
-    if (!shop.campus?.isActive || shop.latitude == null || shop.longitude == null) {
-      throw conflict('The shop no longer has an active campus and complete location');
+    if ((shop.campus && !shop.campus.isActive) || shop.latitude == null || shop.longitude == null) {
+      throw conflict('The shop is on an inactive campus or has no complete location');
     }
     const verified = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
@@ -442,8 +531,8 @@ adminRouter.post(
     const id = param(req, 'id');
     const shop = await prisma.shop.findUnique({ where: { id }, include: { campus: true } });
     if (!shop) throw notFound();
-    if (shop.verificationStatus !== 'verified' || !shop.campus?.isActive) {
-      throw conflict('Only verified shops on active campuses can be published');
+    if (shop.verificationStatus !== 'verified' || (shop.campus && !shop.campus.isActive)) {
+      throw conflict('Only verified shops that are not on an inactive campus can be published');
     }
     const published = await prisma.$transaction(async (tx) => {
       const updated = await tx.shop.update({
@@ -462,8 +551,11 @@ adminRouter.post(
 adminRouter.post(
   '/shops/:id/unpublish',
   requireAdmin,
+  validateBody(unpublishSchema),
   asyncHandler(async (req, res) => {
     const id = param(req, 'id');
+    // The optional reason lives in the audit event (metadata.reason); see latestUnpublishReasons.
+    const reason = (req.body as z.infer<typeof unpublishSchema>)?.reason || undefined;
     const shop = await prisma.shop.findUnique({ where: { id }, select: { id: true } });
     if (!shop) throw notFound();
     const unpublished = await prisma.$transaction(async (tx) => {
@@ -472,7 +564,7 @@ adminRouter.post(
         data: { publishedAt: null },
         select: { id: true, verificationStatus: true, publishedAt: true },
       });
-      await tx.adminAuditEvent.create({ data: audit(req.admin!.id, 'shop.unpublished', 'shop', id) });
+      await tx.adminAuditEvent.create({ data: audit(req.admin!.id, 'shop.unpublished', 'shop', id, reason ? { reason } : undefined) });
       return updated;
     });
     invalidatePublicCaches();
@@ -578,6 +670,15 @@ adminRouter.get(
         admin: { select: { id: true, name: true } },
       },
     });
-    res.json({ events });
+    // Name the shop/campus each entry is about, so the trail is readable.
+    const idsOf = (type: string) => [...new Set(events.filter((e) => e.subjectType === type).map((e) => e.subjectId))];
+    const shopIds = idsOf('shop');
+    const campusIds = idsOf('campus');
+    const [shops, campuses] = await Promise.all([
+      shopIds.length ? prisma.shop.findMany({ where: { id: { in: shopIds } }, select: { id: true, name: true } }) : [],
+      campusIds.length ? prisma.campus.findMany({ where: { id: { in: campusIds } }, select: { id: true, name: true } }) : [],
+    ]);
+    const names = new Map([...shops, ...campuses].map((s) => [s.id, s.name]));
+    res.json({ events: events.map((e) => ({ ...e, subjectName: names.get(e.subjectId) ?? null })) });
   }),
 );

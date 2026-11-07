@@ -7,19 +7,23 @@ interface ShopLocationPickerProps {
   longitude: number | null;
   center: { latitude: number; longitude: number; zoom?: number } | null;
   onChange: (latitude: number, longitude: number) => void;
+  /** What the map calls the pinned spot (reverse lookup), shown so a mismatch with the typed address is visible. */
+  pinLabel?: string | null;
 }
 
-const INDIA_CENTER: [number, number] = [22.9734, 78.6569];
+/** No country assumed: until a pin or detected area exists, show the whole world. */
+const WORLD_CENTER: [number, number] = [20, 0];
 
 export default function ShopLocationPicker({
   latitude,
   longitude,
   center,
   onChange,
+  pinLabel,
 }: ShopLocationPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.CircleMarker | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
   const onChangeRef = useRef(onChange);
 
   useEffect(() => {
@@ -33,11 +37,11 @@ export default function ShopLocationPicker({
       ? [latitude, longitude]
       : center
         ? [center.latitude, center.longitude]
-        : INDIA_CENTER;
+        : WORLD_CENTER;
     const map = L.map(containerRef.current, {
       zoomControl: true,
       attributionControl: true,
-    }).setView(initial, latitude != null ? 18 : center?.zoom ?? 16);
+    }).setView(initial, latitude != null ? 18 : center ? center.zoom ?? 16 : 2);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -77,13 +81,22 @@ export default function ShopLocationPicker({
     if (markerRef.current) {
       markerRef.current.setLatLng(position);
     } else {
-      markerRef.current = L.circleMarker(position, {
-        radius: 9,
-        color: '#ffffff',
-        weight: 3,
-        fillColor: '#2257d9',
-        fillOpacity: 1,
+      const marker = L.marker(position, {
+        draggable: true,
+        keyboard: true,
+        title: 'Shop entrance pin. Drag to move it.',
+        icon: L.divIcon({
+          className: 'location-pin-icon',
+          html: '<span></span>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        }),
       }).addTo(map);
+      marker.on('dragend', () => {
+        const at = marker.getLatLng();
+        onChangeRef.current(Number(at.lat.toFixed(6)), Number(at.lng.toFixed(6)));
+      });
+      markerRef.current = marker;
     }
     map.panTo(position);
   }, [latitude, longitude]);
@@ -92,15 +105,15 @@ export default function ShopLocationPicker({
     <div className="location-picker">
       <div className="location-map-wrap">
         <div className="location-map" ref={containerRef} aria-label="Map for selecting the exact shop entrance" />
-        <div className="location-map-hint">Click the exact shop entrance</div>
+        <div className="location-map-hint">Tap or click the map, or drag the pin to the exact entrance</div>
       </div>
       <div className="location-pin-readout">
         <div>
           <strong>{latitude != null && longitude != null ? 'Entrance pin selected' : 'No entrance pin yet'}</strong>
-          <span>
+          <span title={latitude != null && longitude != null ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : undefined}>
             {latitude != null && longitude != null
-              ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-              : 'Zoom in and click the exact counter or entrance.'}
+              ? pinLabel ? `Near ${pinLabel}` : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+              : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
           </span>
         </div>
         <span className={`stamp ${latitude != null && longitude != null ? 'green' : 'yellow'}`}>

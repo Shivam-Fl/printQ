@@ -111,7 +111,7 @@ feesRouter.post(
 feesRouter.post(
   '/mock-pay',
   requireShopOwner,
-  validateBody(z.object({ paymentId: z.string().uuid() }).strict()),
+  validateBody(z.object({ paymentId: z.uuid() }).strict()),
   asyncHandler(async (req, res) => {
     const outcome = await mockPayFeeOrder(req.shopUser!.shopId, (req.body as { paymentId: string }).paymentId);
     res.json({ outcome });
@@ -160,7 +160,7 @@ feesRouter.get(
 );
 
 const pushSchema = z.object({
-  endpoint: z.string().url().max(1000),
+  endpoint: z.url().max(1000),
   keys: z.object({ p256dh: z.string().min(1).max(300), auth: z.string().min(1).max(100) }),
 }).strict();
 
@@ -183,7 +183,7 @@ feesRouter.post(
 feesRouter.post(
   '/push/unsubscribe',
   requireShopOwner,
-  validateBody(z.object({ endpoint: z.string().url().max(1000) }).strict()),
+  validateBody(z.object({ endpoint: z.url().max(1000) }).strict()),
   asyncHandler(async (req, res) => {
     const { endpoint } = req.body as { endpoint: string };
     await prisma.shopPushSubscription.deleteMany({ where: { endpoint, shopUserId: req.shopUser!.id } });

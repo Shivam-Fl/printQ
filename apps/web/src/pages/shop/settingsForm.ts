@@ -1,5 +1,7 @@
 /** Pure helpers behind the shop Settings form (kept out of the component so they are unit-tested). */
 
+import { applyPlatformMarkup } from '@printq/shared';
+
 export interface PaperDraft {
   id: string;
   label: string;
@@ -78,6 +80,62 @@ export function priceText(paise: number | null): string {
   return paise == null ? '' : (paise / 100).toFixed(2);
 }
 
+// ---- what students pay (M5) -----------------------------------------------
+
+/**
+ * The student's price for one page or one binding the shop prices at basePaise.
+ * Runs the same applyPlatformMarkup the API uses at checkout, so the preview
+ * always matches the real quote (rounding included).
+ */
+export function studentPaise(basePaise: number, markupBps: number): number {
+  return applyPlatformMarkup({
+    paperLabel: '',
+    pagesPerCopy: 1,
+    copies: 1,
+    perPagePaise: basePaise,
+    pagesTotalPaise: basePaise,
+    bindingLabel: null,
+    bindingPaise: 0,
+    discountPaise: 0,
+    totalPaise: basePaise,
+  }, markupBps).perPagePaise;
+}
+
+/** 2500 -> "25%", 1250 -> "12.5%". */
+export function markupPercent(markupBps: number): string {
+  return `${Number((markupBps / 100).toFixed(2))}%`;
+}
+
+/** "Students pay ₹2.50" for a price field; null while the field is empty or invalid, or when there is no fee. */
+export function studentPayText(text: string, markupBps: number | null): string | null {
+  if (!markupBps) return null;
+  const parsed = parseRupees(text, { required: false });
+  if (parsed.error || parsed.paise == null) return null;
+  if (parsed.paise === 0) return 'Free for students';
+  return `Students pay ₹${(studentPaise(parsed.paise, markupBps) / 100).toFixed(2)}`;
+}
+
+/**
+ * A gentle note when colour prices are on the menu but no printer can take a
+ * colour order (students then only see black & white). Null when all is well,
+ * or when there are no printers yet (setup already asks for one).
+ */
+export function colourPrinterWarning(
+  hasColourPrice: boolean,
+  printers: { colorSupport: boolean; status: string; osPrinterName: string | null }[],
+): string | null {
+  if (!hasColourPrice || printers.length === 0) return null;
+  const colour = printers.filter((printer) => printer.colorSupport);
+  const online = colour.filter((printer) => printer.status === 'online');
+  if (online.some((printer) => printer.osPrinterName)) return null;
+  if (colour.length === 0) {
+    return 'Students can’t choose colour yet: none of your printers is set as a colour printer. If one prints colour, open Printers and tap Edit.';
+  }
+  return online.length > 0
+    ? 'Students can’t choose colour yet: your colour printer is not linked to the counter PC.'
+    : 'Students can’t choose colour right now: your colour printer is marked offline or jammed.';
+}
+
 // ---- changed-fields-only save (OWN-1 / OWN-5) ----------------------------
 
 const SCALAR_KEYS = [
@@ -131,20 +189,13 @@ export function buildSettingsPatch(
 // ---- coordinate sanity (OWN-10, warning only) ----------------------------
 
 /**
- * A soft hint for obviously wrong pins. Never blocks a save: the product is not
- * India-only, so only exact 0,0 (also rejected server-side) and the classic
- * lat/lng swap for an Indian shop (lat 68-98, lng 6-36) are called out.
+ * A soft hint for obviously wrong pins. Never blocks a save: the product works
+ * worldwide, so only exact 0,0 (also rejected server-side) is called out.
  */
 export function coordinateWarning(latitude: number | null, longitude: number | null): string | null {
   if (latitude == null || longitude == null) return null;
   if (latitude === 0 && longitude === 0) {
     return 'Coordinates 0, 0 are in the ocean off Africa, not a shop. Choose the entrance on the map.';
-  }
-  if (latitude >= 68 && latitude <= 98 && longitude >= 6 && longitude <= 36) {
-    return 'These look swapped — in India, latitude is about 8–35 and longitude about 68–98. Check the two boxes.';
-  }
-  if (latitude < 6 || latitude > 37.5 || longitude < 68 || longitude > 98) {
-    return 'That location is outside India — check latitude/longitude';
   }
   return null;
 }

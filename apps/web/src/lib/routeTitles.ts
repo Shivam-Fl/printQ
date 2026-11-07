@@ -24,6 +24,7 @@ const EXACT: Record<string, string> = {
   '/refunds': 'Refund policy',
   '/support': 'Help and support',
   '/contact': 'Help and support',
+  '/pc': 'Install PrintQs on your shop computer',
 };
 
 /** Document title for a route; unknown paths get the 404 title. */

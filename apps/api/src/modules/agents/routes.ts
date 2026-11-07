@@ -11,6 +11,7 @@ import { applyTransition } from '../jobs/transitions.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
 import { notifyShopReopened } from '../shops/availability.js';
+import { publishIfReady } from '../shops/autoLive.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
 import { env } from '../../config/env.js';
@@ -41,9 +42,9 @@ const heartbeatSchema = z
   .object({
     // Ids of the jobs this process is working on right now (claimed, not yet
     // handed to the spooler). Omitted by older agents.
-    inFlightJobIds: z.array(z.string().uuid()).max(100).optional(),
+    inFlightJobIds: z.array(z.uuid()).max(100).optional(),
   })
-  .passthrough()
+  .loose()
   .default({});
 
 /** Liveness ping — the dashboard shows agents red after missed heartbeats. */
@@ -63,13 +64,15 @@ agentRouter.post(
     });
     // A restarted process keeps the agent id: recover the jobs its predecessor held.
     if (agent.sessionId) await reconcileAgentSession(agent, agent.sessionId, inFlightJobIds);
+    // an agent coming online may be the last thing a new shop was waiting for
+    await publishIfReady(agent.shopId).catch(() => false);
     res.json({ ok: true });
   }),
 );
 
 const detectedPrintersSchema = z.object({
   printers: z
-    .array(z.object({ name: z.string().trim().min(1).max(200), paperSizes: z.array(z.string()).default([]) }))
+    .array(z.object({ name: z.string().trim().min(1).max(200), paperSizes: z.array(z.string()).max(50).default([]) }))
     .max(50),
 });
 
@@ -111,6 +114,7 @@ agentRouter.post(
     await advanceShopQueues(agent.shopId);
     await emitQueueUpdate(agent.shopId);
     await notifyShopReopened(agent.shopId);
+    await publishIfReady(agent.shopId).catch(() => false);
     publishEvent(`shop:${agent.shopId}`, 'agent:printers_detected', { agentId: agent.id, printers });
     res.json({ ok: true });
   }),
@@ -231,8 +235,8 @@ const completePrintSchema = z.object({
 });
 
 const printerTestResultSchema = z.object({
-  testId: z.string().uuid(),
-  printerId: z.string().uuid(),
+  testId: z.uuid(),
+  printerId: z.uuid(),
   status: z.enum(['spool_accepted', 'failed']),
   error: z.string().trim().max(200).optional(),
 });

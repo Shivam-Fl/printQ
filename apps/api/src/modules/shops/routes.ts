@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -14,10 +14,11 @@ import {
   type PriceBreakdown,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
+import { asyncHandler, badRequest, conflict, forbidden, HttpError, notFound, tooMany } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
+import { publishIfReady } from './autoLive.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
-import { counterReleaseLimiter } from '../../middleware/rateLimit.js';
+import { counterReleaseLimiter, makeGeneralLimiter } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validate.js';
 import { generateAgentToken } from '../../lib/otp.js';
 import { shopOptions } from '../../lib/shopOptions.js';
@@ -43,10 +44,12 @@ import type { Job } from '@prisma/client';
 import { publishEvent } from '../../realtime/events.js';
 import { connectPrinterToDetectingAgents, notifyShopReopened } from './availability.js';
 import { getCommissionOverview } from '../commission/service.js';
-import { distanceMeters, isWithinIndia, MATERIAL_MOVE_M, OUTSIDE_INDIA_MESSAGE } from '../../lib/geo.js';
+import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
-import { searchIndianLocations } from '../../providers/geocoding/index.js';
+import { reverseLocation, searchLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
+import { csvCell } from './csv.js';
+import { countDetectedPrinters, hasOnlinePrinterPath, shopVisibility, VISIBILITY_ADMIN_ACTIONS } from './visibility.js';
 
 export const shopRouter = Router();
 
@@ -68,6 +71,7 @@ shopRouter.get(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
@@ -94,22 +98,72 @@ shopRouter.get(
     res.json({
       shop: { ...shop, printOptions: shopOptions(shop) },
       user: { role: req.shopUser!.role },
+      // PrintQs fee added on top of the shop's base prices (basis points, 2500 = 25%).
+      platformMarkupBps: env.PLATFORM_MARKUP_BPS,
     });
   }),
 );
 
-/** One-time shop setup search; server-side so provider throttling/caching is centralized. */
+// Public on purpose: the sign-up form prefills the address from the pin before an
+// account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
+const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
+/**
+ * The provider queue is shared and small (1 req/s, a few waiting). One client may
+ * hold at most 2 lookups in it at a time, so a single flooder cannot fill it and
+ * make everyone else's search come back empty. Legit use (submit-only search +
+ * a debounced pin lookup) never has more than 2 in flight.
+ */
+const GEOCODE_IN_FLIGHT_PER_CLIENT = 2;
+const geocodeInFlight = new Map<string, number>();
+const geocodeFairShare: RequestHandler = (req, res, next) => {
+  const key = req.ip ?? 'unknown';
+  const running = geocodeInFlight.get(key) ?? 0;
+  if (running >= GEOCODE_IN_FLIGHT_PER_CLIENT) return next(tooMany('Still looking up your last search. Try again in a moment.', 2));
+  geocodeInFlight.set(key, running + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const left = (geocodeInFlight.get(key) ?? 1) - 1;
+    if (left > 0) geocodeInFlight.set(key, left);
+    else geocodeInFlight.delete(key);
+  };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+};
+const optionalCoord = (v: unknown, max: number): number | undefined => {
+  if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d+)?$/.test(v.trim())) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && Math.abs(n) <= max ? n : undefined;
+};
+
+/** Address / shop / POI search, worldwide, optionally biased towards lat,lng. Provider failure gives an empty list. */
+const geocodeSearch = asyncHandler(async (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
+  if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
+  const lat = optionalCoord(req.query.lat, 90);
+  const lng = optionalCoord(req.query.lng, 180);
+  const bias = lat !== undefined && lng !== undefined ? { latitude: lat, longitude: lng } : undefined;
+  res.json({ results: await searchLocations(query, bias) });
+});
+
+// Public on purpose (no sign-in): the register page searches before the shop account exists.
+shopRouter.get('/geocode', geocodeLimiter, geocodeFairShare, geocodeSearch);
+// Deprecated alias kept so shipped clients keep working.
+shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeFairShare, geocodeSearch);
+
+/** Pin to address label for prefilling the address. label is null when unknown or the provider is down. */
+// Public on purpose (no sign-in), like /geocode: register fills the address from the pin.
 shopRouter.get(
-  '/location-search',
-  requireShopOwner,
+  '/geocode/reverse',
+  geocodeLimiter,
+  geocodeFairShare,
   asyncHandler(async (req, res) => {
-    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 180) : '';
-    if (query.length < 3) throw badRequest('Enter at least 3 characters to search');
-    try {
-      res.json({ results: await searchIndianLocations(query) });
-    } catch {
-      throw new HttpError(503, 'Address search is temporarily unavailable. Use device location or manual coordinates.');
-    }
+    const lat = optionalCoord(req.query.lat, 90);
+    const lng = optionalCoord(req.query.lng, 180);
+    if (lat === undefined || lng === undefined || (lat === 0 && lng === 0)) throw badRequest('A valid lat and lng are required');
+    res.json({ label: await reverseLocation(lat, lng) });
   }),
 );
 
@@ -120,11 +174,24 @@ shopRouter.get(
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const [shop, printers, agents] = await Promise.all([
-      prisma.shop.findUnique({ where: { id: shopId } }),
+      prisma.shop.findUnique({ where: { id: shopId }, include: { campus: { select: { isActive: true } } } }),
       prisma.printer.findMany({ where: { shopId } }),
       prisma.agent.findMany({ where: { shopId } }),
     ]);
     if (!shop) throw notFound();
+    // New (autoLive) shops go live by themselves once everything is in place.
+    if (await publishIfReady(shopId)) {
+      const fresh = await prisma.shop.findUnique({ where: { id: shopId } });
+      if (fresh) Object.assign(shop, fresh);
+    }
+    // Only an unpublished verified or rejected shop needs the admin trail (was it hidden on purpose?).
+    const lastAdminAction = shop.verificationStatus === 'rejected' || (shop.verificationStatus === 'verified' && !shop.publishedAt)
+      ? await prisma.adminAuditEvent.findFirst({
+          where: { subjectType: 'shop', subjectId: shopId, action: { in: VISIBILITY_ADMIN_ACTIONS } },
+          orderBy: { createdAt: 'desc' },
+          select: { action: true, metadata: true },
+        })
+      : null;
 
     const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
     const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
@@ -138,7 +205,7 @@ shopRouter.get(
 
     res.json({
       setup: {
-        profileReady: Boolean(shop.name.trim() && shop.address.trim() && shop.campusId),
+        profileReady: Boolean(shop.name.trim() && shop.address.trim()),
         locationReady,
         pricingReady,
         printerReady: readyPrinters.length > 0,
@@ -150,6 +217,7 @@ shopRouter.get(
           && shop.verificationStatus === 'verified'
           && shop.publishedAt != null,
         verification: {
+          autoLive: shop.autoLive,
           status: shop.verificationStatus,
           submittedAt: shop.verificationSubmittedAt,
           verifiedAt: shop.verifiedAt,
@@ -158,17 +226,21 @@ shopRouter.get(
             && pricingReady
             && readyPrinters.length > 0
             && agentReady
-            && Boolean(shop.campusId)
             && shop.verificationStatus !== 'submitted'
             && shop.verificationStatus !== 'verified',
         },
         acceptingOrders: shop.acceptingOrders,
+        // What students see right now; separate from "is setup complete" (ready).
+        visibility: shopVisibility({ ...shop, printerPathOnline: hasOnlinePrinterPath(agents, printers), lastAdminAction }),
+        platformMarkupBps: env.PLATFORM_MARKUP_BPS,
         counts: {
           printers: printers.length,
           linkedPrinters: linkedPrinters.length,
           onlinePrinters: readyPrinters.length,
           agents: agents.length,
           onlineAgents: onlineAgents.length,
+          // OS printers an online PC can see that are not added as a PrintQs printer yet.
+          detectedPrinters: countDetectedPrinters(agents, printers),
         },
         studentUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, '')}/s/${shop.slug}`,
       },
@@ -180,9 +252,9 @@ const shopPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   address: z.string().trim().min(1).max(300).optional(),
   campusName: z.string().trim().max(120).nullable().optional(),
-  campusId: z.string().uuid().nullable().optional(),
-  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
-  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+  campusId: z.uuid().nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
   checkInRadiusM: z.union([z.literal(20), z.literal(50), z.literal(100), z.literal(200)]).optional(),
   // How many students the counter serves at once (drives queue bands).
   counterCapacity: z.number().int().min(COUNTER_CAPACITY_MIN).max(COUNTER_CAPACITY_MAX).optional(),
@@ -197,15 +269,11 @@ const shopPatchSchema = z.object({
   /** printOptionsVersion the client last loaded; a stale one cannot overwrite a newer menu. */
   expectedPrintOptionsVersion: z.number().int().min(0).optional(),
 }).superRefine((value, context) => {
-  if (typeof value.latitude === 'number' && typeof value.longitude === 'number'
-    && !(value.latitude === 0 && value.longitude === 0)
-    && !isWithinIndia(value.latitude, value.longitude)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: OUTSIDE_INDIA_MESSAGE });
-  }
+  // Worldwide: no country restriction on the pin (range is already enforced above).
   if (value.latitude === 0 && value.longitude === 0) {
     // "Null Island": the classic unset/geolocation-failed default, never a real counter.
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Coordinates 0, 0 are not a real location — choose the shop entrance on the map',
     });
@@ -214,7 +282,7 @@ const shopPatchSchema = z.object({
   const longitudeProvided = value.longitude !== undefined;
   if (latitudeProvided !== longitudeProvided || (latitudeProvided && ((value.latitude == null) !== (value.longitude == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['latitude'],
       message: 'Latitude and longitude must be updated together',
     });
@@ -223,7 +291,7 @@ const shopPatchSchema = z.object({
   const payeeProvided = value.counterUpiPayeeName !== undefined;
   if (vpaProvided !== payeeProvided || (vpaProvided && ((value.counterUpiVpa == null) !== (value.counterUpiPayeeName == null)))) {
     context.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['counterUpiVpa'],
       message: 'Merchant UPI VPA and payee name must be updated together',
     });
@@ -256,6 +324,7 @@ shopRouter.patch(
         address: true,
         campusId: true,
         campusName: true,
+        autoLive: true,
         latitude: true,
         longitude: true,
         printOptions: true,
@@ -288,7 +357,8 @@ shopRouter.patch(
         delete body.longitude;
       }
     }
-    const verificationReset = nameChanged || addressChanged || campusChanged || locationChanged;
+    // Auto-live shops stay live through edits; manually verified shops are re-reviewed as before.
+    const verificationReset = !current.autoLive && (nameChanged || addressChanged || campusChanged || locationChanged);
 
     let menuChanged = false;
     if ('printOptions' in body) {
@@ -335,6 +405,8 @@ shopRouter.patch(
         'SETTINGS_CHANGED_ELSEWHERE',
       );
     }
+    // The edit is already saved; an auto-publish hiccup must not turn it into a 500.
+    await publishIfReady(shopId).catch(() => false);
     const shop = await prisma.shop.findUniqueOrThrow({
       where: { id: shopId },
       select: {
@@ -345,6 +417,7 @@ shopRouter.patch(
         campusName: true,
         campusId: true,
         campus: { select: { id: true, name: true, slug: true } },
+        autoLive: true,
         verificationStatus: true,
         verificationSubmittedAt: true,
         verifiedAt: true,
@@ -404,7 +477,7 @@ shopRouter.post(
 shopRouter.post(
   '/printers/:id/test-print',
   requireShopUser,
-  validateBody(z.object({ agentId: z.string().uuid().optional() })),
+  validateBody(z.object({ agentId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const printer = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -463,12 +536,27 @@ shopRouter.post(
       include: { campus: true, printers: true, agents: true },
     });
     if (!shop) throw notFound();
+    if (shop.autoLive && shop.verificationStatus === 'rejected') {
+      // An admin rejection is final for auto-live shops: resubmitting must not skip the admin.
+      throw conflict('This shop was rejected by PrintQs review. Contact support to have it reviewed again.');
+    }
     const hasCoordinates = shop.latitude != null && shop.longitude != null;
     const hasLinkedPrinter = shop.printers.some((printer) => Boolean(printer.osPrinterName));
     const hasAgent = shop.agents.length > 0;
     const hasMenu = shopOptions(shop).papers.length > 0;
-    if (!shop.campus || !shop.campus.isActive || !hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
-      throw badRequest('Complete campus, location, printer, agent, and print-menu setup before requesting verification');
+    if (!hasCoordinates || !hasLinkedPrinter || !hasAgent || !hasMenu) {
+      throw badRequest('Complete location, printer, agent, and print-menu setup before requesting verification');
+    }
+    // A campus is optional. Auto-live shops publish themselves as soon as the agent is online.
+    if (await publishIfReady(shop.id)) {
+      const live = await prisma.shop.findUniqueOrThrow({ where: { id: shop.id }, select: { verificationStatus: true, verificationSubmittedAt: true } });
+      res.json({ verification: { status: live.verificationStatus, submittedAt: live.verificationSubmittedAt } });
+      return;
+    }
+    if (shop.autoLive && shop.verificationStatus === 'draft') {
+      // Not live yet (e.g. agent offline): stay draft so it publishes itself when ready; never park in "submitted".
+      res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
+      return;
     }
     if (shop.verificationStatus === 'verified') {
       res.json({ verification: { status: shop.verificationStatus, submittedAt: shop.verificationSubmittedAt } });
@@ -626,11 +714,6 @@ shopRouter.get(
   }),
 );
 
-const csvCell = (v: string | number) => {
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
 /** Same history data as CSV, for the owner's own bookkeeping/accounting. */
 shopRouter.get(
   '/history.csv',
@@ -653,6 +736,7 @@ shopRouter.get(
     });
 
     const header = ['Date', 'Student', 'File', 'Printer', 'Status', 'Amount (INR)', 'Discount (INR)', 'Payment'];
+    // csvCell neutralises formula-looking text (=, +, -, @) in the student-typed name and file name.
     const rows = jobs.map((j) =>
       [
         j.updatedAt.toISOString(),
@@ -868,7 +952,7 @@ shopRouter.post(
 shopRouter.post(
   '/jobs/:id/assign',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid() })),
+  validateBody(z.object({ printerId: z.uuid() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const { printerId } = req.body as { printerId: string };
@@ -915,7 +999,7 @@ async function releaseOrphanedPrint(job: Job, shopUserId: string): Promise<Job> 
 shopRouter.post(
   '/jobs/:id/retry-print',
   requireShopUser,
-  validateBody(z.object({ printerId: z.string().uuid().optional() })),
+  validateBody(z.object({ printerId: z.uuid().optional() })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     let job = await prisma.job.findFirst({ where: { id: param(req, 'id'), shopId } });
@@ -1132,6 +1216,7 @@ shopRouter.post(
     });
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }
@@ -1139,12 +1224,25 @@ shopRouter.post(
   }),
 );
 
+// printerInputSchema.partial() would re-apply the create defaults (finishingOptions [],
+// status 'online', 15 ppm) to every PATCH and silently reset fields the caller never sent.
+const printerPatchSchema = printerInputSchema.extend({
+  finishingOptions: printerInputSchema.shape.finishingOptions.removeDefault(),
+  avgPagesPerMinute: printerInputSchema.shape.avgPagesPerMinute.removeDefault(),
+  status: printerInputSchema.shape.status.removeDefault(),
+}).partial();
+/** Counter staff may switch a printer online/offline and note the loaded paper; routing setup is owner-only. */
+const STAFF_PRINTER_FIELDS = new Set(['status', 'currentlyLoadedPaper']);
+
 shopRouter.patch(
   '/printers/:id',
   requireShopUser,
-  validateBody(printerInputSchema.partial()),
+  validateBody(printerPatchSchema),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
+    if (req.shopUser!.role !== 'owner' && Object.keys(req.body as object).some((key) => !STAFF_PRINTER_FIELDS.has(key))) {
+      throw forbidden('Only the shop owner can change printer setup. Staff can switch a printer online or offline.');
+    }
     const existing = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!existing) throw notFound();
     const otherOnlineBefore = await prisma.printer.count({
@@ -1165,6 +1263,7 @@ shopRouter.patch(
     // its PC is reachable from here — auto-add without a manual chip-pick.
     if (printer.osPrinterName) {
       await connectPrinterToDetectingAgents(shopId, printer.id, printer.osPrinterName);
+      await publishIfReady(shopId).catch(() => false);
       await advanceShopQueues(shopId);
       await notifyShopReopened(shopId);
     }
@@ -1220,7 +1319,7 @@ shopRouter.post(
   validateBody(
     z.object({
       machineLabel: z.string().trim().min(1).max(80),
-      connectedPrinterIds: z.array(z.string().uuid()).default([]),
+      connectedPrinterIds: z.array(z.uuid()).max(50).default([]),
     }),
   ),
   asyncHandler(async (req, res) => {
@@ -1248,7 +1347,7 @@ shopRouter.post(
 shopRouter.patch(
   '/agents/:id',
   requireShopOwner,
-  validateBody(z.object({ connectedPrinterIds: z.array(z.string().uuid()) })),
+  validateBody(z.object({ connectedPrinterIds: z.array(z.uuid()).max(50) })),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const agent = await prisma.agent.findFirst({ where: { id: param(req, 'id'), shopId } });

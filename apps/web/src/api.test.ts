@@ -148,6 +148,94 @@ describe('validation errors (OWN-12)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'Not found' }), { status: 404 }));
     await expect(apiModule.api('/api/x')).rejects.toMatchObject({ message: 'Not found' });
   });
+
+  it('rewrites zod developer wording into plain English', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'Validation failed',
+      details: [{ path: 'password', message: 'Too small: expected string to have >=8 characters' }],
+    }), { status: 400 }));
+    await expect(apiModule.api('/api/auth/shop/login', { method: 'POST', body: {} })).rejects.toMatchObject({
+      message: 'Password must be at least 8 characters',
+    });
+  });
+
+  it('exposes every rejected field for inline form errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'Validation failed',
+      details: [
+        { path: 'shopName', message: 'Shop name must be at least 2 characters' },
+        { path: 'address', message: 'Too small: expected string to have >=3 characters' },
+        { path: 'email', message: 'Invalid email address' },
+      ],
+    }), { status: 400 }));
+    const err = await apiModule.api('/api/auth/shop/register', { method: 'POST', body: {} }).catch((e: unknown) => e);
+    expect(apiModule.fieldErrors(err)).toEqual({
+      shopName: 'Shop name must be at least 2 characters',
+      address: 'Address must be at least 3 characters',
+      email: 'Enter a valid email address',
+    });
+    expect(apiModule.fieldErrors(new Error('x'))).toEqual({});
+  });
+});
+
+describe('friendly failure messages (S1)', () => {
+  it('maps a network failure to a plain "can’t reach" message with status 0', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(apiModule.api('/api/shop/me', { role: 'shop' })).rejects.toMatchObject({
+      status: 0,
+      message: apiModule.NETWORK_ERROR_MESSAGE,
+    });
+  });
+
+  it('lets an aborted request stay an AbortError', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('aborted', 'AbortError'));
+    await expect(apiModule.api('/api/shops', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it.each([502, 503, 504])('never shows a raw "Request failed (%i)"', async (status) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>Bad gateway</html>', { status }));
+    await expect(apiModule.api('/api/shop/me')).rejects.toMatchObject({ status, message: apiModule.BUSY_ERROR_MESSAGE });
+  });
+
+  it('turns the generic 429 into a wait time from Retry-After', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'Too many requests, slow down' }), {
+      status: 429,
+      headers: { 'Retry-After': '42' },
+    }));
+    await expect(apiModule.api('/api/auth/shop/login', { method: 'POST', body: {} })).rejects.toMatchObject({
+      status: 429,
+      message: 'Too many attempts. Try again in 42 seconds.',
+      retryAfterSeconds: 42,
+    });
+  });
+
+  it('carries the daily-cap wait on the error so the countdown shows an hour, not a minute', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'Too many codes requested for this number today' }), {
+      status: 429,
+      headers: { 'Retry-After': '3600' },
+    }));
+    await expect(apiModule.api('/api/auth/student/request-otp', { method: 'POST', body: {} })).rejects.toMatchObject({
+      status: 429,
+      message: 'Too many codes requested for this number today',
+      retryAfterSeconds: 3600,
+    });
+  });
+
+  it('keeps a specific 429 reason and handles a missing Retry-After', () => {
+    expect(apiModule.errorMessageFor(429, { error: 'Too many codes requested for this number today' })).toBe(
+      'Too many codes requested for this number today',
+    );
+    expect(apiModule.rateLimitMessage(null)).toBe('Too many attempts. Please wait a minute and try again.');
+    expect(apiModule.rateLimitMessage('3600')).toBe('Too many attempts. Try again in about 60 minutes.');
+    expect(apiModule.rateLimitMessage('1')).toBe('Too many attempts. Try again in 1 second.');
+  });
+
+  it('falls back to a plain sentence for an empty error body', () => {
+    expect(apiModule.errorMessageFor(500, {})).toBe('Something went wrong. Please try again.');
+    expect(apiModule.errorMessageFor(413, {})).not.toMatch(/Request failed/);
+  });
 });
 
 describe('shop sign-out (OWN-4)', () => {

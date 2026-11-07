@@ -1,13 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { nearbyShops, publishedShopWhere } from './discovery.js';
+import { isPublishedShop, nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 
 describe('public shop discovery', () => {
-  it('requires verification, publication, and an active canonical campus', () => {
+  it('requires verification and publication; a campus is optional but must be active when present', () => {
     expect(publishedShopWhere).toEqual({
       verificationStatus: 'verified',
       publishedAt: { not: null },
-      campus: { is: { isActive: true } },
+      OR: [{ campusId: null }, { campus: { is: { isActive: true } } }],
     });
+  });
+
+  it('isPublishedShop applies the same rule to loaded rows', () => {
+    const now = new Date();
+    const base = { verificationStatus: 'verified', publishedAt: now, campusId: null, campus: null };
+    expect(isPublishedShop(base)).toBe(true);
+    expect(isPublishedShop({ ...base, publishedAt: null })).toBe(false);
+    expect(isPublishedShop({ ...base, verificationStatus: 'draft' })).toBe(false);
+    expect(isPublishedShop({ ...base, campusId: 'c1', campus: { isActive: true } })).toBe(true);
+    expect(isPublishedShop({ ...base, campusId: 'c1', campus: { isActive: false } })).toBe(false);
+    // a campus id whose campus row was not loaded is never assumed active
+    expect(isPublishedShop({ ...base, campusId: 'c1' })).toBe(false);
+  });
+
+  it('lists a shop with no campus (campusName null), sorted by distance, anywhere in the world', () => {
+    const shops = nearbyShops(
+      { latitude: 51.5072, longitude: -0.1276 },
+      [
+        { slug: 'b', name: 'B', address: 'Pinned location', campusName: null, latitude: 51.512, longitude: -0.1276, open: true },
+        { slug: 'a', name: 'A', address: 'High St', campusName: null, latitude: 51.508, longitude: -0.1276, open: false },
+      ],
+      2_000,
+    );
+    expect(shops.map((s) => s.slug)).toEqual(['a', 'b']);
+    expect(shops[0]?.campusName).toBeNull();
   });
 
   it('returns only a rounded distance and never coordinates', () => {
@@ -29,5 +54,14 @@ describe('public shop discovery', () => {
     expect(shops).toHaveLength(1);
     expect(shops[0]).toMatchObject({ slug: 'near-counter', distanceM: 60 });
     expect(JSON.stringify(shops)).not.toMatch(/latitude|longitude|exactDistance/i);
+  });
+
+  it('bounding box bounds longitude normally, and skips it near the antimeridian and poles', () => {
+    const london = nearbyBoundingBox({ latitude: 51.5, longitude: -0.12 }, 5_000);
+    expect(london.latitude.gte).toBeLessThan(51.5);
+    expect(london.longitude).toBeDefined();
+    expect(nearbyBoundingBox({ latitude: -17.7, longitude: 179.99 }, 5_000).longitude).toBeUndefined();
+    expect(nearbyBoundingBox({ latitude: -17.7, longitude: -179.99 }, 5_000).longitude).toBeUndefined();
+    expect(nearbyBoundingBox({ latitude: 89.99, longitude: 10 }, 5_000).longitude).toBeUndefined();
   });
 });

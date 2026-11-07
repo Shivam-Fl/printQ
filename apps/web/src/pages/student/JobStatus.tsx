@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import { enablePush, pushPermission } from '../../push.js';
@@ -7,6 +7,7 @@ import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { StudentBandPanel, useNow } from '../../components/QueueBand.js';
+import { studentLoginPath } from '../../lib/studentReturn.js';
 import type { QueueBand } from '@printq/shared';
 
 export interface JobDetail {
@@ -157,6 +158,8 @@ function currentLocation(): Promise<GeolocationPosition> {
 export default function JobStatus() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const loginPath = studentLoginPath(location.pathname + location.search);
   const [job, setJob] = useState<JobDetail | null>(null);
   const [position, setPosition] = useState<number | null>(null);
   const [eta, setEta] = useState<number | null>(null);
@@ -182,11 +185,11 @@ export default function JobStatus() {
 
   useEffect(() => {
     if (!getToken('student')) {
-      navigate('/login', { replace: true });
+      navigate(loginPath, { replace: true });
       return;
     }
     void refresh();
-  }, [refresh, navigate]);
+  }, [refresh, navigate, loginPath]);
 
   useEffect(() => {
     if (!job || !statusMeta(job.status).active) return;
@@ -373,7 +376,7 @@ export default function JobStatus() {
           <div className="ticket turn">
             <div className="eyebrow">your counter code</div>
             <div className="otp-band">{otp}</div>
-            <div className="sub">Tell this code to staff when you collect your prints.</div>
+            <div className="sub">Show this screen at the counter to collect your prints. Staff find your order by your name.</div>
           </div>
         )}
         {job.status === 'ready_for_pickup' && (

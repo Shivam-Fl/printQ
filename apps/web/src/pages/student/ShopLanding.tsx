@@ -229,7 +229,7 @@ export default function ShopLanding() {
             <h2>{shop.open ? 'Drop your files here' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Orders are paused'}</h2>
             <p>
               {shop.open
-                ? 'Choose one or several documents. We combine them into one preview before you pay.'
+                ? 'Choose one or several documents. We combine them into one preview. You pay at the counter.'
                 : shop.temporarilyUnavailable
                   ? 'New orders are not available here right now. Please try again later or choose another shop.'
                   : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
