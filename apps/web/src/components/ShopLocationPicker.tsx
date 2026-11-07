@@ -9,10 +9,16 @@ interface ShopLocationPickerProps {
   onChange: (latitude: number, longitude: number) => void;
   /** What the map calls the pinned spot (reverse lookup), shown so a mismatch with the typed address is visible. */
   pinLabel?: string | null;
+  /** A rough device fix: drawn as a circle and zoomed to; the owner taps the entrance inside it. */
+  area?: { latitude: number; longitude: number; radius: number } | null;
 }
 
-/** No country assumed: until a pin or detected area exists, show the whole world. */
-const WORLD_CENTER: [number, number] = [20, 0];
+/** Until a pin or detected area exists, open on India (where shops are). Pins anywhere in the world still work. */
+const INDIA_CENTER: [number, number] = [22.5, 79];
+const INDIA_ZOOM = 4;
+/** Below this zoom a tap only zooms in; pins are placed at street level. */
+const MIN_PIN_ZOOM = 15;
+const PIN_ZOOM = 17;
 
 export default function ShopLocationPicker({
   latitude,
@@ -20,10 +26,12 @@ export default function ShopLocationPicker({
   center,
   onChange,
   pinLabel,
+  area,
 }: ShopLocationPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
+  const areaRef = useRef<L.Circle | null>(null);
   const onChangeRef = useRef(onChange);
 
   useEffect(() => {
@@ -37,11 +45,11 @@ export default function ShopLocationPicker({
       ? [latitude, longitude]
       : center
         ? [center.latitude, center.longitude]
-        : WORLD_CENTER;
+        : INDIA_CENTER;
     const map = L.map(containerRef.current, {
       zoomControl: true,
       attributionControl: true,
-    }).setView(initial, latitude != null ? 18 : center ? center.zoom ?? 16 : 2);
+    }).setView(initial, latitude != null ? 18 : center ? center.zoom ?? 16 : INDIA_ZOOM);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -49,6 +57,12 @@ export default function ShopLocationPicker({
     }).addTo(map);
 
     map.on('click', (event: LeafletMouseEvent) => {
+      // Zoomed out, a tap is a guess (a stray tap at city level would pin the
+      // wrong street): the first tap zooms in on that spot, the next one pins it.
+      if (map.getZoom() < MIN_PIN_ZOOM) {
+        map.setView(event.latlng, PIN_ZOOM);
+        return;
+      }
       onChangeRef.current(
         Number(event.latlng.lat.toFixed(6)),
         Number(event.latlng.lng.toFixed(6)),
@@ -63,6 +77,7 @@ export default function ShopLocationPicker({
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
+      areaRef.current = null;
     };
     // The opening coordinates intentionally define the initial viewport only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,6 +87,18 @@ export default function ShopLocationPicker({
     if (!center || !mapRef.current) return;
     mapRef.current.setView([center.latitude, center.longitude], center.zoom ?? 16);
   }, [center]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    areaRef.current?.remove();
+    areaRef.current = null;
+    if (!area) return;
+    const at = L.latLng(area.latitude, area.longitude);
+    // Not interactive, so a tap inside the circle still reaches the map and drops the pin.
+    areaRef.current = L.circle(at, { radius: area.radius, color: '#2257d9', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(map);
+    map.fitBounds(at.toBounds(area.radius * 2), { maxZoom: 17, padding: [12, 12] });
+  }, [area]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -113,7 +140,9 @@ export default function ShopLocationPicker({
           <span title={latitude != null && longitude != null ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : undefined}>
             {latitude != null && longitude != null
               ? pinLabel ? `Near ${pinLabel}` : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-              : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
+              : area
+                ? 'Your shop should be inside the blue circle. Tap its entrance, then drag to adjust.'
+                : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
           </span>
         </div>
         <span className={`stamp ${latitude != null && longitude != null ? 'green' : 'yellow'}`}>

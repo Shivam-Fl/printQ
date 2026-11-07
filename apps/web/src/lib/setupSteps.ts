@@ -25,6 +25,11 @@ export interface SetupSnapshot {
     onlineAgents: number;
     /** OS printers an online PC reported that are not added to PrintQs yet. */
     detectedPrinters?: number;
+    /**
+     * Added 'PrintQ Simulator' printers that cannot print for students (production). They are NOT
+     * included in linkedPrinters / onlinePrinters. Missing on older APIs, and 0 in development.
+     */
+    simulatorPrinters?: number;
   };
   platformMarkupBps?: number;
   visibility?: { state: VisibilityState; reason: string | null };
@@ -58,8 +63,21 @@ export interface NextAction {
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** Step 3: what the counter PC and printer still need. Null once a linked printer is online. */
+// The practice printer's name and the API's matching rule. Subpath import keeps zod off the dashboard bundle.
+export { SIMULATOR_PRINTER_NAME, isSimulatorPrinterName } from '@printq/shared/simulator';
+
+export const SIMULATOR_ONLY_TEXT = 'Simulator connected — this is for practice. Add your real printer to go live.';
+
+/** The only added printer is the practice simulator, which never prints real student orders. */
+export function simulatorOnly(counts: Pick<SetupSnapshot['counts'], 'linkedPrinters' | 'simulatorPrinters'>): boolean {
+  return (counts.simulatorPrinters ?? 0) > 0 && counts.linkedPrinters === 0;
+}
+
+/** Step 3: what the counter PC and printer still need. Null once a real linked printer is online. */
 export function pcStepTodo(setup: Pick<SetupSnapshot, 'agentReady' | 'counts'>): NextAction | null {
+  if (simulatorOnly(setup.counts) && setup.counts.onlineAgents > 0) {
+    return { text: SIMULATOR_ONLY_TEXT, to: '/dashboard/printers', action: 'Add real printer' };
+  }
   if (setup.agentReady) return null;
   const { agents, onlineAgents, linkedPrinters, detectedPrinters } = setup.counts;
   if (onlineAgents === 0) {
@@ -118,11 +136,14 @@ function liveStepBody(state: VisibilityState): string {
     case 'hidden_by_admin': return 'PrintQs has paused your shop. See the note above.';
     case 'campus_inactive': return 'Your campus is switched off, so students can’t find you right now. See the note above.';
     case 'pending_review': return 'PrintQs checks your shop, then students nearby can find you.';
-    default: return 'Students nearby can find you as soon as your PC is connected and a printer is added.';
+    default: return 'Students nearby can find you as soon as your PC is connected and your printer is added.';
   }
 }
 
-/** The four checklist cards. Step 3 reads the live PC/printer counts so it never claims more than is true. */
+/**
+ * The three setup steps plus the "live" status card (not counted as a step).
+ * Step 3 reads the live PC/printer counts so it never claims more than is true.
+ */
 export function setupSteps(setup: SetupSnapshot): SetupStepView[] {
   const state = visibilityState(setup);
   const pc = pcStepTodo(setup);
@@ -147,7 +168,7 @@ export function setupSteps(setup: SetupSnapshot): SetupStepView[] {
     {
       key: 'pc',
       number: '03',
-      title: 'Connect your counter PC and printer',
+      title: 'Connect the counter PC and add your printer',
       body: pc ? pc.text : `PC connected · ${count(setup.counts.onlinePrinters, 'printer')} ready.`,
       done: !pc,
       to: pc ? pc.to : '/dashboard/printers',
@@ -155,7 +176,7 @@ export function setupSteps(setup: SetupSnapshot): SetupStepView[] {
     },
     {
       key: 'live',
-      number: '04',
+      number: 'LIVE',
       title: 'You are live',
       body: liveStepBody(state),
       done: isListed(state),
@@ -187,14 +208,22 @@ export function statusBanner(setup: SetupSnapshot): StatusBanner | null {
   const state = visibilityState(setup);
   switch (state) {
     case 'live':
-      return null;
+      // Listed, but the only printer is the simulator: real student orders would never print.
+      return simulatorOnly(setup.counts)
+        ? {
+          title: 'Practice mode · only the simulator is connected',
+          text: 'The simulator never prints real student orders. Add your real printer so orders can print.',
+          to: '/dashboard/printers',
+          action: 'Add real printer',
+        }
+        : null;
     case 'live_pc_offline': {
       const pc = setup.counts.onlineAgents > 0 ? pcStepTodo(setup) : null;
       return {
         title: pc
           ? 'Live · add a printer — students can’t order until one is ready'
           : 'Live · counter PC offline — students can’t order until it’s back on',
-        text: pc?.text ?? 'Turn on the counter PC and open PrintQs Shop. Your shop stays listed.',
+        text: pc?.text ?? 'Turn on the counter PC and open PrintQs Shop. Your shop stays listed, but shows as closed until then.',
         to: pc?.to ?? '/dashboard/agents',
         action: pc?.action ?? 'Check counter PC',
       };

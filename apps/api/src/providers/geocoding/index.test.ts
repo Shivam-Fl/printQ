@@ -33,17 +33,59 @@ describe('geocoding provider', () => {
     expect(options.headers).toMatchObject({ 'User-Agent': expect.stringContaining('PrintQs') });
   });
 
-  it('falls back to Photon when the primary returns nothing', async () => {
+  it('falls back to Photon when the primary returns nothing (India first, then worldwide, then Photon)', async () => {
     const fetchMock = vi.fn(async (url: URL) =>
       String(url).includes('photon') ? json(photon) : json([]));
     vi.stubGlobal('fetch', fetchMock);
 
     const results = await searchLocations('Corner Print London');
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(results).toEqual([{
       id: 'N7', label: 'Corner Print, High St 4, London, United Kingdom', latitude: 51.5072, longitude: -0.1276,
     }]);
+  });
+
+  it('LOC-6: with no bias point, asks Nominatim for India first and stops there when India has matches', async () => {
+    const fetchMock = vi.fn(async () => json(nominatim));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await searchLocations('Station Road India First')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String((fetchMock.mock.calls[0] as unknown as [URL])[0]));
+    expect(url.searchParams.get('countrycodes')).toBe('in');
+    expect(url.searchParams.get('viewbox')).toBeNull();
+  });
+
+  it('LOC-6: still finds a place abroad when India has no match (worldwide retry, no country filter)', async () => {
+    const fetchMock = vi.fn(async (url: URL) =>
+      new URL(String(url)).searchParams.get('countrycodes') === 'in' ? json([]) : json(nominatim));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await searchLocations('Only Abroad Street')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const second = new URL(String((fetchMock.mock.calls[1] as unknown as [URL])[0]));
+    expect(second.searchParams.get('countrycodes')).toBeNull();
+  });
+
+  it('LOC-6: Photon is biased to India when there is no bias point, and to the caller when there is', async () => {
+    const fetchMock = vi.fn(async (url: URL) =>
+      String(url).includes('photon') ? json(photon) : json({}, 503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await searchLocations('Photon India Bias');
+    const unbiased = new URL(String((fetchMock.mock.calls.at(-1) as unknown as [URL])[0]));
+    expect(unbiased.hostname).toContain('photon');
+    expect([unbiased.searchParams.get('lat'), unbiased.searchParams.get('lon')]).toEqual(['22.5', '79']);
+    // a primary outage is not retried worldwide: straight to Photon
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fetchMock.mockClear();
+    await searchLocations('Photon Caller Bias', { latitude: 51.5072, longitude: -0.1276 });
+    const biased = new URL(String((fetchMock.mock.calls.at(-1) as unknown as [URL])[0]));
+    expect([biased.searchParams.get('lat'), biased.searchParams.get('lon')]).toEqual(['51.5', '-0.1']);
+    const primary = new URL(String((fetchMock.mock.calls[0] as unknown as [URL])[0]));
+    expect(primary.searchParams.get('countrycodes')).toBeNull();
   });
 
   it('falls back to Photon when the primary errors', async () => {

@@ -14,7 +14,7 @@ export default function Privacy() {
         <h2>Who we are</h2>
         <p>
           {LEGAL_PRODUCT_NAME}
-          {LEGAL_ENTITY_DESCRIPTION ? `, operated by ${LEGAL_ENTITY_DESCRIPTION},` : ''} connects students with campus print shops.
+          {LEGAL_ENTITY_DESCRIPTION ? `, operated by ${LEGAL_ENTITY_DESCRIPTION},` : ''} connects students with print shops.
           This page explains how we handle personal information when you use the app.
         </p>
       </section>
@@ -56,7 +56,7 @@ export default function Privacy() {
         <h2>Payment</h2>
         <p>
           You pay the shop directly, at the counter, by cash or the shop's own UPI. {LEGAL_PRODUCT_NAME} does not collect your card,
-          UPI or bank details and does not take student payments online. We charge shops a commission; see the <Link to="/terms">Terms</Link>.
+          UPI or bank details and does not take student payments online. We charge shops a platform fee; see the <Link to="/terms">Terms</Link>.
         </p>
       </section>
 

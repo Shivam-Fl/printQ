@@ -32,7 +32,7 @@ export default function InstallPrompt() {
   return (
     <div className="card row between" style={{ alignItems: 'center' }}>
       <div>
-        <strong>Add PrintQ to your home screen</strong>
+        <strong>Add PrintQs to your home screen</strong>
         <p className="dim" style={{ margin: '2px 0 0' }}>Faster access, works like an app.</p>
       </div>
       <div className="row" style={{ flexWrap: 'nowrap', flexShrink: 0 }}>

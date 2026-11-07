@@ -7,7 +7,7 @@ import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { errorHandler } from './middleware/error.js';
-import { mountWebApp } from './webApp.js';
+import { mountWebApp, redirectPagesToWebHost } from './webApp.js';
 
 async function listen(app: express.Express): Promise<{ server: Server; base: string }> {
   const server = app.listen(0, '127.0.0.1');
@@ -126,5 +126,75 @@ describe('single-domain web serving (DEF-01)', () => {
     const text = readFileSync(file, 'utf8');
     expect(text).toMatch(/^Allow: \/$/m);
     for (const p of ['/dashboard/', '/admin/', '/api/']) expect(text).toContain(`Disallow: ${p}`);
+  });
+});
+
+describe('pages on the API host move to the web host (PA-7)', () => {
+  let server: Server;
+  let base = '';
+  const hits: string[] = [];
+
+  async function start(publicWebUrl: string) {
+    const dist = mkdtempSync(path.join(tmpdir(), 'printq-web-'));
+    writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>SPA</title>');
+    const app = express();
+    app.get('/healthz', (_req, res) => res.json({ ok: true }));
+    app.use('/api', (req, res) => {
+      hits.push(`${req.method} ${req.originalUrl}`);
+      res.json({ ok: true });
+    });
+    app.use(redirectPagesToWebHost(publicWebUrl));
+    mountWebApp(app, dist);
+    app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+    ({ server, base } = await listen(app));
+  }
+  const stop = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  const get = (p: string, init: RequestInit = {}) => fetch(`${base}${p}`, { redirect: 'manual', ...init });
+
+  describe('split domain (PUBLIC_WEB_URL is another host)', () => {
+    beforeAll(() => start('https://printqs.example'));
+    afterAll(stop);
+
+    it.each(['/pc', '/', '/s/sharma-xerox?ref=qr', '/robots.txt'])('301s %s to the same path on the web host', async (p) => {
+      const res = await get(p);
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toBe(`https://printqs.example${p}`);
+    });
+
+    it('also moves HEAD requests', async () => {
+      const res = await get('/pc', { method: 'HEAD' });
+      expect(res.status).toBe(301);
+    });
+
+    it('keeps a protocol-relative looking path on the web host (no open redirect)', async () => {
+      const res = await get('//evil.example/x');
+      expect(res.status).toBe(301);
+      expect(new URL(res.headers.get('location')!).hostname).toBe('printqs.example');
+    });
+
+    it.each(['/api/public/shops', '/API/public/shops', '/api'])('never redirects the API (%s)', async (p) => {
+      const res = await get(p);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+    });
+
+    it('never redirects the health check or non-GET calls (webhooks)', async () => {
+      expect((await get('/healthz')).status).toBe(200);
+      const post = await get('/api/payments/webhook', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
+      expect(post.status).toBe(200);
+      expect(hits).toContain('POST /api/payments/webhook');
+      expect((await get('/pc', { method: 'POST' })).status).toBe(404);
+    });
+  });
+
+  describe('single domain (PUBLIC_WEB_URL is this host)', () => {
+    beforeAll(() => start('http://127.0.0.1:9'));
+    afterAll(stop);
+
+    it('serves the SPA without redirecting', async () => {
+      const res = await get('/pc');
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('<title>SPA</title>');
+    });
   });
 });

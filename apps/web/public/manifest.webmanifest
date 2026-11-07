@@ -1,6 +1,6 @@
 {
   "name": "PrintQs — skip the print shop line",
-  "short_name": "PrintQ",
+  "short_name": "PrintQs",
   "description": "Print queues without the counter rush. Upload, pay, arrive, and collect.",
   "id": "/",
   "start_url": "/jobs",

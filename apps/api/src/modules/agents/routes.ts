@@ -10,7 +10,7 @@ import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
-import { notifyShopReopened } from '../shops/availability.js';
+import { notifyShopReopened, restorePrintersReachedAgain } from '../shops/availability.js';
 import { publishIfReady } from '../shops/autoLive.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
@@ -100,6 +100,7 @@ agentRouter.post(
         })
       : [];
     const connectedPrinterIds = [...new Set([...agent.connectedPrinterIds, ...reachable.map((p) => p.id)])];
+    const newlyConnected = connectedPrinterIds.filter((id) => !agent.connectedPrinterIds.includes(id));
 
     await prisma.agent.update({
       where: { id: agent.id },
@@ -111,6 +112,8 @@ agentRouter.post(
       },
     });
     if (agent.sessionId) await reconcileAgentSession(agent, agent.sessionId);
+    // a re-installed PC brings back the printers that went offline when the old PC was removed
+    await restorePrintersReachedAgain(agent.shopId, agent.id, newlyConnected);
     await advanceShopQueues(agent.shopId);
     await emitQueueUpdate(agent.shopId);
     await notifyShopReopened(agent.shopId);

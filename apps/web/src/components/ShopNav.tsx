@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api, ApiError, getShopRole, getToken, setShopRole, signOutShop } from '../api.js';
 import { resetSockets } from '../socket.js';
 import FeeBanner from './FeeBanner.js';
 import { shopLoginPath } from '../lib/locationFlow.js';
+import { clearShopSessionNotice, noteShopSessionEnded } from '../lib/shopSessionNotice.js';
 
 /** Only a real 401 means the session is over. A cold start (5xx) or a Wi-Fi blip must not sign the owner out. */
 export function isSessionOver(err: unknown): boolean {
@@ -33,9 +34,11 @@ export default function ShopNav() {
   const [role, setRole] = useState<'owner' | 'staff' | null>(getShopRole());
   const [desktopStatus, setDesktopStatus] = useState<PrintQsDesktopStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
+  const signedOutHere = useRef(false);
 
   useEffect(() => {
-    if (!getToken('shop')) {
+    const token = getToken('shop');
+    if (!token) {
       navigate(shopLoginPath());
       return;
     }
@@ -53,6 +56,7 @@ export default function ShopNav() {
         .catch((err) => {
           if (cancelled) return;
           if (isSessionOver(err)) {
+            noteShopSessionEnded(token); // revoked elsewhere: the login page says why (once)
             navigate(shopLoginPath());
             return;
           }
@@ -64,6 +68,8 @@ export default function ShopNav() {
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      // Any page's API call that got a 401 cleared the token before sending us to login.
+      if (!signedOutHere.current && !getToken('shop')) noteShopSessionEnded(token);
     };
   }, [navigate]);
 
@@ -84,6 +90,8 @@ export default function ShopNav() {
   }, []);
 
   async function signOut() {
+    signedOutHere.current = true;
+    clearShopSessionNotice();
     await signOutShop(); // revokes the session server-side, then clears the token
     resetSockets();
     navigate('/dashboard/login');
@@ -93,7 +101,8 @@ export default function ShopNav() {
     <>
     <div className="shopnav">
       <span className="brand">
-        Print<em>Q</em>
+        {/* same wordmark as Topbar; one span so it is read as "PrintQs", not "Print Q" */}
+        <span>Print<em>Q</em>s</span>
         {name && <small title={name}>{name}</small>}
       </span>
       <div className="links">

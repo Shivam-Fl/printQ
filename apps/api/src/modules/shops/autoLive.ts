@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { shopOptions } from '../../lib/shopOptions.js';
+import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { invalidatePublicCaches } from '../public/cache.js';
 
 /**
@@ -8,6 +9,7 @@ import { invalidatePublicCaches } from '../public/cache.js';
  * linked printer. Only never-reviewed shops (verificationStatus draft, or submitted by an older client) are
  * touched: an admin rejection or unpublish is final until an admin acts, and
  * shops that existed before this rule (autoLive=false) keep manual verification.
+ * In production the simulator printer never counts (PSO-1): it cannot finish an order.
  * Returns true when the shop was published by this call.
  */
 export async function publishIfReady(shopId: string): Promise<boolean> {
@@ -25,7 +27,7 @@ export async function publishIfReady(shopId: string): Promise<boolean> {
   if (!shop || !shop.autoLive || (shop.verificationStatus !== 'draft' && shop.verificationStatus !== 'submitted') || shop.publishedAt) return false;
 
   const linkedOnline = new Set(
-    shop.printers.filter((p) => p.osPrinterName && p.status === 'online').map((p) => p.id),
+    shop.printers.filter((p) => p.osPrinterName && p.status === 'online' && canPrintForStudents(p)).map((p) => p.id),
   );
   const ready = shop.latitude != null && shop.longitude != null
     && shopOptions(shop).papers.length > 0

@@ -1,4 +1,6 @@
+import { isSimulatorPrinterName } from '@printq/shared';
 import { isPublishedShop } from '../public/discovery.js';
+import { canPrintForStudents, simulatorIsPracticeOnly } from '../../lib/simulatorPrinters.js';
 
 /**
  * What students can see of this shop right now, kept apart from "is setup
@@ -63,29 +65,37 @@ export function shopVisibility(shop: ShopVisibilityInput): ShopVisibility {
   return { state: 'not_ready', reason: null };
 }
 
-/** True when an online agent is connected to an online printer (same rule as the public "open" flag). */
+/**
+ * True when an online agent is connected to an online printer (same rule as the public "open" flag).
+ * In production the simulator printer does not count (PSO-1).
+ */
 export function hasOnlinePrinterPath(
   agents: { status: string; connectedPrinterIds: string[] }[],
-  printers: { id: string; status: string }[],
+  printers: { id: string; status: string; osPrinterName?: string | null }[],
+  practiceOnly = simulatorIsPracticeOnly(),
 ): boolean {
   const reachable = new Set(agents.filter((agent) => agent.status === 'online').flatMap((agent) => agent.connectedPrinterIds));
-  return printers.some((printer) => printer.status === 'online' && reachable.has(printer.id));
+  return printers.some((printer) => printer.status === 'online' && reachable.has(printer.id) && canPrintForStudents(printer, practiceOnly));
 }
 
 /**
  * OS printers that this shop's ONLINE agents can see but that no PrintQ printer
  * profile is linked to yet ("PC connected · 1 printer found — add it").
+ * In production the simulator is not offered: adding it would not take the shop live.
  */
 export function countDetectedPrinters(
   agents: { status: string; detectedPrinters: unknown }[],
   printers: { osPrinterName: string | null }[],
+  practiceOnly = simulatorIsPracticeOnly(),
 ): number {
   const linked = new Set(printers.map((printer) => printer.osPrinterName).filter((name): name is string => Boolean(name)));
   const found = new Set<string>();
   for (const agent of agents) {
     if (agent.status !== 'online' || !Array.isArray(agent.detectedPrinters)) continue;
     for (const item of agent.detectedPrinters as { name?: unknown }[]) {
-      if (typeof item?.name === 'string' && item.name && !linked.has(item.name)) found.add(item.name);
+      if (typeof item?.name !== 'string' || !item.name || linked.has(item.name)) continue;
+      if (practiceOnly && isSimulatorPrinterName(item.name)) continue;
+      found.add(item.name);
     }
   }
   return found.size;

@@ -56,7 +56,7 @@ describe('legal and support routes', () => {
     for (const path of ['/privacy', '/terms', '/refunds']) {
       expect(at(path)).toContain(legal.LEGAL_LAST_UPDATED);
     }
-    expect(legal.LEGAL_LAST_UPDATED).toBe('2026-10-10');
+    expect(legal.LEGAL_LAST_UPDATED).toBe('2026-11-07');
   });
 
   it('unknown routes render NotFound with a way back', () => {
@@ -64,6 +64,15 @@ describe('legal and support routes', () => {
     expect(html).toContain('This page is not in the queue');
     expect(html).toContain('href="/"');
     expect(html).toContain('href="/shops"');
+  });
+
+  it('dotted paths the SPA rewrite skips (/s/qa.test) get a branded, noindex 404 (PA-8)', () => {
+    const page = readFileSync(new URL('../public/404.html', import.meta.url), 'utf8');
+    expect(page).toContain('<meta name="robots" content="noindex" />');
+    expect(page).toContain('This page is not in the queue');
+    expect(page).toContain('PrintQs');
+    expect(page).toContain('href="/"');
+    expect(page).toContain('href="/shops"');
   });
 
   it('policies describe pay-at-shop and fast document deletion', () => {

@@ -9,6 +9,7 @@ import Topbar from '../../components/Topbar.js';
 import { StudentBandPanel, useNow } from '../../components/QueueBand.js';
 import { studentLoginPath } from '../../lib/studentReturn.js';
 import type { QueueBand } from '@printq/shared';
+import { paymentSummary, type PaymentStatus } from './jobPayment.js';
 
 export interface JobDetail {
   id: string;
@@ -28,7 +29,7 @@ export interface JobDetail {
   absent: boolean;
   otpExpiresAt: string | null;
   noShowCount: number;
-  paymentStatus: 'pending' | 'counter_due' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
+  paymentStatus: PaymentStatus;
   rating: number | null;
   printError: string | null;
   printAttempts: number;
@@ -73,42 +74,6 @@ export function applyCheckInResult(job: JobDetail, r: CheckInResult): JobDetail 
   };
 }
 
-type PaymentStatus = JobDetail['paymentStatus'];
-
-export interface PaymentSummary {
-  label: string;
-  receiptAvailable: boolean;
-  receiptMessage: string;
-}
-
-/** Keep the order total truthful: an order is not a paid order until the API says so. */
-export function paymentSummary(
-  paymentStatus: PaymentStatus,
-): PaymentSummary {
-  if (paymentStatus === 'paid') {
-    return {
-      label: 'Paid at shop',
-      receiptAvailable: true,
-      receiptMessage: '',
-    };
-  }
-
-  switch (paymentStatus) {
-    case 'cash_due':
-    case 'counter_due':
-      return { label: 'Pay at shop', receiptAvailable: false, receiptMessage: 'Receipt will be available after staff verifies payment at the counter.' };
-    case 'refunding':
-      return { label: 'Refund processing', receiptAvailable: false, receiptMessage: 'The payment is being refunded. The receipt will be available once processing is complete.' };
-    case 'refunded':
-      return { label: 'Refunded', receiptAvailable: false, receiptMessage: 'This payment was refunded, so there is no active payment receipt.' };
-    case 'failed':
-      return { label: 'Payment failed', receiptAvailable: false, receiptMessage: 'No receipt is available because the payment was not completed.' };
-    case 'pending':
-    default:
-      return { label: 'Order preparing', receiptAvailable: false, receiptMessage: 'Receipt will be available after staff verifies payment at the counter.' };
-  }
-}
-
 /** Opens the shop's verified merchant VPA with the exact final amount. */
 export function counterUpiIntentUri(
   vpa: string,
@@ -122,7 +87,7 @@ export function counterUpiIntentUri(
     pn: payeeName,
     am: (totalPaise / 100).toFixed(2),
     cu: 'INR',
-    tn: `PrintQ ${jobId.slice(0, 8)}`,
+    tn: `PrintQs ${jobId.slice(0, 8)}`,
   });
   return `upi://pay?${params.toString()}`;
 }
@@ -291,7 +256,7 @@ export default function JobStatus() {
   const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
   const reachedIdx = ORDER.indexOf(job.status);
-  const payment = paymentSummary(job.paymentStatus);
+  const payment = paymentSummary(job.paymentStatus, job.status);
 
   return (
     <StudentShell>
@@ -435,7 +400,10 @@ export default function JobStatus() {
 
         {/* ---- receipt ---- */}
         <div className="card receipt">
-          <div className="line total"><span>{payment.label}</span><span>{rupees(job.totalPaise)}</span></div>
+          <div className="line total">
+            <span>{payment.label}</span>
+            <span style={{ whiteSpace: 'nowrap' }}>{payment.nothingCharged ? <s>{rupees(job.totalPaise)}</s> : rupees(job.totalPaise)}</span>
+          </div>
           {payment.receiptAvailable ? (
             <button
               className="ghost small"

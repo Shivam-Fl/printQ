@@ -9,6 +9,7 @@ import {
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
 import { logger } from '../../lib/logger.js';
+import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { env } from '../../config/env.js';
 import { digestReleaseCode, encryptReleaseCode, generateOtp } from '../../lib/otp.js';
 import { timersQueue } from '../../lib/queues.js';
@@ -133,7 +134,8 @@ export function rankFromSnapshot(
 ) {
   const reachable = new Set(onlineAgents.flatMap((agent) => agent.connectedPrinterIds));
   return rankPrinters(
-    printers.filter((printer) => reachable.has(printer.id)).map(toProfile),
+    // the simulator never gets a student's order in production (PSO-1): it cannot finish it
+    printers.filter((printer) => reachable.has(printer.id) && canPrintForStudents(printer)).map(toProfile),
     specs,
     pagesPerCopy,
     activeJobs

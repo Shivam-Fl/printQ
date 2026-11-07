@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  nextSetupAction, pcStepTodo, platformFeeLine, PRICES_PATH, setupSteps, statusBanner, visibilityState,
-  type SetupSnapshot,
+  isSimulatorPrinterName, nextSetupAction, pcStepTodo, platformFeeLine, PRICES_PATH, setupSteps, SIMULATOR_ONLY_TEXT,
+  simulatorOnly, statusBanner, visibilityState, type SetupSnapshot,
 } from './setupSteps.js';
 
 function snapshot(over: Partial<SetupSnapshot> = {}, counts: Partial<SetupSnapshot['counts']> = {}): SetupSnapshot {
@@ -74,7 +74,7 @@ describe('steps 2 and 4', () => {
   it('step 4 promises live only after PC and printer', () => {
     const live = setupSteps(snapshot()).find((step) => step.key === 'live')!;
     expect(live.done).toBe(false);
-    expect(live.body).toBe('Students nearby can find you as soon as your PC is connected and a printer is added.');
+    expect(live.body).toBe('Students nearby can find you as soon as your PC is connected and your printer is added.');
   });
   it('step 4 counts a live shop with its PC off as live', () => {
     const live = setupSteps(snapshot({ visibility: { state: 'live_pc_offline', reason: null } })).find((step) => step.key === 'live')!;
@@ -129,5 +129,58 @@ describe('status banner (queue + setup)', () => {
     const ready = snapshot({ agentReady: true, printerReady: true, visibility: { state: 'pending_review', reason: null } }, { onlineAgents: 1, linkedPrinters: 1, onlinePrinters: 1 });
     expect(statusBanner(ready)!.title).toBe('Waiting for PrintQs review');
     expect(nextSetupAction(ready).text).toMatch(/checking your shop/);
+  });
+});
+
+describe('simulator-only shops (PSO-1)', () => {
+  // The API leaves simulators out of linkedPrinters/onlinePrinters and counts them in simulatorPrinters.
+  const simOnline = { agents: 1, onlineAgents: 1, linkedPrinters: 0, onlinePrinters: 0, simulatorPrinters: 1 };
+
+  it('treats a missing simulatorPrinters count as no simulator', () => {
+    expect(simulatorOnly({ linkedPrinters: 0 })).toBe(false);
+    expect(simulatorOnly({ linkedPrinters: 0, simulatorPrinters: 0 })).toBe(false);
+  });
+  it('is simulator-only only when no real printer is added', () => {
+    expect(simulatorOnly({ linkedPrinters: 0, simulatorPrinters: 1 })).toBe(true);
+    expect(simulatorOnly({ linkedPrinters: 1, simulatorPrinters: 1 })).toBe(false);
+  });
+  it('recognises the simulator name like the API does', () => {
+    expect(isSimulatorPrinterName('PrintQ Simulator')).toBe(true);
+    expect(isSimulatorPrinterName('  printq simulator ')).toBe(true);
+    expect(isSimulatorPrinterName('HP LaserJet')).toBe(false);
+    expect(isSimulatorPrinterName(null)).toBe(false);
+  });
+  it('step 3 stays to-do and asks for the real printer', () => {
+    const step = pcStep(snapshot({}, simOnline));
+    expect(step.done).toBe(false);
+    expect(step.body).toBe(SIMULATOR_ONLY_TEXT);
+    expect(step.body).toBe('Simulator connected — this is for practice. Add your real printer to go live.');
+    expect(step.to).toBe('/dashboard/printers');
+  });
+  it('step 3 is done once a real printer is added next to the simulator', () => {
+    const step = pcStep(snapshot({ agentReady: true, printerReady: true }, { ...simOnline, linkedPrinters: 1, onlinePrinters: 1 }));
+    expect(step.done).toBe(true);
+  });
+  it('says the PC is offline (not the simulator line) when the PC is off', () => {
+    expect(pcStepTodo(snapshot({}, { ...simOnline, onlineAgents: 0 }))?.text).toMatch(/offline/);
+  });
+  it('never says "Almost live" for a simulator-only shop', () => {
+    const banner = statusBanner(snapshot({}, simOnline))!;
+    expect(banner.title).not.toMatch(/Almost live/);
+    expect(banner.text).toBe(`Next: ${SIMULATOR_ONLY_TEXT}`);
+  });
+  it('warns a listed simulator-only shop that real orders cannot print', () => {
+    // a shop published before the API fix: still listed, but its only printer is the simulator
+    const banner = statusBanner(snapshot({ visibility: { state: 'live', reason: null } }, simOnline))!;
+    expect(banner.title).toMatch(/only the simulator/);
+    expect(banner.to).toBe('/dashboard/printers');
+  });
+});
+
+describe('wording (PSO-3)', () => {
+  it('step 3 uses the register checklist wording and no simulator jargon', () => {
+    const steps = setupSteps(snapshot());
+    expect(steps.find((step) => step.key === 'pc')!.title).toBe('Connect the counter PC and add your printer');
+    expect(JSON.stringify(steps)).not.toMatch(/Safe simulator/i);
   });
 });

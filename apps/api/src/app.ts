@@ -22,7 +22,7 @@ import { agentRouter } from './modules/agents/routes.js';
 import { publicRouter } from './modules/public/routes.js';
 import { pushRouter } from './modules/push/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
-import { mountWebApp } from './webApp.js';
+import { mountWebApp, redirectPagesToWebHost } from './webApp.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -97,6 +97,9 @@ export function createApp(): express.Express {
   app.use('/api/shop', shopRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/agent', agentRouter);
+
+  // Split-domain production: pages opened on the API host move to PUBLIC_WEB_URL (PA-7).
+  if (env.NODE_ENV === 'production') app.use(redirectPagesToWebHost(env.PUBLIC_WEB_URL));
 
   // Single-domain production deploy: serve the built web app from the API so
   // the PWA, push notifications and API share one origin. Dev uses Vite.

@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, fieldErrors, getToken, setShopRole, setToken } from '../../api.js';
+import { api, ApiError, fieldErrors, getToken, setShopRole, setToken } from '../../api.js';
 import PasswordInput from '../../components/PasswordInput.js';
 import ShopSignedIn from '../../components/ShopSignedIn.js';
 import Topbar from '../../components/Topbar.js';
 import {
   firstInvalid,
   isDuplicateEmailError,
-  PASSWORD_MIN,
   REGISTER_FIELDS,
   validateShopRegister,
   type RegisterField,
   type RegisterForm,
 } from '../../lib/authForm.js';
-import { reverseLabel } from '../../lib/geocode.js';
-import { stashRegisterPin } from '../../lib/locationFlow.js';
+import { addressIsReplaceable, reverseLabel } from '../../lib/geocode.js';
+import {
+  addressAfterReverse, locationFailureLead, postLoginPath, registerFillNote, registerPinFromFix, stashRegisterPin,
+} from '../../lib/locationFlow.js';
+import { passwordHint, passwordHintClass } from '../../lib/passwordHint.js';
+import type { SetupSnapshot } from '../../lib/setupSteps.js';
 
 const INPUT_IDS: Record<RegisterField, string> = {
   shopName: 'shopName',
@@ -49,9 +52,27 @@ export default function ShopRegister() {
   const [locating, setLocating] = useState(false);
   const [locateNote, setLocateNote] = useState('');
   const errorBox = useRef<HTMLDivElement>(null);
-  /** Coordinates from "Fill from my location", handed to the pin step so it does not ask again. */
+  /** A precise (<= 100 m) fix from "Fill from my location", handed to the pin step so it does not ask again. */
   const coords = useRef<{ latitude: number; longitude: number } | null>(null);
+  /** The address this button last filled in, so a second tap may refresh it but typed text is never replaced. */
+  const lastFilled = useRef<string | null>(null);
+  const addressRef = useRef(form.address);
+  addressRef.current = form.address;
   const handleSignedOut = useCallback(() => setSignedIn(false), []);
+  // "Go to dashboard" follows the login rule: a shop that is not live yet goes to Setup (PSLS-6).
+  const [signedInSetup, setSignedInSetup] = useState<SetupSnapshot | null>(null);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    let cancelled = false;
+    api<{ setup: SetupSnapshot }>('/api/shop/setup-status', { role: 'shop' })
+      .then((r) => { if (!cancelled) setSignedInSetup(r.setup); })
+      .catch((err) => {
+        // 401: the stale token was cleared, so show the form. Anything else: keep the default /dashboard link.
+        if (!cancelled && err instanceof ApiError && err.status === 401) setSignedIn(false);
+      });
+    return () => { cancelled = true; };
+  }, [signedIn]);
 
   // A general error (network, rate limit) sits under the button: make sure it is on screen.
   useEffect(() => {
@@ -75,18 +96,30 @@ export default function ShopRegister() {
     setLocateNote('');
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const latitude = Number(position.coords.latitude.toFixed(6));
-        const longitude = Number(position.coords.longitude.toFixed(6));
-        coords.current = { latitude, longitude };
-        const label = await reverseLabel(latitude, longitude);
-        if (label) {
+        const { accuracy } = position.coords;
+        // A rough fix (> 100 m) is not handed on: setup finds the location again and the owner taps the entrance.
+        coords.current = registerPinFromFix(position.coords);
+        // Never replace an address the owner typed (e.g. "Shop 7, Janpath Market"), and skip the lookup then.
+        if (!addressIsReplaceable(addressRef.current, lastFilled.current)) {
+          setLocateNote(registerFillNote('kept', accuracy));
+          setLocating(false);
+          return;
+        }
+        const label = await reverseLabel(Number(position.coords.latitude.toFixed(6)), Number(position.coords.longitude.toFixed(6)));
+        // Re-check after the lookup: the owner may have typed meanwhile.
+        const next = addressAfterReverse(addressRef.current, label, lastFilled.current);
+        if (!label) setLocateNote(registerFillNote('not_found', accuracy));
+        else if (next === label) {
+          lastFilled.current = label;
           setForm((current) => ({ ...current, address: label }));
           setErrors((current) => ({ ...current, address: undefined }));
-        } else setLocateNote('Could not find an address here. Type it in; you will pin the exact spot next.');
+          setLocateNote(registerFillNote('filled', accuracy));
+        } else setLocateNote(registerFillNote('kept', accuracy));
         setLocating(false);
       },
-      () => {
-        setLocateNote('Location is off. Type the address instead; you will pin the exact spot next.');
+      (reason) => {
+        const lead = locationFailureLead(reason.code === reason.PERMISSION_DENIED);
+        setLocateNote(`${lead}. Type the address instead; you will pin the exact spot next.`);
         setLocating(false);
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
@@ -158,8 +191,8 @@ export default function ShopRegister() {
       </span>
     ) : null;
 
-  const passwordOk = form.password.length >= PASSWORD_MIN && Boolean(form.password.trim());
-  const passwordLeft = PASSWORD_MIN - form.password.length;
+  // Same rule as the API, so a password that will be rejected never shows a green tick.
+  const hint = passwordHint(form.password);
 
   return (
     <main className="auth-page shop-auth-page register-page">
@@ -168,11 +201,11 @@ export default function ShopRegister() {
         <div className="auth-copy">
           <span className="eyebrow-label">Get your counter online</span>
           <h1>Set up your shop.</h1>
-          <p>Five fields and about three minutes. Any shop can join, on a campus or not.</p>
+          {!signedIn && <p>Five fields and about three minutes. Any shop can join, on a campus or not.</p>}
         </div>
         {signedIn ? (
           <ShopSignedIn
-            to="/dashboard"
+            to={postLoginPath(null, signedInSetup)}
             hint="To register another shop, sign out first."
             onSignedOut={handleSignedOut}
           />
@@ -186,7 +219,7 @@ export default function ShopRegister() {
                 {fieldError('shopName')}
               </div>
               <div className="field full-field">
-                <label htmlFor="address">Counter address</label>
+                <label htmlFor="address">Shop address</label>
                 <input id="address" type="text" placeholder="12 Market Road, near the bus stand" value={form.address} onChange={set('address')} autoComplete="street-address"
                   aria-invalid={errors.address ? true : undefined} aria-describedby={describedBy('address')} />
                 {fieldError('address')}
@@ -204,7 +237,7 @@ export default function ShopRegister() {
                 {fieldError('ownerName')}
               </div>
               <div className="field grow">
-                <label htmlFor="remail">Work email</label>
+                <label htmlFor="remail">Email</label>
                 <input id="remail" type="email" inputMode="email" placeholder="owner@shop.com" value={form.email} onChange={set('email')} autoComplete="email"
                   aria-invalid={errors.email ? true : undefined} aria-describedby={describedBy('email')} />
                 {fieldError('email')}
@@ -213,10 +246,8 @@ export default function ShopRegister() {
                 <label htmlFor="rpass">Password</label>
                 <PasswordInput id="rpass" placeholder="At least 8 characters" value={form.password} onChange={set('password')} autoComplete="new-password"
                   aria-invalid={errors.password ? true : undefined} aria-describedby={describedBy('password', 'rpass-help')} />
-                <span id="rpass-help" className={`field-help password-rule${passwordOk ? ' ok' : ''}`}>
-                  {passwordOk ? '✓ At least 8 characters' : form.password && passwordLeft > 0
-                    ? `At least 8 characters (${passwordLeft} more)`
-                    : 'At least 8 characters'}
+                <span id="rpass-help" className={passwordHintClass(hint)}>
+                  {hint.text}
                 </span>
                 {fieldError('password')}
               </div>
@@ -232,17 +263,16 @@ export default function ShopRegister() {
             </p>
           </form>
         )}
-        <p className="dim auth-after-card">Already registered? <Link to="/dashboard/login">Sign in →</Link></p>
+        {!signedIn && <p className="dim auth-after-card">Already registered? <Link to="/dashboard/login">Sign in →</Link></p>}
       </div>
       <aside className="auth-aside shop-auth-aside">
         <div className="auth-proof">
           <span className="eyebrow-label">Launch checklist</span>
-          <h2>Live in four steps.</h2>
+          <h2>Three steps to go live.</h2>
           <ol>
-            <li><span>1</span><div><strong>Confirm your location</strong><p>We find it for you; drag the pin to your entrance.</p></div></li>
+            <li><span>1</span><div><strong>Confirm your location</strong><p>We find your area; you tap your shop entrance on the map.</p></div></li>
             <li><span>2</span><div><strong>Check your prices</strong><p>Sensible defaults are already filled in.</p></div></li>
-            <li><span>3</span><div><strong>Connect the counter PC</strong><p>Install the PrintQs Shop desktop app on the counter PC and sign in. It finds your printers, or runs the Safe simulator if you have none.</p></div></li>
-            <li><span>4</span><div><strong>You are live</strong><p>Students nearby can find you as soon as your PC is connected.</p></div></li>
+            <li><span>3</span><div><strong>Connect the counter PC and add your printer</strong><p>Install the PrintQs Shop app on the counter PC, sign in and add your printer. Students nearby can find you once your printer is added.</p></div></li>
           </ol>
         </div>
       </aside>
