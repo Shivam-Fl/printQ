@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ShopLocationPicker from './ShopLocationPicker.js';
+import { useGoogleMaps } from './GoogleLocationMap.js';
 import {
   autoSearchQuery, desktopLocationTip, deviceFixMessage, isPreciseFix, locationFailureLead, searchMessage, SEARCH_FAILED_MESSAGE,
 } from '../lib/locationFlow.js';
-import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, searchPlaces, type PlaceResult } from '../lib/geocode.js';
+import { addressIsReplaceable, createPlaceSearch, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, type PlaceResult, type SearchHit } from '../lib/geocode.js';
 
 interface Props {
   latitude: number | null;
@@ -32,7 +33,10 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const [locationFailed, setLocationFailed] = useState(false);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<PlaceResult[]>([]);
+  const [results, setResults] = useState<SearchHit[]>([]);
+  /** Google Places when a browser key is set, else the API search; keeps one Google session per editor. */
+  const [findPlaces] = useState(createPlaceSearch);
+  const google = useGoogleMaps();
   /** What the map calls the current pin; shown even when the owner typed a different address. */
   const [pinLabel, setPinLabel] = useState<string | null>(null);
   const lastAuto = useRef<string | null>(null);
@@ -178,10 +182,14 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     setResults([]);
     try {
       // Bias towards the pin, or towards the rough area the device found, so nearby matches come first.
-      const found = await searchPlaces(text, hasPin ? { latitude, longitude } : area);
+      const found = await findPlaces(text, hasPin ? { latitude, longitude } : area);
       setResults(found);
       setMessage(intro + searchMessage(found));
-      if (intro && found[0]) setCenter({ latitude: found[0].latitude, longitude: found[0].longitude, zoom: 16 });
+      if (intro && found[0]) {
+        const mine = detectSeq.current;
+        const best = await found[0].resolve().catch(() => null);
+        if (best && mine === detectSeq.current) setCenter({ latitude: best.latitude, longitude: best.longitude, zoom: 16 });
+      }
     } catch {
       setMessage(intro + SEARCH_FAILED_MESSAGE);
     } finally {
@@ -198,9 +206,20 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     await runSearch(text);
   }
 
-  function choose(result: PlaceResult) {
-    // A choice beats any lookup still in flight for an earlier pin, and any device fix still coming.
+  async function choose(hit: SearchHit) {
+    // A choice beats any device fix still coming.
     stopDetect();
+    const mine = detectSeq.current;
+    let result: PlaceResult | null = null;
+    try {
+      result = await hit.resolve(); // Google matches fetch their coordinates only now
+    } catch { /* handled below */ }
+    if (mine !== detectSeq.current) return; // the owner pinned by hand or chose again meanwhile
+    if (!result) {
+      setMessage('Could not open that match. Choose another, or click the map to drop the pin.');
+      return;
+    }
+    // ...and any lookup still in flight for an earlier pin.
     reverseSeq.current += 1;
     if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     setCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 18 });
@@ -246,7 +265,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
         <ul className="location-search-results" aria-label="Address matches" style={{ listStyle: 'none', margin: 0 }}>
           {results.map((result) => (
             <li key={result.id}>
-              <button type="button" onClick={() => choose(result)}>
+              <button type="button" onClick={() => { void choose(result); }}>
                 <span className="location-result-pin" aria-hidden>PIN</span>
                 <span>{result.label}</span>
               </button>
@@ -255,7 +274,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
         </ul>
       )}
       <ShopLocationPicker latitude={latitude} longitude={longitude} center={center} area={area} onChange={placeByHand} pinLabel={pinLabel} />
-      <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
+      {!google && <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>}
       {!hideAddress && (
         <div className="field">
           <label htmlFor="shop-address">Address students will see</label>
