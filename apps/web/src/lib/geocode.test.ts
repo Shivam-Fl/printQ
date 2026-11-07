@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMock = vi.hoisted(() => vi.fn());
 vi.mock('../api.js', () => ({ api: apiMock }));
+// The keyless path (Leaflet + API geocoder); a local apps/web/.env.local key must not change it.
+vi.mock('./googleMaps.js', () => ({ googleMapsAvailable: () => false, createGoogleSearch: () => vi.fn(), googleReverseLabel: vi.fn() }));
 
 import {
   addressIsReplaceable, geocodeSearchUrl, PINNED_LOCATION, reverseGeocodeUrl, reverseLabel, searchPlaces,

@@ -1,33 +1,44 @@
 import { useEffect, useRef } from 'react';
 import L, { type LeafletMouseEvent } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import GoogleLocationMap, { useGoogleMaps } from './GoogleLocationMap.js';
+import { INDIA_CENTER, INDIA_ZOOM, MIN_PIN_ZOOM, PIN_ZOOM, type LocationMapProps } from './locationMap.js';
 
-interface ShopLocationPickerProps {
-  latitude: number | null;
-  longitude: number | null;
-  center: { latitude: number; longitude: number; zoom?: number } | null;
-  onChange: (latitude: number, longitude: number) => void;
+interface ShopLocationPickerProps extends LocationMapProps {
   /** What the map calls the pinned spot (reverse lookup), shown so a mismatch with the typed address is visible. */
   pinLabel?: string | null;
-  /** A rough device fix: drawn as a circle and zoomed to; the owner taps the entrance inside it. */
-  area?: { latitude: number; longitude: number; radius: number } | null;
 }
 
-/** Until a pin or detected area exists, open on India (where shops are). Pins anywhere in the world still work. */
-const INDIA_CENTER: [number, number] = [22.5, 79];
-const INDIA_ZOOM = 4;
-/** Below this zoom a tap only zooms in; pins are placed at street level. */
-const MIN_PIN_ZOOM = 15;
-const PIN_ZOOM = 17;
+/** Google Maps when a browser key is configured (and loads), otherwise Leaflet + OpenStreetMap tiles. */
+export default function ShopLocationPicker({ pinLabel, ...map }: ShopLocationPickerProps) {
+  const google = useGoogleMaps();
+  const { latitude, longitude, area } = map;
+  return (
+    <div className="location-picker">
+      <div className={`location-map-wrap${google ? ' is-google' : ''}`}>
+        {google ? <GoogleLocationMap {...map} /> : <LeafletLocationMap {...map} />}
+        <div className="location-map-hint">Tap or click the map, or drag the pin to the exact entrance</div>
+      </div>
+      <div className="location-pin-readout">
+        <div>
+          <strong>{latitude != null && longitude != null ? 'Entrance pin selected' : 'No entrance pin yet'}</strong>
+          <span title={latitude != null && longitude != null ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : undefined}>
+            {latitude != null && longitude != null
+              ? pinLabel ? `Near ${pinLabel}` : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+              : area
+                ? 'Your shop should be inside the blue circle. Tap its entrance, then drag to adjust.'
+                : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
+          </span>
+        </div>
+        <span className={`stamp ${latitude != null && longitude != null ? 'green' : 'yellow'}`}>
+          {latitude != null && longitude != null ? 'ready to save' : 'select pin'}
+        </span>
+      </div>
+    </div>
+  );
+}
 
-export default function ShopLocationPicker({
-  latitude,
-  longitude,
-  center,
-  onChange,
-  pinLabel,
-  area,
-}: ShopLocationPickerProps) {
+function LeafletLocationMap({ latitude, longitude, center, onChange, area }: LocationMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
@@ -128,27 +139,5 @@ export default function ShopLocationPicker({
     map.panTo(position);
   }, [latitude, longitude]);
 
-  return (
-    <div className="location-picker">
-      <div className="location-map-wrap">
-        <div className="location-map" ref={containerRef} aria-label="Map for selecting the exact shop entrance" />
-        <div className="location-map-hint">Tap or click the map, or drag the pin to the exact entrance</div>
-      </div>
-      <div className="location-pin-readout">
-        <div>
-          <strong>{latitude != null && longitude != null ? 'Entrance pin selected' : 'No entrance pin yet'}</strong>
-          <span title={latitude != null && longitude != null ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` : undefined}>
-            {latitude != null && longitude != null
-              ? pinLabel ? `Near ${pinLabel}` : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-              : area
-                ? 'Your shop should be inside the blue circle. Tap its entrance, then drag to adjust.'
-                : 'Zoom in and tap or click the exact counter or entrance, then drag to adjust.'}
-          </span>
-        </div>
-        <span className={`stamp ${latitude != null && longitude != null ? 'green' : 'yellow'}`}>
-          {latitude != null && longitude != null ? 'ready to save' : 'select pin'}
-        </span>
-      </div>
-    </div>
-  );
+  return <div className="location-map" ref={containerRef} aria-label="Map for selecting the exact shop entrance" />;
 }

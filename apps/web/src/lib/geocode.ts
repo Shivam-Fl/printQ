@@ -1,5 +1,9 @@
-/** Address search + reverse lookup against the public geocode API (worldwide, no key). */
+/**
+ * Address search + reverse lookup: Google (Places autocomplete + Geocoder) when a browser key is
+ * configured, otherwise the public geocode API proxied by our server (worldwide, no key).
+ */
 import { api } from '../api.js';
+import { createGoogleSearch, googleMapsAvailable, googleReverseLabel } from './googleMaps.js';
 
 export interface PlaceResult {
   id: string;
@@ -68,8 +72,42 @@ export async function searchPlaces(
   return Array.isArray(res.results) ? dedupePlaces(res.results) : [];
 }
 
+/** A search match; Google matches only fetch their coordinates when picked. */
+export interface SearchHit {
+  id: string;
+  label: string;
+  resolve: () => Promise<PlaceResult | null>;
+}
+
+/**
+ * Search for the editor: Google suggestions when available (one session per editor), else the
+ * API search. Google failing falls back to the API search, so search never depends on one provider.
+ */
+export function createPlaceSearch() {
+  const google = createGoogleSearch();
+  return async (query: string, bias?: { latitude: number; longitude: number } | null): Promise<SearchHit[]> => {
+    if (query.trim().length < MIN_QUERY_LENGTH) return [];
+    if (googleMapsAvailable()) {
+      try {
+        const hits = await google(query, bias);
+        return hits.map((hit) => {
+          const label = compactAddress(hit.text);
+          return { id: hit.id, label, resolve: async () => { const at = await hit.resolve(); return at && { id: hit.id, label, ...at }; } };
+        });
+      } catch { /* Google unavailable: the API search below still works */ }
+    }
+    return (await searchPlaces(query, bias)).map((place) => ({ id: place.id, label: place.label, resolve: async () => place }));
+  };
+}
+
 /** Best-effort address for a pin; null on any failure so setup never blocks. */
 export async function reverseLabel(latitude: number, longitude: number): Promise<string | null> {
+  if (googleMapsAvailable()) {
+    try {
+      const label = await googleReverseLabel(latitude, longitude);
+      if (label) return compactAddress(label);
+    } catch { /* fall back to the API lookup */ }
+  }
   try {
     const res = await api<{ label?: string | null }>(reverseGeocodeUrl(latitude, longitude));
     return typeof res.label === 'string' && res.label.trim() ? compactAddress(res.label) : null;
