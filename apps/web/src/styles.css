@@ -1010,6 +1010,8 @@ tr:last-child td { border-bottom: none; }
 /* Hint sits right of the zoom buttons (10px margin + 44px buttons + border) so it never covers "+"; it wraps on narrow maps. */
 .location-map-hint { position: absolute; z-index: 500; top: 12px; left: 66px; right: 12px; width: fit-content; margin: 0 auto; padding: 8px 12px; border: 1px solid rgba(255,255,255,.72); border-radius: 14px; background: rgba(20,28,44,.88); color: #fff; box-shadow: 0 4px 14px rgba(20,28,44,.2); font-size: .73rem; font-weight: 700; line-height: 1.35; text-align: center; pointer-events: none; }
 .location-map .leaflet-control-zoom.leaflet-bar a { width: 44px; height: 44px; line-height: 44px; font-size: 24px; } /* >= 44px tap targets */
+.location-map-wrap.is-google .location-map-hint { left: 12px; } /* Google keeps the top-left corner free */
+.location-map-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--pencil); font-size: .8rem; font-weight: 700; pointer-events: none; }
 .location-pin-readout { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-top: 1px solid var(--rule); background: var(--paper); }
 .location-pin-readout > div { min-width: 0; }
 .location-pin-readout strong, .location-pin-readout span { display: block; }

@@ -1,5 +1,5 @@
 /** Pure helpers behind the shop location editor and setup, kept DOM-free so they are unit-testable. */
-import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, type PlaceResult } from './geocode.js';
+import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION } from './geocode.js';
 import { stillOnboarding, visibilityState, type SetupSnapshot } from './setupSteps.js';
 
 export const SEARCH_FOUND_MESSAGE = 'Choose the closest match, then drag the pin to the exact entrance.';
@@ -7,7 +7,7 @@ export const SEARCH_EMPTY_MESSAGE = 'Nothing found. That is fine: click the map 
 export const SEARCH_FAILED_MESSAGE = 'Address search is unavailable right now. Click the map to drop the pin and type your address.';
 
 /** Message shown after a search; an empty result is a normal outcome that points at the pin fallback. */
-export function searchMessage(results: PlaceResult[]): string {
+export function searchMessage(results: readonly unknown[]): string {
   return results.length ? SEARCH_FOUND_MESSAGE : SEARCH_EMPTY_MESSAGE;
 }
 
