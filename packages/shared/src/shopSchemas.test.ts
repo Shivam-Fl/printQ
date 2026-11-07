@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { printOptionsSchema, shopRegisterSchema } from './schemas.js';
+import { isWeakPassword, passwordProblem } from './password.js';
+import {
+  confirmPasswordResetSchema,
+  printOptionsSchema,
+  shopLoginSchema,
+  shopRegisterSchema,
+  staffLoginSchema,
+} from './schemas.js';
 
 describe('printOptionsSchema pricing sanity (OWN-11)', () => {
   const menu = (over: Record<string, unknown> = {}) => ({
@@ -61,5 +68,75 @@ describe('shop registration messages name the field (OWN-12)', () => {
   it('names a missing field rather than "Required"', () => {
     const r = shopRegisterSchema.safeParse({ ...ok, email: undefined });
     expect(r.success ? '' : r.error.issues[0]!.message).toBe('Email is required');
+  });
+});
+
+describe('shop password rule (S3) and plain login messages (S9)', () => {
+  const regIssues = (password: unknown) => {
+    const r = shopRegisterSchema.safeParse({ shopName: 'Test Shop', address: '12 Lane', ownerName: 'Owner', email: 'a@b.co', password });
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+  };
+
+  it.each([
+    '12345678', '87654321', '1234567890', '0987654321', 'abcdefgh', 'ABCDEFGH', '11111111', 'aaaaaaaa',
+    '12121212', '12341234', 'password', 'Password', 'password1', 'Password@123', 'p@ssw0rd', 'PASSWORD!',
+    'printqs', 'PrintQs@123', 'printq2026', 'qwertyuiop', 'qwerty123', 'admin@123', 'India@123', 'abcd1234',
+  ])('rejects the guessable password %j', (pw) => {
+    expect(isWeakPassword(pw)).toBe(true);
+    const problem = passwordProblem(pw);
+    expect(problem).not.toBeNull();
+    expect(problem).toMatch(/^Password /);
+  });
+
+  it.each(['Ganesh Xerox 21', 'correct-horse-1', 'Sharma@Copy9', 'longenough', 'Corner-print-42', '9810-ravi-copy'])(
+    'accepts the ordinary password %j',
+    (pw) => {
+      expect(isWeakPassword(pw)).toBe(false);
+      expect(passwordProblem(pw)).toBeNull();
+      expect(regIssues(pw)).toEqual([]);
+    },
+  );
+
+  it('rejects whitespace-only and too-short-after-trim passwords with one plain message', () => {
+    expect(regIssues('        ')).toEqual(['password: Password cannot be only spaces']);
+    expect(regIssues('  abc12  ')).toEqual(['password: Password must be at least 8 characters']);
+    expect(regIssues('short')).toEqual(['password: Password must be at least 8 characters']);
+    expect(regIssues('1234')).toEqual(['password: Password must be at least 8 characters']);
+    expect(regIssues('12345678')).toHaveLength(1);
+    expect(regIssues('x'.repeat(129))).toEqual(['password: Password must be at most 128 characters']);
+  });
+
+  it('applies the same rule to reset, named "New password"', () => {
+    const reset = (newPassword: unknown) => {
+      const r = confirmPasswordResetSchema.safeParse({ email: 'a@b.co', otp: '123456', newPassword });
+      return r.success ? [] : r.error.issues.map((i) => i.message);
+    };
+    expect(reset('Corner-print-42')).toEqual([]);
+    expect(reset('12345678')[0]).toMatch(/^New password is too easy to guess/);
+    expect(reset('        ')).toEqual(['New password cannot be only spaces']);
+    expect(reset('short')).toEqual(['New password must be at least 8 characters']);
+    expect(reset(undefined)).toEqual(['New password is required']);
+  });
+
+  it('login only needs a non-empty password — never raw zod text', () => {
+    const login = (body: Record<string, unknown>) => {
+      const r = shopLoginSchema.safeParse(body);
+      return r.success ? [] : r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+    };
+    // a staff PIN typed in the password box is a wrong password, not a schema error
+    expect(login({ email: 'staff@shop.co', password: '4821' })).toEqual([]);
+    expect(login({ email: 'Owner@Shop.co ', password: 'x' })).toEqual([]);
+    expect(login({ email: 'owner@shop.co', password: '' })).toEqual(['password: Enter your password']);
+    expect(login({ email: 'owner@shop.co' })).toEqual(['password: Enter your password']);
+    expect(login({ email: 'nope', password: 'whatever1' })).toEqual(['email: Enter a valid email address']);
+    expect(login({ password: 'whatever1' })).toEqual(['email: Enter your email']);
+    expect(login({ email: 'a@b.co', password: 'x'.repeat(129) })).toEqual(['password: Password must be at most 128 characters']);
+  });
+
+  it('staff PIN login and reset-code messages are plain', () => {
+    const pin = staffLoginSchema.safeParse({ email: 'staff@shop.co' });
+    expect(pin.success ? [] : pin.error.issues.map((i) => i.message)).toEqual(['Enter your PIN']);
+    const code = confirmPasswordResetSchema.safeParse({ email: 'a@b.co', otp: '12', newPassword: 'Corner-print-42' });
+    expect(code.success ? [] : code.error.issues.map((i) => i.message)).toEqual(['Code is 6 digits']);
   });
 });

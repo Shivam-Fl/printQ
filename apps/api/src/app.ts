@@ -58,6 +58,8 @@ export function createApp(): express.Express {
         if (!origin || env.CORS_ORIGINS.includes(origin)) callback(null, true);
         else callback(new HttpError(403, 'Origin is not allowed', 'CORS_ORIGIN_DENIED'));
       },
+      // split-domain production (printqs.com -> api.printqs.com): let the web read the 429 wait time
+      exposedHeaders: ['Retry-After'],
     }),
   );
   app.use(

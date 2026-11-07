@@ -31,6 +31,7 @@ const Privacy = lazy(() => import('./pages/legal/Privacy.js'));
 const Terms = lazy(() => import('./pages/legal/Terms.js'));
 const Refunds = lazy(() => import('./pages/legal/Refunds.js'));
 const Support = lazy(() => import('./pages/legal/Support.js'));
+const PcDownload = lazy(() => import('./pages/legal/PcDownload.js'));
 import NotFound from './pages/legal/NotFound.js';
 
 function RouteMeta() {
@@ -94,6 +95,8 @@ export default function App() {
         <Route path="/terms" element={<Terms />} />
         <Route path="/refunds" element={<Refunds />} />
         <Route path="/support" element={<Support />} />
+        {/* public: printqs.com/pc, the counter-computer installer (typed on the shop PC) */}
+        <Route path="/pc" element={<PcDownload />} />
         <Route path="/contact" element={<Navigate to="/support" replace />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

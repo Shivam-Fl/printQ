@@ -2,26 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
-import { reverseLabel } from '../../lib/geocode.js';
 import ShopNav from '../../components/ShopNav.js';
 import { shouldPollSetup, startSetupPolling } from '../../lib/setupPolling.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
-import { addressAfterReverse, buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
+import { buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
+import { isListed, setupSteps, statusBanner, visibilityState, type SetupSnapshot } from '../../lib/setupSteps.js';
 
-interface SetupStatus {
+interface SetupStatus extends SetupSnapshot {
   profileReady: boolean;
-  locationReady: boolean;
-  pricingReady: boolean;
-  printerReady: boolean;
-  agentReady: boolean;
-  ready: boolean;
-  counts: {
-    printers: number;
-    linkedPrinters: number;
-    onlinePrinters: number;
-    agents: number;
-    onlineAgents: number;
-  };
+  counts: SetupSnapshot['counts'] & { printers: number };
   studentUrl: string;
   verification: {
     status: 'draft' | 'submitted' | 'verified' | 'rejected';
@@ -36,39 +25,7 @@ interface SetupStatus {
 
 /** Signed-out visits (the desktop tray link) come back here after login. */
 const LOGIN_THEN_SETUP = '/dashboard/login?next=/dashboard/setup';
-
-type StepKey = 'locationReady' | 'pricingReady' | 'agentReady' | 'ready';
-
-const STEPS: Array<{ key: StepKey; number: string; title: string; body: string; to?: string; action?: string }> = [
-  {
-    key: 'locationReady',
-    number: '01',
-    title: 'Confirm your location',
-    body: 'We try to find you automatically. Check the pin and address, then save.',
-  },
-  {
-    key: 'pricingReady',
-    number: '02',
-    title: 'Check your prices',
-    body: 'Sensible defaults are already filled in. Keep them or change paper, colour and binding prices.',
-    to: '/dashboard/settings',
-    action: 'Review prices',
-  },
-  {
-    key: 'agentReady',
-    number: '03',
-    title: 'Connect your shop PC',
-    body: 'Install the PrintQ app on the computer next to your printer. It finds your printers by itself.',
-    to: '/dashboard/agents',
-    action: 'Connect computer',
-  },
-  {
-    key: 'ready',
-    number: '04',
-    title: 'You are live',
-    body: 'As soon as your PC is connected, students nearby can find your shop and send jobs.',
-  },
-];
+const STEP_COUNT = 4;
 
 export default function ShopSetup() {
   const navigate = useNavigate();
@@ -104,14 +61,9 @@ export default function ShopSetup() {
       .then((r) => {
         // A pin found during register wins over an empty shop, so the owner is not asked for location twice.
         const fromRegister = r.shop.latitude == null || r.shop.longitude == null ? takeRegisterPin() : null;
+        // The editor looks a register pin up on mount: it fills an empty address and shows what the map calls the spot.
         setPin(fromRegister ?? { latitude: r.shop.latitude, longitude: r.shop.longitude });
         setAddress(r.shop.address);
-        if (fromRegister) {
-          // The register pin skipped the editor's lookup: fill the address now unless the owner already has text.
-          void reverseLabel(fromRegister.latitude, fromRegister.longitude)
-            .then((label) => setAddress((current) => addressAfterReverse(current, label)))
-            .catch(() => { /* keep the saved address */ });
-        }
       })
       .catch(() => { /* the editor still works without the saved values */ })
       .finally(() => setShopLoaded(true));
@@ -144,10 +96,12 @@ export default function ShopSetup() {
     }).then(setQr).catch(() => setQr(''));
   }, [setup?.studentUrl]);
 
-  const completeCount = useMemo(
-    () => (setup ? STEPS.filter((step) => setup[step.key]).length : 0),
-    [setup],
-  );
+  const steps = useMemo(() => (setup ? setupSteps(setup) : []), [setup]);
+  const completeCount = steps.filter((step) => step.done).length;
+  const state = setup ? visibilityState(setup) : null;
+  const listed = state ? isListed(state) : false;
+  // A live shop with its PC off, or a paused / campus-hidden shop, gets a plain notice instead of onboarding copy.
+  const banner = setup && state !== 'live' && state !== 'not_ready' && state !== 'pending_review' ? statusBanner(setup) : null;
 
   async function copyLink() {
     if (!setup) return;
@@ -197,39 +151,58 @@ export default function ShopSetup() {
   }
 
   return (
-    <div className="page wide shop-page">
+    <main className="page wide shop-page">
       <ShopNav />
       <header className="page-heading setup-heading">
         <div>
           <span className="eyebrow-label">Launch checklist</span>
           <h1>Get your counter ready</h1>
-          <p>Four short steps, about three minutes. No campus needed.</p>
+          <p>Four short steps. No campus needed.</p>
         </div>
-        <div className="setup-score" aria-label={`${completeCount} of ${STEPS.length} setup steps complete`}>
-          <strong>{completeCount}/{STEPS.length}</strong>
+        <div className="setup-score" aria-label={setup ? `${completeCount} of ${STEP_COUNT} setup steps complete` : 'Loading setup'}>
+          <strong>{setup ? `${completeCount}/${STEP_COUNT}` : '–'}</strong>
           <span>complete</span>
         </div>
       </header>
 
       {setup && (
         <div className="progress-track" aria-hidden>
-          <span style={{ width: `${(completeCount / STEPS.length) * 100}%` }} />
+          <span style={{ width: `${(completeCount / STEP_COUNT) * 100}%` }} />
         </div>
       )}
 
-      {setup?.ready && (
+      {state === 'live' && (
         <div className="notice success-notice">
           <div>
-            <strong>Your shop is live.</strong>
-            <p>Students nearby can find it now. Keep PrintQ running on the counter PC and share your student link.</p>
+            <strong>You’re live.</strong>
+            <p>Students nearby can find your shop now. Keep PrintQs Shop running on the counter PC and share your student link.</p>
           </div>
           <Link className="button-link" to="/dashboard">Open live queue</Link>
         </div>
       )}
 
+      {banner && (
+        <div className="notice setup-notice">
+          <div>
+            <strong>{banner.title}</strong>
+            <p>{banner.text}</p>
+          </div>
+          <Link className="button-link" to={banner.to}>{banner.action}</Link>
+        </div>
+      )}
+
+      {!setup && !error && (
+        <div className="setup-grid" aria-busy="true">
+          <p className="dim" role="status" style={{ gridColumn: '1 / -1', margin: 0 }}>Loading your checklist…</p>
+          {Array.from({ length: STEP_COUNT }, (_, index) => (
+            <div className="skeleton-card" key={index} style={{ height: 190 }} aria-hidden />
+          ))}
+        </div>
+      )}
+
       <div className="setup-grid">
-        {STEPS.map((step) => {
-          const done = Boolean(setup?.[step.key]);
+        {steps.map((step) => {
+          const done = step.done;
           return (
             <section className={`setup-card${done ? ' done' : ''}`} key={step.key}>
               <div className="setup-card-top">
@@ -238,7 +211,14 @@ export default function ShopSetup() {
               </div>
               <h2>{step.title}</h2>
               <p>{step.body}</p>
-              {step.key === 'locationReady' && setup && shopLoaded && (!done || editingLocation) && (
+              {step.note && <p style={{ minHeight: 0 }}>{step.note}</p>}
+              {step.key === 'location' && !done && setup && !shopLoaded && (
+                <>
+                  <div className="skeleton-card" style={{ height: 340 }} aria-hidden />
+                  <p role="status" style={{ minHeight: 0, marginTop: 10 }}>Loading the map…</p>
+                </>
+              )}
+              {step.key === 'location' && setup && shopLoaded && (!done || editingLocation) && (
                 <>
                   <ShopLocationEditor
                     latitude={pin.latitude}
@@ -255,26 +235,26 @@ export default function ShopSetup() {
                   {locationError && <div className="error-box" role="alert">{locationError}</div>}
                 </>
               )}
-              {step.key === 'locationReady' && done && !editingLocation && (
+              {step.key === 'location' && done && !editingLocation && (
                 <button type="button" className="ghost small" onClick={() => setEditingLocation(true)}>Review location →</button>
               )}
-              {step.to && <Link to={step.to}>{done ? 'Review' : step.action} →</Link>}
+              {step.to && <Link to={step.to}>{step.action} →</Link>}
             </section>
           );
         })}
       </div>
 
-      {setup && !setup.ready && setup.verification.autoLive !== false && (
+      {setup && state === 'not_ready' && setup.verification.autoLive !== false && (
         <section className="share-panel">
           <div className="share-copy">
             <span className="eyebrow-label">Going live</span>
             <h2>Your shop goes live by itself</h2>
-            <p>There is nothing to submit and no review to wait for. Once your location is saved, prices are set and your PC is connected to a printer, students nearby can find you.</p>
+            <p>There is nothing to submit and no review to wait for. Once your location is saved, your counter PC is connected and your printer is added, students nearby can find you.</p>
           </div>
         </section>
       )}
 
-      {setup && !setup.ready && setup.verification.autoLive === false && (
+      {setup && (state === 'not_ready' || state === 'pending_review') && setup.verification.autoLive === false && (
         <section className="share-panel">
           <div className="share-copy">
             <span className="eyebrow-label">Independent verification</span>
@@ -295,12 +275,12 @@ export default function ShopSetup() {
         </section>
       )}
 
-      {setup?.ready && (
+      {setup && listed && (
         <section className="share-panel">
           <div className="share-copy">
             <span className="eyebrow-label">Student ordering link</span>
             <h2>Put this QR at the counter</h2>
-            <p>Students upload and pay from anywhere, then join the walk-in line only after they physically arrive.</p>
+            <p>Students upload from anywhere and pay you at the counter. They join the walk-in line only after they arrive.</p>
             <div className="copy-field">
               <code>{setup.studentUrl}</code>
               <button className="secondary small" onClick={copyLink}>{copied ? 'Copied' : 'Copy link'}</button>
@@ -326,6 +306,6 @@ export default function ShopSetup() {
       </section>
 
       {error && <div className="error-box">{error}</div>}
-    </div>
+    </main>
   );
 }

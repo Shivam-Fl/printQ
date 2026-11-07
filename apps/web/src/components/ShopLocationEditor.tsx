@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ShopLocationPicker from './ShopLocationPicker.js';
-import { searchMessage, SEARCH_FAILED_MESSAGE } from '../lib/locationFlow.js';
+import { autoSearchQuery, searchMessage, SEARCH_FAILED_MESSAGE } from '../lib/locationFlow.js';
 import { addressIsReplaceable, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, searchPlaces, type PlaceResult } from '../lib/geocode.js';
 
 interface Props {
@@ -27,7 +27,10 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PlaceResult[]>([]);
+  /** What the map calls the current pin; shown even when the owner typed a different address. */
+  const [pinLabel, setPinLabel] = useState<string | null>(null);
   const lastAuto = useRef<string | null>(null);
+  const autoSearched = useRef(false);
   const addressRef = useRef(address);
   const reverseSeq = useRef(0);
   const detectedOnce = useRef(false);
@@ -44,6 +47,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const runReverse = async (lat: number, lng: number, mine: number) => {
     const label = await reverseLabel(lat, lng);
     if (mine !== reverseSeq.current) return;
+    setPinLabel(label);
     if (!addressIsReplaceable(addressRef.current, lastAuto.current)) return;
     const next = label ?? PINNED_LOCATION;
     lastAuto.current = next;
@@ -56,6 +60,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
   const fillAddress = useCallback((lat: number, lng: number) => {
     if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     const mine = ++reverseSeq.current;
+    setPinLabel(null);
     reverseTimer.current = window.setTimeout(() => { void runReverseRef.current(lat, lng, mine); }, 600);
   }, []);
 
@@ -64,8 +69,20 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     fillAddress(lat, lng);
   }, [onPin, fillAddress]);
 
+  /** Location is off: search once for the address typed at sign-up, so the owner only picks a match. */
+  const autoSearchRef = useRef<(intro: string) => boolean>(() => false);
+  autoSearchRef.current = (intro: string) => {
+    const text = autoSearchQuery(addressRef.current);
+    if (!autoDetect || hasPin || autoSearched.current || !text) return false;
+    autoSearched.current = true;
+    setQuery(text);
+    void runSearch(text, intro);
+    return true;
+  };
+
   const detect = useCallback(() => {
     if (!navigator.geolocation) {
+      if (autoSearchRef.current('This device cannot share its location, so we searched for your address. ')) return;
       setMessage('This device cannot share its location. Search for your address or click the map.');
       return;
     }
@@ -90,10 +107,13 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     };
     const fallback = (denied: boolean) => {
       if (mine !== detectSeq.current) return;
+      setBusy(false);
+      if (autoSearchRef.current(denied
+        ? 'Location access is off, so we searched for the address you typed. '
+        : 'Could not get a location, so we searched for the address you typed. ')) return;
       setMessage(denied
         ? 'Location access is off. Search your address below or click the map to drop the pin.'
         : 'Could not get a location. Search your address below or click the map to drop the pin.');
-      setBusy(false);
     };
     navigator.geolocation.getCurrentPosition(
       (position) => applyPosition(position, false),
@@ -122,23 +142,37 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     detect();
   }, [autoDetect, hasPin, detect]);
 
+  // First-time setup that opens with a pin (handed over from register): look it up once so the
+  // owner sees what the map calls that spot and an empty address gets filled.
+  useEffect(() => {
+    if (autoDetect && latitude != null && longitude != null) fillAddress(latitude, longitude);
+    // Mount only: later pins are looked up where they are placed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** `intro` marks the one automatic search: its message explains why, and the map moves to the best match. */
+  async function runSearch(text: string, intro = '') {
+    setSearching(true);
+    setResults([]);
+    try {
+      const found = await searchPlaces(text, hasPin ? { latitude, longitude } : null);
+      setResults(found);
+      setMessage(intro + searchMessage(found));
+      if (intro && found[0]) setCenter({ latitude: found[0].latitude, longitude: found[0].longitude, zoom: 16 });
+    } catch {
+      setMessage(intro + SEARCH_FAILED_MESSAGE);
+    } finally {
+      setSearching(false);
+    }
+  }
+
   async function search() {
     const text = query.trim();
     if (text.length < MIN_QUERY_LENGTH) {
       setMessage('Type at least 3 characters, for example a street, area or shop name.');
       return;
     }
-    setSearching(true);
-    setResults([]);
-    try {
-      const found = await searchPlaces(text, hasPin ? { latitude, longitude } : null);
-      setResults(found);
-      setMessage(searchMessage(found));
-    } catch {
-      setMessage(SEARCH_FAILED_MESSAGE);
-    } finally {
-      setSearching(false);
-    }
+    await runSearch(text);
   }
 
   function choose(result: PlaceResult) {
@@ -147,6 +181,7 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
     if (reverseTimer.current != null) window.clearTimeout(reverseTimer.current);
     setCenter({ latitude: result.latitude, longitude: result.longitude, zoom: 18 });
     setResults([]);
+    setPinLabel(result.label);
     onPin(result.latitude, result.longitude);
     if (addressIsReplaceable(addressRef.current, lastAuto.current)) {
       lastAuto.current = result.label;
@@ -192,13 +227,19 @@ export default function ShopLocationEditor({ latitude, longitude, address, onPin
           ))}
         </ul>
       )}
-      <ShopLocationPicker latitude={latitude} longitude={longitude} center={center} onChange={place} />
+      <ShopLocationPicker latitude={latitude} longitude={longitude} center={center} onChange={place} pinLabel={pinLabel} />
       <span className="location-attribution">Address search and map data © OpenStreetMap contributors</span>
       {!hideAddress && (
         <div className="field">
           <label htmlFor="shop-address">Address students will see</label>
           <input id="shop-address" type="text" value={address} onChange={(event) => onAddress(event.target.value)} autoComplete="street-address" />
-          <span className="field-help">Filled in from the pin. Edit it freely; “{PINNED_LOCATION}” is fine too.</span>
+          <span className="field-help">
+            {!hasPin
+              ? 'Shop number, road and area, so students can find you.'
+              : lastAuto.current !== null && address.trim() === lastAuto.current
+                ? 'Filled in from the pin. Add your shop number or a landmark so students can find you.'
+                : `Edit it freely; “${PINNED_LOCATION}” is fine too.`}
+          </span>
         </div>
       )}
     </div>

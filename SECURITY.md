@@ -148,6 +148,16 @@ This is a pilot-stage project. Report issues to the repo owner directly.
 - Unauthenticated, login, OTP-request/verify, Firebase-session and fee-action limiters stay strictly **per IP**
   (brute-force protection); OTP requests also keep the database-backed per-phone limits (1/min, 10/day). The
   counter-code failure limiter stays per (shop, IP) and per shop.
-- Every 429 carries `Retry-After` (seconds).
+- Shop/staff/admin login counts only failed sign-ins (successful ones give their slot back), still 5/min per IP.
+  Shop register has its own bucket: 10 per 15 minutes per IP, every attempt counts (each sign-up can create an
+  auto-live shop).
+- Staff PINs: 10 wrong tries per account per 15 minutes (keyed by a hash of the email, whatever the IP), on both
+  `/shop/staff-login` and `/shop/login` (only when the password is PIN-shaped, so a full owner password is never
+  locked out). A correct PIN gives its slot back.
+- Login OTP verify and shop reset-password claim an attempt atomically before checking the hash, so parallel
+  guesses cannot exceed 5 tries per code; the code is consumed with a conditional update (works once).
+- Passwords (register and reset) use one shared rule, `passwordProblem()` in `@printq/shared`: 8-128 characters,
+  not only spaces, and not an easy guess (repeats, straight runs like 12345678, common words like Password@123).
+- Every 429 carries `Retry-After` (seconds), exposed through CORS for the split-domain web app.
 - Shop coordinates are validated against a India bounding box only (accepted limitation: neighbouring countries
   inside the box are not rejected; a polygon check was judged not worth the complexity).

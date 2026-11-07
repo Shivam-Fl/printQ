@@ -63,6 +63,24 @@ describe('geocode routes (public, no auth)', () => {
     expect((await fetch(`${base}/api/shop/geocode/reverse?lat=0x10&lng=1e1`)).status).toBe(400);
   });
 
+  it('lets one client hold at most 2 lookups in the shared provider queue at a time', async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    search.mockImplementation(async () => { await gate; return []; });
+    const first = fetch(`${base}/api/shop/geocode?q=slow+one`);
+    const second = fetch(`${base}/api/shop/geocode?q=slow+two`);
+    await vi.waitFor(() => expect(search).toHaveBeenCalledTimes(2));
+    const third = await fetch(`${base}/api/shop/geocode?q=slow+three`);
+    expect(third.status).toBe(429);
+    expect(third.headers.get('retry-after')).toBe('2');
+    finish();
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    // slots are given back once a lookup finishes
+    search.mockResolvedValue([]);
+    expect((await fetch(`${base}/api/shop/geocode?q=after+slow`)).status).toBe(200);
+  });
+
   it('rate limits with 429 after the per-IP budget is spent', async () => {
     let last = 200;
     for (let i = 0; i < 40 && last !== 429; i += 1) {

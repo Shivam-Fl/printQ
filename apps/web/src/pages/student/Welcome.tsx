@@ -32,6 +32,10 @@ export default function Welcome() {
             <Link to="/login" className="button-link large">Start a print <IconChevron /></Link>
             <Link to="/shops" className="button-link secondary large">Browse nearby shops</Link>
           </div>
+          <p className="welcome-owner-line">
+            Own a print shop? <Link to="/dashboard/register">Register your shop</Link> in about three minutes,
+            or <Link to="/dashboard/login">sign in</Link>.
+          </p>
           <div className="trust-row">
             <span><IconClock /> Arrival-based live line</span>
             <span><IconBell /> Turn alerts</span>
@@ -78,22 +82,25 @@ export default function Welcome() {
               <span className="role-link">Continue with phone <IconChevron /></span>
             </div>
           </Link>
-          <Link to="/dashboard/login" className="role-card owner-role">
+          <div className="role-card owner-role">
             <span className="role-icon"><IconStore /></span>
             <div>
               <span className="role-label">For print shops</span>
               <h3>Run your queue</h3>
               <p>Prepared orders stay separate from checked-in students. One code finds the right order and confirms cash or UPI when received.</p>
-              <span className="role-link">Open shop dashboard <IconChevron /></span>
+              <div className="role-actions">
+                <Link to="/dashboard/register" className="role-link">Register your shop <IconChevron /></Link>
+                <Link to="/dashboard/login" className="role-secondary">Already registered? Sign in</Link>
+              </div>
             </div>
-          </Link>
+          </div>
         </div>
       </section>
 
       <footer className="public-footer">
         <span>PrintQ</span>
         <span>Less waiting. Better printing.</span>
-        <Link to="/shops">Find a verified shop</Link>
+        <Link to="/shops">Find a shop</Link>
         <PolicyLinks />
       </footer>
     </main>

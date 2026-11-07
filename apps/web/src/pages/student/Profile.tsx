@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, clearToken, getToken } from '../../api.js';
 import { enablePush, pushPermission } from '../../push.js';
 import { resetSockets } from '../../socket.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { IconBell, IconLogout } from '../../components/Icons.js';
+import { studentLoginPath } from '../../lib/studentReturn.js';
 
 interface Me {
   name: string | null;
@@ -14,6 +15,8 @@ interface Me {
 
 export default function Profile() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const loginPath = studentLoginPath(location.pathname + location.search);
   const [me, setMe] = useState<Me | null>(null);
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
@@ -24,7 +27,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (!getToken('student')) {
-      navigate('/login', { replace: true });
+      navigate(loginPath, { replace: true });
       return;
     }
     api<{ student: Me }>('/api/auth/student/me', { role: 'student' })
@@ -33,7 +36,7 @@ export default function Profile() {
         setName(r.student.name ?? '');
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your profile'));
-  }, [navigate]);
+  }, [navigate, loginPath]);
 
   async function save() {
     setBusy(true);

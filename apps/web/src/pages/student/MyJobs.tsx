@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ago, api, getToken, rupees } from '../../api.js';
 import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
+import { studentLoginPath } from '../../lib/studentReturn.js';
 
 interface JobRow {
   id: string;
@@ -46,18 +47,20 @@ function JobCard({ job }: { job: JobRow }) {
 
 export default function MyJobs() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const loginPath = studentLoginPath(location.pathname + location.search);
   const [jobs, setJobs] = useState<JobRow[] | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!getToken('student')) {
-      navigate('/login', { replace: true });
+      navigate(loginPath, { replace: true });
       return;
     }
     api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student' })
       .then((r) => setJobs(r.jobs))
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
-  }, [navigate]);
+  }, [navigate, loginPath]);
 
   const active = jobs?.filter((j) => statusMeta(j.status).active) ?? [];
   const history = jobs?.filter((j) => !statusMeta(j.status).active) ?? [];

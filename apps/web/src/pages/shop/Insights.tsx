@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getToken, rupees } from '../../api.js';
 import ShopNav from '../../components/ShopNav.js';
+import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface Stats {
   totalRevenuePaise: number;
@@ -21,7 +22,7 @@ export default function Insights() {
 
   useEffect(() => {
     if (!getToken('shop')) {
-      navigate('/dashboard/login');
+      navigate(shopLoginPath());
       return;
     }
     api<{ stats: Stats }>('/api/shop/stats', { role: 'shop' })

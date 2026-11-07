@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -14,7 +14,7 @@ import {
   type PriceBreakdown,
 } from '@printq/shared';
 import { prisma } from '../../lib/prisma.js';
-import { asyncHandler, badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
+import { asyncHandler, badRequest, conflict, forbidden, HttpError, notFound, tooMany } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
 import { publishIfReady } from './autoLive.js';
 import { requireShopOwner, requireShopUser } from '../../middleware/auth.js';
@@ -48,6 +48,8 @@ import { distanceMeters, MATERIAL_MOVE_M } from '../../lib/geo.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { reverseLocation, searchLocations } from '../../providers/geocoding/index.js';
 import { selectPrinterTestAgent } from './printerTest.js';
+import { csvCell } from './csv.js';
+import { countDetectedPrinters, hasOnlinePrinterPath, shopVisibility, VISIBILITY_ADMIN_ACTIONS } from './visibility.js';
 
 export const shopRouter = Router();
 
@@ -96,6 +98,8 @@ shopRouter.get(
     res.json({
       shop: { ...shop, printOptions: shopOptions(shop) },
       user: { role: req.shopUser!.role },
+      // PrintQs fee added on top of the shop's base prices (basis points, 2500 = 25%).
+      platformMarkupBps: env.PLATFORM_MARKUP_BPS,
     });
   }),
 );
@@ -103,6 +107,31 @@ shopRouter.get(
 // Public on purpose: the sign-up form prefills the address from the pin before an
 // account exists. Guarded by a strict per-IP limiter; providers are cached and throttled.
 const geocodeLimiter = makeGeneralLimiter('geocode', 30, 30);
+/**
+ * The provider queue is shared and small (1 req/s, a few waiting). One client may
+ * hold at most 2 lookups in it at a time, so a single flooder cannot fill it and
+ * make everyone else's search come back empty. Legit use (submit-only search +
+ * a debounced pin lookup) never has more than 2 in flight.
+ */
+const GEOCODE_IN_FLIGHT_PER_CLIENT = 2;
+const geocodeInFlight = new Map<string, number>();
+const geocodeFairShare: RequestHandler = (req, res, next) => {
+  const key = req.ip ?? 'unknown';
+  const running = geocodeInFlight.get(key) ?? 0;
+  if (running >= GEOCODE_IN_FLIGHT_PER_CLIENT) return next(tooMany('Still looking up your last search. Try again in a moment.', 2));
+  geocodeInFlight.set(key, running + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const left = (geocodeInFlight.get(key) ?? 1) - 1;
+    if (left > 0) geocodeInFlight.set(key, left);
+    else geocodeInFlight.delete(key);
+  };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+};
 const optionalCoord = (v: unknown, max: number): number | undefined => {
   if (typeof v !== 'string' || !/^-?\d{1,3}(\.\d+)?$/.test(v.trim())) return undefined;
   const n = Number(v);
@@ -119,14 +148,17 @@ const geocodeSearch = asyncHandler(async (req, res) => {
   res.json({ results: await searchLocations(query, bias) });
 });
 
-shopRouter.get('/geocode', geocodeLimiter, geocodeSearch);
+// Public on purpose (no sign-in): the register page searches before the shop account exists.
+shopRouter.get('/geocode', geocodeLimiter, geocodeFairShare, geocodeSearch);
 // Deprecated alias kept so shipped clients keep working.
-shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeSearch);
+shopRouter.get('/location-search', requireShopOwner, geocodeLimiter, geocodeFairShare, geocodeSearch);
 
 /** Pin to address label for prefilling the address. label is null when unknown or the provider is down. */
+// Public on purpose (no sign-in), like /geocode: register fills the address from the pin.
 shopRouter.get(
   '/geocode/reverse',
   geocodeLimiter,
+  geocodeFairShare,
   asyncHandler(async (req, res) => {
     const lat = optionalCoord(req.query.lat, 90);
     const lng = optionalCoord(req.query.lng, 180);
@@ -142,7 +174,7 @@ shopRouter.get(
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
     const [shop, printers, agents] = await Promise.all([
-      prisma.shop.findUnique({ where: { id: shopId } }),
+      prisma.shop.findUnique({ where: { id: shopId }, include: { campus: { select: { isActive: true } } } }),
       prisma.printer.findMany({ where: { shopId } }),
       prisma.agent.findMany({ where: { shopId } }),
     ]);
@@ -152,6 +184,14 @@ shopRouter.get(
       const fresh = await prisma.shop.findUnique({ where: { id: shopId } });
       if (fresh) Object.assign(shop, fresh);
     }
+    // Only an unpublished verified or rejected shop needs the admin trail (was it hidden on purpose?).
+    const lastAdminAction = shop.verificationStatus === 'rejected' || (shop.verificationStatus === 'verified' && !shop.publishedAt)
+      ? await prisma.adminAuditEvent.findFirst({
+          where: { subjectType: 'shop', subjectId: shopId, action: { in: VISIBILITY_ADMIN_ACTIONS } },
+          orderBy: { createdAt: 'desc' },
+          select: { action: true, metadata: true },
+        })
+      : null;
 
     const linkedPrinters = printers.filter((printer) => Boolean(printer.osPrinterName));
     const readyPrinters = linkedPrinters.filter((printer) => printer.status === 'online');
@@ -190,12 +230,17 @@ shopRouter.get(
             && shop.verificationStatus !== 'verified',
         },
         acceptingOrders: shop.acceptingOrders,
+        // What students see right now; separate from "is setup complete" (ready).
+        visibility: shopVisibility({ ...shop, printerPathOnline: hasOnlinePrinterPath(agents, printers), lastAdminAction }),
+        platformMarkupBps: env.PLATFORM_MARKUP_BPS,
         counts: {
           printers: printers.length,
           linkedPrinters: linkedPrinters.length,
           onlinePrinters: readyPrinters.length,
           agents: agents.length,
           onlineAgents: onlineAgents.length,
+          // OS printers an online PC can see that are not added as a PrintQs printer yet.
+          detectedPrinters: countDetectedPrinters(agents, printers),
         },
         studentUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, '')}/s/${shop.slug}`,
       },
@@ -669,11 +714,6 @@ shopRouter.get(
   }),
 );
 
-const csvCell = (v: string | number) => {
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
 /** Same history data as CSV, for the owner's own bookkeeping/accounting. */
 shopRouter.get(
   '/history.csv',
@@ -696,6 +736,7 @@ shopRouter.get(
     });
 
     const header = ['Date', 'Student', 'File', 'Printer', 'Status', 'Amount (INR)', 'Discount (INR)', 'Payment'];
+    // csvCell neutralises formula-looking text (=, +, -, @) in the student-typed name and file name.
     const rows = jobs.map((j) =>
       [
         j.updatedAt.toISOString(),
@@ -1183,12 +1224,25 @@ shopRouter.post(
   }),
 );
 
+// printerInputSchema.partial() would re-apply the create defaults (finishingOptions [],
+// status 'online', 15 ppm) to every PATCH and silently reset fields the caller never sent.
+const printerPatchSchema = printerInputSchema.extend({
+  finishingOptions: printerInputSchema.shape.finishingOptions.removeDefault(),
+  avgPagesPerMinute: printerInputSchema.shape.avgPagesPerMinute.removeDefault(),
+  status: printerInputSchema.shape.status.removeDefault(),
+}).partial();
+/** Counter staff may switch a printer online/offline and note the loaded paper; routing setup is owner-only. */
+const STAFF_PRINTER_FIELDS = new Set(['status', 'currentlyLoadedPaper']);
+
 shopRouter.patch(
   '/printers/:id',
   requireShopUser,
-  validateBody(printerInputSchema.partial()),
+  validateBody(printerPatchSchema),
   asyncHandler(async (req, res) => {
     const shopId = req.shopUser!.shopId;
+    if (req.shopUser!.role !== 'owner' && Object.keys(req.body as object).some((key) => !STAFF_PRINTER_FIELDS.has(key))) {
+      throw forbidden('Only the shop owner can change printer setup. Staff can switch a printer online or offline.');
+    }
     const existing = await prisma.printer.findFirst({ where: { id: param(req, 'id'), shopId } });
     if (!existing) throw notFound();
     const otherOnlineBefore = await prisma.printer.count({

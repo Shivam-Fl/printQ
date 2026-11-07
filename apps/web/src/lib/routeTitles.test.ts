@@ -8,6 +8,7 @@ describe('titleForPath', () => {
     expect(titleForPath('/s/abc')).toContain('Print at this shop');
     expect(titleForPath('/jobs/123')).toContain('Print status');
     expect(titleForPath('/')).toContain('skip the print queue');
+    expect(titleForPath('/pc')).toBe('Install PrintQs on your shop computer · PrintQs');
   });
   it('titles unknown routes as not found', () => {
     expect(titleForPath('/nope/nothing')).toBe('Page not found · PrintQs');

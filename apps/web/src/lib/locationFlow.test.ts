@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { PINNED_LOCATION } from './geocode.js';
 import {
-  addressAfterReverse,
-  buildLocationSave, postLoginPath, REGISTER_PIN_KEY, SEARCH_EMPTY_MESSAGE, SEARCH_FOUND_MESSAGE,
+  addressAfterReverse, autoSearchQuery,
+  buildLocationSave, postLoginPath, REGISTER_PIN_KEY, shopLoginPath, SEARCH_EMPTY_MESSAGE, SEARCH_FOUND_MESSAGE,
   searchMessage, stashRegisterPin, takeRegisterPin,
 } from './locationFlow.js';
 
@@ -85,10 +85,60 @@ describe('register pin reverse lookup', () => {
 });
 
 describe('post-login destination', () => {
-  it('lands on setup from the tray link, otherwise on the dashboard', () => {
+  const live = { ready: true, verification: { publishedAt: '2026-11-01T00:00:00Z' } };
+  const fresh = { ready: false, verification: { publishedAt: null } };
+
+  it('keeps ?next for any same-site dashboard page', () => {
     expect(postLoginPath('/dashboard/setup')).toBe('/dashboard/setup');
+    expect(postLoginPath('/dashboard/settings', fresh)).toBe('/dashboard/settings');
+    expect(postLoginPath('/dashboard/settings#prices', live)).toBe('/dashboard/settings#prices');
+    expect(postLoginPath('/dashboard', fresh)).toBe('/dashboard');
+  });
+  it('ignores off-site, odd or looping next values', () => {
+    for (const next of ['https://evil.example', '//evil.example', '/dashboard//evil.example', '/dashboard/../admin',
+      '/dashboardx', '/admin', '/dashboard\\evil', '/dashboard/login', '/dashboard/register?x=1', 'javascript:alert(1)']) {
+      expect(postLoginPath(next, live)).toBe('/dashboard');
+    }
+  });
+  it('sends a shop that is not live yet to setup, a live one to the queue', () => {
+    expect(postLoginPath(null, fresh)).toBe('/dashboard/setup');
+    expect(postLoginPath(null, { ...fresh, visibility: { state: 'pending_review', reason: null } })).toBe('/dashboard/setup');
+    expect(postLoginPath(null, live)).toBe('/dashboard');
+    // Already-live shops with the PC off, paused or campus-hidden see the explanation on the queue.
+    expect(postLoginPath(null, { ...fresh, visibility: { state: 'live_pc_offline', reason: null } })).toBe('/dashboard');
+    expect(postLoginPath(null, { ...fresh, visibility: { state: 'hidden_by_admin', reason: 'Spam' } })).toBe('/dashboard');
+  });
+  it('falls back to the queue when setup status could not load', () => {
     expect(postLoginPath(null)).toBe('/dashboard');
-    expect(postLoginPath('https://evil.example')).toBe('/dashboard');
-    expect(postLoginPath('/dashboard/settings')).toBe('/dashboard');
+    expect(postLoginPath(null, null)).toBe('/dashboard');
+  });
+});
+
+describe('location denied: register address search', () => {
+  it('searches the typed address, trimmed', () => {
+    expect(autoSearchQuery('  Shop 4, Gokhale Road, Thane ')).toBe('Shop 4, Gokhale Road, Thane');
+  });
+  it('skips empty, too short or placeholder addresses', () => {
+    expect(autoSearchQuery('')).toBeNull();
+    expect(autoSearchQuery(' ab ')).toBeNull();
+    expect(autoSearchQuery(PINNED_LOCATION)).toBeNull();
+  });
+});
+
+describe('shopLoginPath (SLS-7)', () => {
+  it('keeps the ?next another guard already set (ShopNav and the page both redirect)', () => {
+    const first = shopLoginPath('/dashboard/history');
+    expect(shopLoginPath(first)).toBe(first);
+  });
+  it('sends the owner back to the dashboard page they opened', () => {
+    expect(shopLoginPath('/dashboard/settings#prices')).toBe('/dashboard/login?next=%2Fdashboard%2Fsettings%23prices');
+    expect(postLoginPath(decodeURIComponent(shopLoginPath('/dashboard/history').split('next=')[1]!))).toBe('/dashboard/history');
+  });
+  it('uses the plain login page for the queue or anything odd', () => {
+    expect(shopLoginPath('/dashboard')).toBe('/dashboard/login');
+    expect(shopLoginPath('/dashboard/')).toBe('/dashboard/login');
+    expect(shopLoginPath('/dashboard/login')).toBe('/dashboard/login');
+    expect(shopLoginPath('/dashboard/x/../login')).toBe('/dashboard/login');
+    expect(shopLoginPath('//evil.example')).toBe('/dashboard/login');
   });
 });

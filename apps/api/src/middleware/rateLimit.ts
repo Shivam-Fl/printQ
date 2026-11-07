@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { env } from '../config/env.js';
@@ -86,7 +87,12 @@ export const otpVerifyLimiter = makeLimiter('otpver', 60_000, 10);
 // Keep enough headroom for many students sharing one campus Wi-Fi NAT and for
 // silent trusted-device renewal; the global limiter still provides a ceiling.
 export const firebaseSessionLimiter = makeLimiter('firebase-session', 60_000, 120);
-export const loginLimiter = makeLimiter('login', 60_000, 5);
+// Successful sign-ins hand their slot back: a shop's normal logins (or several
+// owners behind one NAT) never lock anyone out; wrong passwords still count.
+export const loginLimiter = makeLimiter('login', 60_000, 5, true);
+// Sign-up has its own bucket (it used to share rl:login:). Every request counts,
+// so one address can't mass-create shops: 10 per 15 minutes per IP.
+export const registerLimiter = makeLimiter('register', 15 * 60_000, 10);
 /** Uploads: per signed-in student (route runs requireStudent first) plus a higher per-IP ceiling. */
 export const uploadLimiter: RequestHandler = chain(
   makeLimiter('upload-ip', 60_000, env.RATE_LIMIT_UPLOAD_PER_IP, false, ipOf),
@@ -129,18 +135,33 @@ async function giveBackSlot(key: string): Promise<void> {
   await redis.decr(key);
 }
 
-export function makeFailureLimiter(prefix: string, windowMs: number, perShopIp: number, perShop: number) {
+type FailureLimiterOptions = {
+  /** Whose budget a request spends. Default: the signed-in user's shop. */
+  scopeOf?: (req: Request) => string;
+  /** The 429 text. Default: the generic limiter text the web app rewrites with the wait time. */
+  message?: string;
+};
+
+export function makeFailureLimiter(
+  prefix: string,
+  windowMs: number,
+  perShopIp: number,
+  perShop: number,
+  options: FailureLimiterOptions = {},
+) {
+  const scopeOf = options.scopeOf ?? ((req: Request) => req.shopUser?.shopId ?? 'anon');
+  const message = options.message ?? 'Too many requests, slow down';
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     try {
-      const shopId = req.shopUser?.shopId ?? 'anon';
+      const scope = scopeOf(req);
       const keys = [
-        { key: `rl:${prefix}:ip:${shopId}:${req.ip ?? 'unknown'}`, max: perShopIp },
-        { key: `rl:${prefix}:shop:${shopId}`, max: perShop },
+        { key: `rl:${prefix}:ip:${scope}:${req.ip ?? 'unknown'}`, max: perShopIp },
+        { key: `rl:${prefix}:shop:${scope}`, max: perShop },
       ];
       const counts = await Promise.all(keys.map((k) => takeSlot(k.key, windowMs)));
       const blocked = counts.some((count, i) => count > keys[i]!.max);
       // the window is fixed from its first hit; retrying after one full window is always safe
-      if (blocked) return next(tooMany('Too many requests, slow down', windowMs / 1000));
+      if (blocked) return next(tooMany(message, windowMs / 1000));
       _res.once('finish', () => {
         if (_res.statusCode < 400) void Promise.all(keys.map((k) => giveBackSlot(k.key))).catch(() => undefined);
       });
@@ -155,6 +176,33 @@ export function makeFailureLimiter(prefix: string, windowMs: number, perShopIp: 
 // requests before printing: those succeed (2xx) and return their own slot.
 // Only failures stay counted: 10/min per (shop, IP), 40/min per shop.
 export const counterReleaseLimiter = makeFailureLimiter('counter-release', 60_000, 10, 40);
+
+/**
+ * Per-account brake on wrong staff PINs (S3/AUTH-9). A 4-6 digit PIN is only
+ * 10,000-1,000,000 guesses, so the per-IP loginLimiter alone falls to an
+ * attacker rotating addresses. Only PIN-shaped attempts are counted and
+ * blocked: on /shop/staff-login always, and on /shop/login when the password
+ * typed is 4-6 digits (a PIN works there too). A full owner password is never
+ * blocked by this, so nobody can lock an owner out by spamming their email.
+ * 10 wrong PINs per account per 15 minutes; a correct PIN hands its slot back.
+ * Mount AFTER validateBody so the email is already normalised.
+ */
+const accountScope = (req: Request) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email : '';
+  return `acct:${createHash('sha256').update(email).digest('hex').slice(0, 32)}`;
+};
+const pinFailures = makeFailureLimiter('pin-login-fail', 15 * 60_000, 10, 10, {
+  scopeOf: accountScope,
+  message: 'Too many wrong PINs for this account. Please wait 15 minutes and try again.',
+});
+export const pinLoginFailureLimiter: RequestHandler = (req, res, next) => {
+  const secret: unknown = req.body?.pin ?? req.body?.password;
+  if (typeof secret === 'string' && /^\d{4,6}$/.test(secret)) {
+    void pinFailures(req, res, next);
+    return;
+  }
+  next();
+};
 
 // Fee Checkout order creation / verification calls the payment provider.
 export const feeActionLimiter = makeLimiter('fee-action', 60_000, 20);
