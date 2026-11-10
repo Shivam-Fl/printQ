@@ -274,8 +274,11 @@ tasks.changePrice = async (viewport = { width: 1366, height: 768 }, label = 'g-c
   }
   await page.getByText(/saved|Saved/).first().waitFor({ timeout: 10_000 }).catch(() => undefined);
   const s = L.summary({ viewport: `${viewport.width}x${viewport.height}` });
-  // put the price back
   await ctx.close();
+  // put the price back so later screenshots show the fixture's round prices
+  const me = (await api('/api/shop/me', { token: A.token })).data.shop;
+  const po = { ...me.printOptions, papers: me.printOptions.papers.map((p) => (p.id === 'A4' ? { ...p, bwPaise: 200 } : p)) };
+  await api('/api/shop/me', { method: 'PATCH', token: A.token, body: { printOptions: po, expectedPrintOptionsVersion: me.printOptionsVersion } });
   return s;
 };
 

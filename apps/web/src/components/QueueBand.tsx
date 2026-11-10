@@ -39,7 +39,7 @@ const BAND_LABEL: Record<QueueBand, string> = {
   waiting: 'waiting',
 };
 
-/** Small pill used on the shop dashboard rows. */
+/** Small pill used on shop rows. */
 export function BandPill({ band, deadline, nowMs }: { band: QueueBand | null; deadline?: string | null; nowMs: number }) {
   if (!band) return null;
   const cd = band === 'revealed' ? countdownFor(deadline, nowMs) : null;
@@ -60,68 +60,65 @@ export interface BandJob {
   otpCode: string | null;
 }
 
+/** "482913" -> ["482", "913"]: read aloud in two halves at the counter. */
+export function codeHalves(code: string): [string, string] {
+  return [code.slice(0, 3), code.slice(3)];
+}
+
 /**
  * The student's live-line card: one clear state per band.
- *  revealed -> perforated counter-code ticket + countdown
- *  arriving -> "head to the shop" banner + position
+ *  revealed -> the counter-code ticket (the product's one bold element) + countdown
+ *  arriving -> "go to the counter" card with the position
  *  waiting  -> position only
  */
 export function StudentBandPanel({ job, nowMs }: { job: BandJob; nowMs: number }) {
   const position = job.position;
-  const positionTicket = (
-    <div className="ticket">
-      <div className="eyebrow">live walk-in position</div>
-      <div className="ticket-num">{position === null ? '·' : `#${position}`}</div>
-      <div className="sub">
-        {job.etaMinutes !== null ? `roughly ${job.etaMinutes} min` : 'position is advisory'}
-      </div>
-    </div>
-  );
 
   if (job.band === 'revealed' && job.otpCode) {
     const cd = countdownFor(job.revealDeadlineAt, nowMs);
+    const [first, second] = codeHalves(job.otpCode);
     return (
       <div className={`ticket turn band-ticket${cd?.urgent ? ' urgent' : ''}`} data-band="revealed">
-        <div className="eyebrow">it’s your turn</div>
+        <p className="ticket-title">Your turn</p>
+        <div className="otp-band" data-counter-code aria-label={`Counter code ${job.otpCode.split('').join(' ')}`}>
+          <span aria-hidden>{first}</span>
+          <span aria-hidden>{second}</span>
+        </div>
         {cd ? (
-          <div className={`band-countdown${cd.urgent ? ' urgent' : ''}`} role="timer" aria-live="off">
+          <p className={`band-countdown${cd.urgent ? ' urgent' : ''}`} role="timer" aria-live="off">
             {cd.expired ? 'Be at the counter now' : `Be at the counter in ${cd.text}`}
-          </div>
+          </p>
         ) : (
-          <div className="band-countdown">Please be at the counter</div>
+          <p className="band-countdown">Please be at the counter</p>
         )}
         {/* One polite announcement that changes only when urgency flips, never every second. */}
         <span className="sr-only" role="status">
           {cd?.urgent ? 'Hurry, only a few seconds left to reach the counter.' : 'It’s your turn. Please be at the counter.'}
         </span>
-        <div className="otp-band">{job.otpCode}</div>
-        <div className="sub">
-          Tell staff this code. {cd ? 'If you are not there in time you lose your place and must check in again.' : 'Staff can find your order with it.'}
-        </div>
+        <p className="sub">
+          Show this code to staff. {cd ? 'If you are not there in time, you lose your place and check in again.' : 'They find your order with it.'}
+        </p>
       </div>
     );
   }
 
   if (job.band === 'arriving') {
     return (
-      <>
-        <div className="band-banner" data-band="arriving" role="status">
-          <strong>Your turn is coming up — please head to the shop.</strong>
-          <span>
-            You are {position === null ? 'next in line' : `#${position} in line`}. Your counter code appears here when it is your turn.
-          </span>
-        </div>
-        {positionTicket}
-      </>
+      <div className="now-card" data-band="arriving" role="status">
+        <p className="now-kicker">Your turn is coming up</p>
+        <p className="now-position num">{position === null ? 'Next' : `#${position}`}</p>
+        <p className="now-body">Please head to the shop counter. Your code appears here when it is your turn.</p>
+      </div>
     );
   }
 
   return (
-    <>
-      {positionTicket}
-      {job.band === 'waiting' && (
-        <p className="band-hint" data-band="waiting">We will alert you when your turn is coming up. Stay nearby.</p>
-      )}
-    </>
+    <div className="now-card" data-band={job.band ?? 'waiting'}>
+      <p className="now-kicker">You are in line</p>
+      <p className="now-position num">{position === null ? '·' : `#${position}`}</p>
+      <p className="now-body">
+        {job.etaMinutes !== null ? `About ${job.etaMinutes} min. ` : ''}We will tell you when to come to the counter. Stay nearby.
+      </p>
+    </div>
   );
 }

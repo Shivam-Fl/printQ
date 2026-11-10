@@ -6,6 +6,7 @@ import { useResource } from '../../lib/useResource.js';
 import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
+import { IconUpload } from '../../components/Icons.js';
 
 interface Paper {
   id: string;
@@ -192,7 +193,7 @@ export default function ShopLanding() {
       <Topbar right={loggedIn ? <Link to="/home">Home</Link> : undefined} />
       <div className="shop-hero">
         <div>
-          <span className="eyebrow-label">Order online · collect at counter</span>
+          <span className="eyebrow-label">Order here, collect at the counter</span>
           {/* long names get a smaller size instead of being cut off (names can be up to 120 characters) */}
           <h1 className={shop.name.length > 28 ? 'long-name' : undefined}>{shop.name}</h1>
           <p className="dim">
@@ -226,11 +227,11 @@ export default function ShopLanding() {
           onDrop={onDropFiles}
         >
           <div>
-            <div className="upload-mark" aria-hidden>↑</div>
-            <h2>{shop.open ? 'Drop your files here' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Orders are paused'}</h2>
+            <div className="upload-mark" aria-hidden><IconUpload /></div>
+            <h2>{shop.open ? 'Choose your files' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Orders are paused'}</h2>
             <p>
               {shop.open
-                ? 'Choose one or several documents. We combine them into one preview. You pay at the counter.'
+                ? 'PDF, Word or photos. Pick one or several; they print as one order. You pay at the counter.'
                 : shop.temporarilyUnavailable
                   ? 'New orders are not available here right now. Please try again later or choose another shop.'
                   : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
@@ -263,10 +264,10 @@ export default function ShopLanding() {
                   {uploading ? 'Uploading safely…' : 'Choose files'}
                 </button>
                 <button className="ghost" disabled={uploading} onClick={() => cameraInput.current?.click()}>
-                  Scan paper with camera
+                  Take a photo
                 </button>
               </div>
-              <div className="upload-meta">PDF · DOCX · JPG · PNG · private files auto-delete</div>
+              <div className="upload-meta">Your files are private and deleted soon after printing. On a computer you can also drop them here.</div>
             </>
           )}
           {!shop.open && !shop.temporarilyUnavailable && <NotifyWhenOpen slug={slug} />}

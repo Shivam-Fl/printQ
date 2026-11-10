@@ -32,7 +32,7 @@ const Terms = lazy(() => import('./pages/legal/Terms.js'));
 const Refunds = lazy(() => import('./pages/legal/Refunds.js'));
 const Support = lazy(() => import('./pages/legal/Support.js'));
 const PcDownload = lazy(() => import('./pages/legal/PcDownload.js'));
-import NotFound from './pages/legal/NotFound.js';
+const NotFound = lazy(() => import('./pages/legal/NotFound.js'));
 
 function RouteMeta() {
   const { pathname } = useLocation();

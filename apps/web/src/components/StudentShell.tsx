@@ -3,9 +3,12 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { IconHome, IconJobs, IconPlus, IconUser } from './Icons.js';
 import { lastShopSlug } from '../api.js';
 
-/** A saved shop can become unpublished; the directory rechecks live eligibility. */
+/**
+ * The bottom Print button follows the same rule as Home's New print: Home only offers
+ * shops that are live right now, so a saved shop that was unpublished is never opened.
+ */
 export function resolveBottomNewPrintPath(_rememberedSlug: string | null): string {
-  return '/shops';
+  return '/home?pick=1';
 }
 
 /**

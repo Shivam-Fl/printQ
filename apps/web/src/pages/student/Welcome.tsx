@@ -39,9 +39,9 @@ export default function Welcome() {
             or <Link to="/dashboard/login">sign in</Link>.
           </p>
           <div className="trust-row">
-            <span><IconClock /> Arrival-based live line</span>
-            <span><IconBell /> Turn alerts</span>
-            <span><IconPrinter /> Exact PDF preview</span>
+            <span><IconClock /> Join the line when you arrive</span>
+            <span><IconBell /> Alert when it’s your turn</span>
+            <span><IconPrinter /> See exactly what prints</span>
           </div>
         </div>
 

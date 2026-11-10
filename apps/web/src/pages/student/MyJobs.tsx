@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ago, api, getToken, rupees } from '../../api.js';
-import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { specsText, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import { nothingCharged } from './jobPayment.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
@@ -40,7 +40,7 @@ function JobCard({ job }: { job: JobRow }) {
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <span className={`stamp ${m.tone}`}>{m.label}</span>
+          <span className={stampClass(m.tone)}>{m.label}</span>
           <div className="dim mono" style={{ marginTop: 6 }}>{nothingCharged(job.status, job.paymentStatus) ? 'Nothing charged' : rupees(job.totalPaise)}</div>
         </div>
       </div>
