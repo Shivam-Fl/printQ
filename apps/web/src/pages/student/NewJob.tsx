@@ -245,9 +245,6 @@ export default function NewJob() {
             <span className="eyebrow-label">Review before you visit</span>
             <h1>Set up your print</h1>
             <p className="dim">Choose only what you need and check the preview. The total updates instantly.</p>
-            <div className="checkout-steps" aria-label="Order progress">
-              <span className="done">Files uploaded</span><span className="current">Print settings</span><span>Pay at shop</span><span>Arrive &amp; check in</span>
-            </div>
           </div>
           <section className="checkout-card">
             <div className="checkout-card-head">
