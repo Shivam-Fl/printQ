@@ -21,7 +21,7 @@ export function PcSteps({ onPcPage = false }: { onPcPage?: boolean }) {
       </li>
       <li>
         <strong>Connect the PC and add your printer</strong>
-        <span>In the app, open Computers, choose Real printer and press Connect this computer. Your printers show up by themselves. Press Configure printers, then Add &amp; configure next to your printer.</span>
+        <span>In the app, go to Shop, then Counter PC. Choose Real printer and press Connect this computer. Your printers show up by themselves: press Add next to the one at your counter.</span>
       </li>
     </ol>
   );

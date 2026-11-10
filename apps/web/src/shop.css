@@ -554,3 +554,71 @@ button.warn-button:hover:not(:disabled) { border-color: var(--warn-ink); }
 @media print {
   .receipt-sheet { border: 0; padding: 0; }
 }
+
+/* --- setup checklist: one column, the current step open --- */
+.setup-head { margin: 0 0 var(--sp-5); }
+.setup-head h1 { margin: 0 0 4px; }
+.setup-head > p { margin: 0; color: var(--pencil); }
+.setup-progress { display: grid; gap: 6px; max-width: 420px; margin-top: var(--sp-4); }
+.setup-progress > span { color: var(--ink); font-size: var(--fs-sm); font-weight: 700; }
+.setup-progress .progress-track { margin: 0; }
+.setup-banners { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); scroll-margin-top: 90px; }
+.setup-steps { display: grid; gap: var(--sp-3); margin: 0 0 var(--sp-6); padding: 0; list-style: none; }
+.setup-step { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--paper); }
+.setup-step.current { border-color: var(--stamp-line); box-shadow: var(--shadow-1); }
+.setup-step-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); }
+.setup-step-head h2 { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-md); }
+.setup-step-mark { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--paper-bg); border: 1px solid var(--rule-strong); color: var(--ink); font-weight: 700; }
+.setup-step.current .setup-step-mark { background: var(--stamp); border-color: var(--stamp); color: #fff; }
+.setup-step.done .setup-step-mark { background: var(--ok); border-color: var(--ok); color: #fff; }
+.setup-step-body { display: grid; gap: var(--sp-3); padding: 0 var(--sp-5) var(--sp-5) calc(var(--sp-5) + 32px + var(--sp-3)); }
+.setup-step-lead { margin: 0; color: var(--pencil); }
+.setup-step-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
+.setup-step-summary p { flex: 1 1 280px; margin: 0; color: var(--pencil); }
+.setup-step-summary p strong { color: var(--ink); }
+.setup-review { margin-bottom: var(--sp-6); }
+
+/* --- printers found on the counter PC (setup + printers page) --- */
+.detected-list { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.detected-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--stamp-line); border-radius: var(--r-md); background: var(--paper); }
+.detected-item.practice { border-color: var(--warn-line); background: var(--warn-soft); }
+.detected-item .detected-icon { grid-row: auto; flex: none; }
+.detected-text { display: grid; flex: 1 1 200px; min-width: 0; }
+.detected-text strong { overflow-wrap: anywhere; }
+.detected-text span { color: var(--pencil); font-size: var(--fs-sm); }
+.detected-item .colour-question { flex: 1 1 100%; }
+
+/* --- printers page: one card per printer, technical options under Advanced --- */
+.printers-section { margin: 0 0 var(--sp-8); }
+.printers-section > h2 { margin: 0 0 var(--sp-3); font-size: var(--fs-md); }
+.printer-list { display: grid; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.printer-card { padding: var(--sp-4) var(--sp-5); border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--paper); box-shadow: var(--shadow-1); }
+.printer-card.status-offline { background: var(--paper-sunk); }
+.printer-card.status-jammed { border-color: var(--danger-line); box-shadow: inset 4px 0 0 var(--danger); }
+.printer-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); }
+.printer-card-name { display: grid; min-width: 0; }
+.printer-card-name strong { font-size: var(--fs-md); overflow-wrap: anywhere; }
+.printer-card-name span { color: var(--pencil); font-size: var(--fs-sm); }
+.printer-status { margin: 0; flex: none; }
+.printer-status select { width: auto; min-width: 110px; }
+.printer-unlinked { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin-top: var(--sp-3); }
+.printer-unlinked select { width: auto; }
+.printer-card .printer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin-top: var(--sp-3); }
+.printer-card .printer-actions select { width: auto; }
+.printer-note { margin: var(--sp-2) 0 0; color: var(--pencil); font-size: var(--fs-sm); }
+.printer-note.bad { color: var(--danger-ink); }
+.printer-edit { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--paper-sunk); }
+.printer-advanced { margin-top: var(--sp-3); }
+.printer-advanced > p { margin: 0 0 var(--sp-3); }
+.printers-manual { margin-bottom: var(--sp-6); }
+.printers-manual .printer-form { margin-top: var(--sp-2); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--paper); }
+.setting-row p { margin: 4px 0 0; }
+.printer-added-notice:focus { outline: 3px solid var(--stamp-line); outline-offset: 2px; }
+
+@media (max-width: 620px) {
+  .setup-step-head { padding: var(--sp-3) var(--sp-4); }
+  .setup-step-body { padding: 0 var(--sp-4) var(--sp-4); }
+  .setting-row { flex-direction: column; align-items: stretch; }
+  .printer-card { padding: var(--sp-4); }
+}

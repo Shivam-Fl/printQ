@@ -6,6 +6,7 @@ import ShopNav from '../../components/ShopNav.js';
 import ShopTabs from '../../components/ShopTabs.js';
 import { PcLinkShare, PcSteps } from '../../components/PcSetup.js';
 import { WINDOWS_DOWNLOAD_URL, detectPhoneLike } from '../../lib/pcDownload.js';
+import { IconMonitor } from '../../components/ShopIcons.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
 
 interface DetectedPrinter {
@@ -152,8 +153,7 @@ export default function Agents() {
       <ShopTabs />
       <header className="page-heading">
         <div>
-          <span className="eyebrow-label">Counter computer</span>
-          <h1>Shop computers</h1>
+          <h1>Counter PC</h1>
           <p>PrintQs prints from the Windows computer next to your printer, using the PrintQs Shop app.</p>
         </div>
         <span className="summary-pill">{agents.filter((agent) => agent.status === 'online').length} online</span>
@@ -173,7 +173,7 @@ export default function Agents() {
       {desktop && desktopStatus && (
         <section className={`notice desktop-engine-notice ${desktopStatus.state === 'online' ? 'success-notice' : ''}`}>
           <div>
-            <strong>Printer engine: {desktopStatus.state.replace('_', ' ')}</strong>
+            <strong>PrintQs Shop on this computer: {desktopStatus.state === 'online' ? 'connected' : desktopStatus.state.replace('_', ' ')}</strong>
             <p>{desktopStatus.detail}{appVersion ? ` · App v${appVersion}` : ''}</p>
           </div>
           <div className="row">
@@ -186,7 +186,6 @@ export default function Agents() {
       {showConnectionForm && !newAgentId && (
         <section className="connect-panel">
           <div className="connect-intro">
-            <span className="step-number">01</span>
             <div>
               <h2>Connect this Windows computer</h2>
               <p>PrintQs will securely register this app, detect installed printers and keep the engine running in the system tray.</p>
@@ -237,7 +236,7 @@ export default function Agents() {
                   <p>The simulator never takes real student orders. To go live, connect this computer again in Real printer mode.</p>
                 )}
               </div>
-              <Link className="button-link" to="/dashboard/printers">Configure printers</Link>
+              <Link className="button-link" to="/dashboard/setup">Add your printer</Link>
             </div>
           )}
           <button className="text-button" onClick={() => setNewAgentId(null)}>Close setup</button>
@@ -246,7 +245,7 @@ export default function Agents() {
 
       <section>
         <div className="section-heading">
-          <div><h2>Registered computers</h2><p>A computer shows offline if PrintQs hasn’t heard from it for two minutes.</p></div>
+          <div><h2>Your computers</h2><p>A computer shows offline if PrintQs has not heard from it for two minutes.</p></div>
         </div>
 
         {agents.length === 0 ? (
@@ -259,12 +258,12 @@ export default function Agents() {
             {agents.map((agent) => (
               <article className="device-card" key={agent.id}>
                 <div className="device-card-head">
-                  <div className={`device-icon${agent.status === 'online' ? ' online' : ''}`} aria-hidden>PC</div>
+                  <div className={`device-icon${agent.status === 'online' ? ' online' : ''}`} aria-hidden><IconMonitor /></div>
                   <div className="grow">
                     <strong>{agent.machineLabel}</strong>
                     <p>{agent.lastHeartbeatAt ? `Last seen ${new Date(agent.lastHeartbeatAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Never connected'}</p>
                   </div>
-                  <span className={`status-dot${agent.status === 'online' ? ' done' : ''}`}>{agent.status}</span>
+                  <span className={`status-dot${agent.status === 'online' ? ' done' : ''}`}>{agent.status === 'online' ? 'Online' : 'Offline'}</span>
                 </div>
                 <div className="device-printers">
                   <span>Detected printers</span>

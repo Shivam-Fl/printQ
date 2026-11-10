@@ -295,10 +295,10 @@ tasks.addPrinter = async (viewport = { width: 1366, height: 768 }, label = 'h-ad
   if (UI === 'before') {
     await L.click(page.getByRole('link', { name: 'Printers', exact: true }), 'Printers');
   } else {
+    // Shop opens Setup (not live) or Printers (live); both list the printers the PC found, with Add
     await L.click(page.getByRole('link', { name: 'Shop', exact: true }), 'Shop');
-    await L.click(page.getByRole('link', { name: 'Printers', exact: true }), 'Printers');
   }
-  await L.click(page.getByRole('button', { name: /Add & configure|Add printer/ }).first(), 'Add printer');
+  await L.click(page.getByRole('button', { name: /Add & configure|Add for practice|^Add / }).first(), 'Add printer');
   await L.click(page.getByRole('button', { name: /Yes, colour/ }).first(), 'Yes, colour');
   await waitFor('printer row', async () => ((await api('/api/shop/printers', { token: C.token })).data.printers ?? []).length > 0 || null, 10_000);
   const s = L.summary({ viewport: `${viewport.width}x${viewport.height}` });

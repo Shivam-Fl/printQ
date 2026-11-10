@@ -879,6 +879,8 @@ div.role-card:hover { border-color: var(--rule); box-shadow: var(--shadow-1); }
 .register-card { max-width: 680px; }
 .auth-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .auth-form-grid .full-field { grid-column: 1 / -1; }
+.register-next { max-width: 540px; margin: 0; color: var(--pencil); font-size: var(--fs-sm); }
+.phone-only { display: none; }
 .shop-signed-in-title { margin: 0; font-size: 1.05rem; color: var(--ink); overflow-wrap: anywhere; }
 
 /* --- 6.4 student: home, directory, landing --- */
@@ -1227,6 +1229,7 @@ div.role-card:hover { border-color: var(--rule); box-shadow: var(--shadow-1); }
   .auth-card h2 { font-size: 1.3rem; }
   .auth-card { padding: 22px; }
   .auth-aside { display: none; }
+  .phone-only { display: block; }
   .upload-panel { min-height: 280px; padding: 30px 20px; }
   .upload-actions { display: grid; width: 100%; }
   .auth-form-grid { grid-template-columns: 1fr; }
