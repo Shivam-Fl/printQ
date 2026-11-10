@@ -1,6 +1,6 @@
-/* Inline stroke icons — no external icon font (CSP-safe, no network). */
-type P = { className?: string };
-const base = {
+/* Inline stroke icons on a 24 px grid, 2 px stroke — no icon font or library (CSP-safe, no network). */
+export type P = { className?: string };
+export const base = {
   width: 24,
   height: 24,
   fill: 'none',
@@ -9,6 +9,8 @@ const base = {
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
   viewBox: '0 0 24 24',
+  'aria-hidden': true,
+  focusable: false,
 };
 
 export const IconHome = (p: P) => (
@@ -40,4 +42,10 @@ export const IconStore = (p: P) => (
 );
 export const IconClock = (p: P) => (
   <svg {...base} {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+);
+export const IconUpload = (p: P) => (
+  <svg {...base} {...p}><path d="M12 16V4M7 9l5-5 5 5" /><path d="M5 20h14" /></svg>
+);
+export const IconPin = (p: P) => (
+  <svg {...base} {...p}><path d="M12 21s-7-6.2-7-11.5a7 7 0 1 1 14 0C19 14.8 12 21 12 21Z" /><circle cx="12" cy="9.5" r="2.5" /></svg>
 );

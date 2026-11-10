@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, getShopRole, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
+import ShopTabs from '../../components/ShopTabs.js';
 import { detectedEmptyState, guessPaperSizes } from './printersView.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
 import { afterPrinterAdded, isSimulatorPrinterName, type AfterPrinterAdded, type SetupAfterAdd } from './printerAddedNotice.js';
@@ -323,6 +324,7 @@ export default function Printers() {
   return (
     <div className="page wide">
       <ShopNav />
+      <ShopTabs />
 
       <div className="page-heading printers-heading">
         <div>

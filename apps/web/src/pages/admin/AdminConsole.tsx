@@ -7,6 +7,7 @@ import { createLatestRequest } from '../../lib/latestRequest.js';
 import {
   auditLabel, auditReason, campusErrorMessage, campusFormProblem, SHOP_STATE_LABELS, setupMissing, type ShopState,
 } from './adminText.js';
+import '../../shop.css';
 
 interface Campus {
   id: string;

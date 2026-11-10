@@ -1,122 +1,54 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, getToken, rupees } from '../../api.js';
-import { statusBanner, type SetupSnapshot } from '../../lib/setupSteps.js';
+import { ApiError, api, getShopRole, getToken } from '../../api.js';
+import { statusBanner } from '../../lib/setupSteps.js';
+import { shopStatus, type ShopSetupStatus } from '../../lib/shopStatus.js';
 import { getShopSocket } from '../../socket.js';
 import { flashTitle, playChime } from '../../newOrderAlert.js';
 import ShopNav from '../../components/ShopNav.js';
-import { BandPill, useNow } from '../../components/QueueBand.js';
-import type { QueueBand } from '@printq/shared';
-import { jobActions } from './queueActions.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
+import CounterCode, { type PrinterLite } from './CounterCode.js';
+import { InFlightPanel, LinePanel, PreparedPanel } from './CounterLists.js';
+import { inFlightJobs, lineGroups, studentLabel, type QueueJob } from './counterFlow.js';
 
-interface QueueJob {
-  id: string;
-  status: string;
-  mode: 'instant' | 'scheduled';
-  scheduledTime: string | null;
-  specs: {
-    copies: number;
-    paperSize: string;
-    color: boolean;
-    duplex: boolean;
-    binding: string | null;
-    pageRange: string | null;
-  };
-  pagesPerCopy: number;
-  totalPaise: number;
-  paymentStatus: 'pending' | 'counter_due' | 'cash_due' | 'paid' | 'refunding' | 'refunded' | 'failed';
-  paymentProvider: string | null;
-  cashCollectedAt: string | null;
-  counterPaymentMethod: 'cash' | 'shop_upi' | null;
-  counterPaymentConfirmedAt: string | null;
-  assignedPrinterId: string | null;
-  otpExpiresAt: string | null;
-  printError: string | null;
-  printErrorCode?: string | null;
-  /** Server-computed: the computer that was printing this job is offline or gone. */
-  printAgentOffline?: boolean;
-  printAttempts: number;
-  spoolAcceptedAt: string | null;
-  printConfirmedAt: string | null;
-  printCompletionMethod: 'simulator' | 'staff_confirmed' | null;
-  queuedAt: string | null;
-  arrivedAt: string | null;
-  checkInCount: number;
-  /** Server-computed: 1-based place in the live line and its counter band. */
-  position: number | null;
-  band: QueueBand | null;
-  /** Revealed students must reach the counter by this time (null = no timer). */
-  revealDeadlineAt: string | null;
-  /** Marked absent earlier; must check in again to rejoin. */
-  absent: boolean;
-  createdAt: string;
-  student: { name: string | null; phoneMasked: string };
-  file: { originalName: string; pages: number | null };
+interface ShopMe {
+  shop: { counterUpiVpa: string | null; counterUpiVerifiedAt: string | null };
+  user: { role: 'owner' | 'staff' };
 }
 
-interface Printer {
-  id: string;
-  label: string;
-  status: string;
-}
-
-interface ManualAssign {
-  jobId?: string;
-  eligiblePrinters: { printerId: string; estimatedWaitMinutes: number }[];
-  overrideQueue: boolean;
-}
-
-interface QueueOverride {
-  jobId?: string;
-  position: number | null;
-  queueStatus: string;
-}
-
-interface PaymentConfirmation {
-  jobId?: string;
-  amountPaise: number;
-  selectedPrinterId?: string;
-  overrideQueue: boolean;
-}
-
-interface SetupStatus extends SetupSnapshot {
-  acceptingOrders: boolean;
-}
-
-const slotLabel = (iso: string) =>
-  new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-
+/** The counter: one code box, what is printing, and the walk-in line. */
 export default function Dashboard() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [capacity, setCapacity] = useState<number | null>(null);
-  const [printers, setPrinters] = useState<Printer[]>([]);
-  const [otp, setOtp] = useState('');
-  const [manual, setManual] = useState<ManualAssign | null>(null);
-  const [queueOverride, setQueueOverride] = useState<QueueOverride | null>(null);
-  const [paymentConfirmation, setPaymentConfirmation] = useState<PaymentConfirmation | null>(null);
-  const [counterReference, setCounterReference] = useState('');
-  const [manualPrinter, setManualPrinter] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [setup, setSetup] = useState<SetupStatus | null>(null);
+  const [printers, setPrinters] = useState<PrinterLite[]>([]);
+  const [setup, setSetup] = useState<ShopSetupStatus | null>(shopStatus.get());
+  const [upiReady, setUpiReady] = useState(false);
+  const [isOwner, setIsOwner] = useState(getShopRole() !== 'staff');
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [alert, setAlert] = useState('');
+  const [receipt, setReceipt] = useState<{ text: string; key: number } | null>(null);
+  const [focusSignal, setFocusSignal] = useState(0);
   const seenWaitingIds = useRef<Set<string> | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const [queueRes, printersRes, setupRes] = await Promise.all([
         api<{ jobs: QueueJob[]; counterCapacity: number }>('/api/shop/queue', { role: 'shop' }),
-        api<{ printers: Printer[] }>('/api/shop/printers', { role: 'shop' }),
-        api<{ setup: SetupStatus }>('/api/shop/setup-status', { role: 'shop' }),
+        api<{ printers: PrinterLite[] }>('/api/shop/printers', { role: 'shop' }),
+        api<{ setup: ShopSetupStatus }>('/api/shop/setup-status', { role: 'shop' }),
       ]);
       setJobs(queueRes.jobs);
       setCapacity(queueRes.counterCapacity);
       setPrinters(printersRes.printers);
       setSetup(setupRes.setup);
+      shopStatus.set(setupRes.setup);
+      setLoadError('');
+      setLoaded(true);
     } catch (err) {
-      if ((err as { status?: number }).status === 401) navigate(shopLoginPath());
-      else setError(err instanceof Error ? err.message : 'Failed to load');
+      if (err instanceof ApiError && err.status === 401) navigate(shopLoginPath());
+      else setLoadError(err instanceof Error ? err.message : 'Could not load the counter.');
     }
   }, [navigate]);
 
@@ -126,17 +58,20 @@ export default function Dashboard() {
       return;
     }
     void refresh();
+    api<ShopMe>('/api/shop/me', { role: 'shop' })
+      .then((me) => {
+        setUpiReady(Boolean(me.shop.counterUpiVpa && me.shop.counterUpiVerifiedAt));
+        setIsOwner(me.user.role === 'owner');
+      })
+      .catch(() => undefined);
   }, [refresh, navigate]);
 
-  // beep + flash the tab title when a job the dashboard hasn't seen yet joins the live queue
+  // a new student in the line: chime, and flash the tab title when the counter is in the background
   useEffect(() => {
     const waitingIds = new Set(jobs.filter((j) => j.status === 'queued' || j.status === 'notified').map((j) => j.id));
-    if (seenWaitingIds.current) {
-      const isNew = [...waitingIds].some((id) => !seenWaitingIds.current!.has(id));
-      if (isNew) {
-        playChime();
-        if (document.hidden) flashTitle('🔔 New print job — PrintQs');
-      }
+    if (seenWaitingIds.current && [...waitingIds].some((id) => !seenWaitingIds.current!.has(id))) {
+      playChime();
+      if (document.hidden) flashTitle('New student in line · PrintQs');
     }
     seenWaitingIds.current = waitingIds;
   }, [jobs]);
@@ -146,538 +81,134 @@ export default function Dashboard() {
     if (!socket) return;
     const onAny = () => void refresh();
     const onPrintFailed = (p: { jobId: string; message?: string }) => {
-      setError(p.message ?? 'A print hit a problem. Check the printer, then use Retry print below.');
+      setAlert(p.message ?? 'A print hit a problem. Check the printer, then press Retry print.');
       void refresh();
     };
-    const onNoAgent = () => {
-      setError('No print agent is running for that printer — start the agent on the shop PC.');
-    };
-    socket.on('queue:update', onAny);
-    socket.on('queue:job_printing', onAny);
-    socket.on('queue:finishing_required', onAny);
-    socket.on('queue:job_ready', onAny);
-    socket.on('queue:print_confirmation_required', onAny);
-    socket.on('queue:manual_assign_needed', onAny);
-    socket.on('agent:offline', onAny);
+    const onNoAgent = () => setAlert('No counter PC is running for that printer. Open PrintQs Shop on the counter PC.');
+    const events = ['queue:update', 'queue:job_printing', 'queue:finishing_required', 'queue:job_ready', 'queue:print_confirmation_required', 'queue:manual_assign_needed', 'agent:offline'];
+    for (const e of events) socket.on(e, onAny);
     socket.on('queue:print_failed', onPrintFailed);
     socket.on('queue:no_agent', onNoAgent);
     return () => {
-      socket.off('queue:update', onAny);
-      socket.off('queue:job_printing', onAny);
-      socket.off('queue:finishing_required', onAny);
-      socket.off('queue:job_ready', onAny);
-      socket.off('queue:print_confirmation_required', onAny);
-      socket.off('queue:manual_assign_needed', onAny);
-      socket.off('agent:offline', onAny);
+      for (const e of events) socket.off(e, onAny);
       socket.off('queue:print_failed', onPrintFailed);
       socket.off('queue:no_agent', onNoAgent);
     };
   }, [refresh]);
 
-  async function release(
-    printerId?: string,
-    overrideQueue = false,
-    counterPayment?: { method: 'cash' | 'shop_upi'; reference?: string },
-  ) {
-    setError('');
-    setMessage('');
+  // the "Sent to…" line fades after a few seconds
+  useEffect(() => {
+    if (!receipt) return;
+    const timer = setTimeout(() => setReceipt(null), 8000);
+    return () => clearTimeout(timer);
+  }, [receipt]);
+
+  const done = useCallback((text: string) => {
+    setReceipt({ text, key: Date.now() });
+    setAlert('');
+    setFocusSignal((n) => n + 1); // back to the code box for the next student
+    void refresh();
+  }, [refresh]);
+
+  async function markAbsent(job: QueueJob) {
+    if (!confirm(`Mark ${studentLabel(job)} absent? They lose their place and must check in again at the back. Their order and code still work.`)) return;
     try {
-      const res = await api<{
-        ok?: boolean;
-        requiresManualAssignment?: boolean;
-        requiresQueueOverride?: boolean;
-        requiresPaymentConfirmation?: boolean;
-        counterPaymentAmountPaise?: number;
-        selectedPrinterId?: string;
-        jobId?: string;
-        position?: number | null;
-        queueStatus?: string;
-        eligiblePrinters?: { printerId: string; estimatedWaitMinutes: number }[];
-      }>('/api/shop/release', {
-        method: 'POST',
-        role: 'shop',
-        body: {
-          otp,
-          ...(printerId ? { printerId } : {}),
-          overrideQueue,
-          ...(counterPayment ? { paymentConfirmation: counterPayment } : {}),
-        },
-      });
-      if (res.requiresQueueOverride) {
-        setPaymentConfirmation(null);
-        setQueueOverride({
-          jobId: res.jobId,
-          position: res.position ?? null,
-          queueStatus: res.queueStatus ?? 'outside_queue',
-        });
-        return;
-      }
-      if (res.requiresManualAssignment) {
-        setPaymentConfirmation(null);
-        setManual({ jobId: res.jobId, eligiblePrinters: res.eligiblePrinters ?? [], overrideQueue });
-        setManualPrinter(res.eligiblePrinters?.[0]?.printerId ?? '');
-        return;
-      }
-      if (res.requiresPaymentConfirmation && res.counterPaymentAmountPaise != null) {
-        setManual(null);
-        setQueueOverride(null);
-        setPaymentConfirmation({
-          jobId: res.jobId,
-          amountPaise: res.counterPaymentAmountPaise,
-          selectedPrinterId: res.selectedPrinterId,
-          overrideQueue,
-        });
-        return;
-      }
-      setMessage('Sent to printer ✓');
-      setOtp('');
-      setManual(null);
-      setQueueOverride(null);
-      setPaymentConfirmation(null);
-      await refresh();
+      await api(`/api/shop/jobs/${job.id}/no-show`, { method: 'POST', role: 'shop' });
+      done(`${studentLabel(job)} marked absent`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Release failed');
+      setAlert(err instanceof Error ? err.message : 'Could not mark absent. Try again.');
     }
   }
 
-  async function jobAction(id: string, action: 'no-show' | 'handover') {
-    if (action === 'no-show' && !confirm('Mark this student absent? They lose their place and must check in again (at the back of the line). Their order and counter code stay valid, and the next student is called.')) return;
-    setError('');
+  async function setAccepting(next: boolean) {
+    if (!next && !confirm('Pause new orders? Students see your shop as closed. Orders already placed and their codes keep working.')) return;
     try {
-      await api(`/api/shop/jobs/${id}/${action}`, { method: 'POST', role: 'shop' });
+      await api('/api/shop/availability', { method: 'PATCH', role: 'shop', body: { acceptingOrders: next } });
+      setReceipt({ text: next ? 'New orders are on again' : 'New orders paused', key: Date.now() });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Action failed');
+      setAlert(err instanceof Error ? err.message : 'Could not change new orders. Try again.');
     }
   }
 
-  async function retryPrint(id: string) {
-    setError('');
-    setMessage('');
-    try {
-      await api(`/api/shop/jobs/${id}/retry-print`, { method: 'POST', role: 'shop', body: {} });
-      setMessage('Print sent again');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not retry this print');
-    }
-  }
-
-  async function returnCounterPaymentAndClose(id: string, amountPaise: number) {
-    if (!confirm(`Only continue after returning ${rupees(amountPaise)} to the student. This records an auditable counter-payment return and closes the order.`)) return;
-    setError('');
-    setMessage('');
-    try {
-      await api(`/api/shop/jobs/${id}/counter-payment-returned`, { method: 'POST', role: 'shop', body: {} });
-      setMessage('Counter payment return recorded — order closed');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not close this counter-paid order');
-    }
-  }
-
-  async function completeFinishing(id: string) {
-    setError('');
-    setMessage('');
-    try {
-      await api(`/api/shop/jobs/${id}/finishing-complete`, { method: 'POST', role: 'shop' });
-      setMessage('Finishing complete — student notified ✓');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not complete finishing');
-    }
-  }
-
-  async function confirmPrinted(id: string) {
-    if (!confirm('This records the print as DONE: the student is told it is ready, your commission is posted and the document is deleted after ten minutes. Only continue if you checked that the full requested print actually came out correctly.')) return;
-    setError('');
-    setMessage('');
-    try {
-      const result = await api<{ finishingRequired: boolean }>(`/api/shop/jobs/${id}/confirm-print-completion`, {
-        method: 'POST',
-        role: 'shop',
-      });
-      setMessage(result.finishingRequired ? 'Print confirmed — manual finishing is now in progress' : 'Print confirmed — student notified ✓');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm the printed output');
-    }
-  }
-
-  async function toggleAvailability() {
-    if (!setup) return;
-    const next = !setup.acceptingOrders;
-    if (!next && !confirm('Pause new orders? Students will see your shop as closed. Orders already placed and their counter codes keep working.')) return;
-    setError('');
-    try {
-      await api('/api/shop/availability', {
-        method: 'PATCH',
-        role: 'shop',
-        body: { acceptingOrders: next },
-      });
-      setMessage(next ? 'New orders resumed' : 'New orders paused');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change new orders. Please try again.');
-    }
-  }
-
-  const printerLabel = (id: string | null) =>
-    id ? (printers.find((p) => p.id === id)?.label ?? id.slice(0, 8)) : '—';
-
-  const specsText = (j: QueueJob) =>
-    `${j.specs.copies}× ${j.specs.paperSize} ${j.specs.color ? 'colour' : 'B/W'}` +
-    `${j.specs.duplex ? ' · 2-side' : ''}` +
-    `${j.specs.binding ? ` · ${j.specs.binding.replace('_', ' ')}` : ''}` +
-    `${j.specs.pageRange ? ` · p${j.specs.pageRange}` : ''} · ${j.pagesPerCopy}pp`;
-
-  const waiting0 = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
-  const nowMs = useNow(waiting0.some((j) => j.revealDeadlineAt));
-  const atCounter = waiting0.filter((j) => j.band === 'revealed').length;
-  const comingUp = waiting0.filter((j) => j.band === 'arriving').length;
-  const prepared = jobs.filter((j) => j.status === 'awaiting_arrival');
-  const waiting = jobs.filter((j) => j.status === 'queued' || j.status === 'notified');
-  const inFlight = jobs.filter((j) => ['otp_verified', 'printing', 'finishing', 'ready_for_pickup'].includes(j.status));
-  // Names the real problem: PC offline, paused by PrintQs, campus off, or the next missing setup step.
+  const groups = useMemo(() => lineGroups(jobs), [jobs]);
+  const inFlight = useMemo(() => inFlightJobs(jobs), [jobs]);
   const banner = setup ? statusBanner(setup) : null;
+  const paused = setup?.acceptingOrders === false;
 
   return (
-    <div className="page wide shop-page">
+    <div className="page wide shop-page counter-page">
       <ShopNav />
 
-      <header className="page-heading dashboard-heading">
-        <div>
-          <span className="eyebrow-label">Live operations</span>
-          <h1>Counter &amp; walk-in line</h1>
-          <p>Queue positions organize students; the six-digit code always controls which prepared order prints.</p>
-        </div>
-        <div className="queue-summary">
-          <span><strong>{atCounter}</strong> at counter{capacity ? ` (of ${capacity})` : ''}</span>
-          <span><strong>{comingUp}</strong> coming up</span>
-          <span><strong>{waiting.length - atCounter - comingUp}</strong> waiting</span>
-          <span><strong>{prepared.length}</strong> prepared remotely</span>
-          <span><strong>{inFlight.length}</strong> printing / pickup</span>
-          {/* while paused, "Resume new orders" sits in the paused notice below */}
-          {setup?.acceptingOrders && (
-            <button className="ghost small" onClick={toggleAvailability}>Pause new orders</button>
+      <div className="counter-head">
+        <h1>Counter</h1>
+        <div className="counter-head-side">
+          {receipt && <p key={receipt.key} className="counter-receipt" role="status">{receipt.text}</p>}
+          {setup && !paused && (
+            <button type="button" className="secondary small" onClick={() => void setAccepting(false)}>Pause new orders</button>
           )}
         </div>
-      </header>
+      </div>
 
-      {setup && !setup.acceptingOrders && (
-        <div className="notice setup-notice" role="status">
+      {paused && (
+        <div className="notice warn counter-notice" role="status">
           <div>
             <strong>New orders are paused</strong>
-            <p>Students see your shop as closed and can’t place new orders. Orders already placed and their counter codes still work.</p>
+            <p>Students see your shop as closed. Orders already placed and their codes still work.</p>
           </div>
-          <button onClick={toggleAvailability}>Resume new orders</button>
+          <button type="button" onClick={() => void setAccepting(true)}>Resume new orders</button>
         </div>
       )}
-
       {banner && (
-        <div className="notice setup-notice">
+        <div className="notice warn counter-notice">
           <div>
             <strong>{banner.title}</strong>
             <p>{banner.text}</p>
           </div>
-          <Link className="button-link" to={banner.to}>{banner.action}</Link>
+          <Link className="button-link secondary" to={banner.to}>{banner.action}</Link>
+        </div>
+      )}
+      {loadError && (
+        <div className="notice danger counter-notice" role="alert">
+          <div>
+            <strong>Can’t load the counter</strong>
+            <p>{loadError}</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => void refresh()}>Try again</button>
+        </div>
+      )}
+      {alert && (
+        <div className="notice danger counter-notice" role="alert">
+          <div><strong>{alert}</strong></div>
+          <button type="button" className="quiet" onClick={() => setAlert('')}>Dismiss</button>
         </div>
       )}
 
-      <div className="release-panel">
-        <div>
-          <span className="eyebrow-label">Counter action</span>
-          <h2>Find order by counter code</h2>
-          <p>
-            Enter the student’s six-digit code to find the correct document. Students see their code only when it is their turn at the counter; staff can still serve anyone present by overriding the line. Looking up a code stops that student’s absent timer.
-          </p>
-        </div>
-        <div className="release-controls">
-          <input
-            className="big-otp-input"
-            type="text"
-            inputMode="numeric"
-            maxLength={6}
-            placeholder="······"
-            aria-label="Student's counter code"
-            value={otp}
-            onChange={(e) => {
-              setOtp(e.target.value.replace(/\D/g, ''));
-              setQueueOverride(null);
-              setManual(null);
-              setPaymentConfirmation(null);
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && otp.length === 6 && void release()}
-          />
-          <button disabled={otp.length !== 6} onClick={() => release()}>
-            Find &amp; print
-          </button>
-          {message && <span className="stamp green">{message}</span>}
-        </div>
-        {queueOverride && (
-          <div className="manual-picker queue-override-panel" role="alert">
-            <strong>This student is not at the counter yet</strong>
-            <p>
-              {queueOverride.position !== null
-                ? `Their live position is #${queueOverride.position}. Printing now will serve them out of turn.`
-                : queueOverride.queueStatus === 'awaiting_arrival'
-                  ? 'They have not checked in to the physical line.'
-                  : 'They are not currently in the live line.'}
-            </p>
-            <div className="row">
-              <button onClick={() => release(undefined, true)}>Print anyway</button>
-              <button className="ghost" onClick={() => setQueueOverride(null)}>Keep queue order</button>
-            </div>
-          </div>
-        )}
-        {manual && (
-          <div className="manual-picker">
-            <strong>Choose a compatible printer</strong>
-            <p>The recommended option has the shortest estimated completion time.</p>
-            <div className="row">
-              <select
-                value={manualPrinter}
-                onChange={(e) => setManualPrinter(e.target.value)}
-                style={{ maxWidth: 340 }}
-              >
-                {manual.eligiblePrinters.length === 0 && <option value="">No eligible printer online!</option>}
-                {manual.eligiblePrinters.map((p, i) => (
-                  <option key={p.printerId} value={p.printerId}>
-                    {printerLabel(p.printerId)} — ~{p.estimatedWaitMinutes} min{i === 0 ? ' (recommended)' : ''}
-                  </option>
-                ))}
-              </select>
-              <button disabled={!manualPrinter} onClick={() => release(manualPrinter, manual.overrideQueue)}>
-                Confirm &amp; print
-              </button>
-              <button className="ghost" onClick={() => setManual(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-        {paymentConfirmation && (
-          <div className="manual-picker cash-confirm-panel" role="alert">
-            <span className="eyebrow-label">Pay at shop</span>
-            <strong>Verify {rupees(paymentConfirmation.amountPaise)}</strong>
-            <p>Check the exact amount in your cash drawer or verified merchant UPI app. A UPI return screen, screenshot, or typed reference is never proof on its own.</p>
-            <label htmlFor="counter-payment-reference">Merchant-app reference (optional)</label>
-            <input id="counter-payment-reference" maxLength={120} value={counterReference} onChange={(event) => setCounterReference(event.target.value)} placeholder="Optional reference after verification" />
-            <div className="row">
-              <button onClick={() => release(paymentConfirmation.selectedPrinterId, paymentConfirmation.overrideQueue, { method: 'cash', ...(counterReference.trim() ? { reference: counterReference.trim() } : {}) })}>
-                Cash received &amp; print
-              </button>
-              <button onClick={() => release(paymentConfirmation.selectedPrinterId, paymentConfirmation.overrideQueue, { method: 'shop_upi', ...(counterReference.trim() ? { reference: counterReference.trim() } : {}) })}>
-                UPI received &amp; print
-              </button>
-              <button className="ghost" onClick={() => { setPaymentConfirmation(null); setCounterReference(''); }}>Not received</button>
-            </div>
-          </div>
-        )}
-        {error && <div className="error-box">{error}</div>}
+      <div className="counter-grid">
+        <CounterCode
+          jobs={jobs}
+          printers={printers}
+          upiReady={upiReady}
+          isOwner={isOwner}
+          reload={refresh}
+          onSent={(r) => done(r.text)}
+          focusSignal={focusSignal}
+        />
+        <InFlightPanel jobs={inFlight} printers={printers} loading={!loaded} onDone={done} />
+        <LinePanel groups={groups} capacity={capacity} loading={!loaded} onAbsent={(job) => void markAbsent(job)} />
+        <PreparedPanel jobs={jobs} />
       </div>
 
-      <div className="section-heading"><div><h2>Physically checked in</h2><p>One shop-wide walk-in line, ordered by arrival. The first {capacity ?? 'few'} are called to the counter; if they do not arrive in time they are marked absent automatically.</p></div><span className="summary-pill">{waiting.length}</span></div>
-      <div className="table-shell" tabIndex={0} role="region" aria-label="Checked-in students">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th><th>Student</th><th>File</th><th>Specs</th><th>Printer</th><th>Status</th><th>Amount</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {waiting.length === 0 && (
-              <tr><td colSpan={8}><div className="table-empty"><strong>No one is checked in</strong><span>Remote uploads stay out of this line until a student confirms arrival.</span></div></td></tr>
-            )}
-            {waiting.map((j, index) => (
-              <tr key={j.id} className={j.band ? `row-${j.band}` : undefined}>
-                <td><strong>{j.position ?? index + 1}</strong></td>
-                <td>{j.student.name ?? j.student.phoneMasked}</td>
-                <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {j.file.originalName}
-                </td>
-                <td>{specsText(j)}</td>
-                <td>
-                  {printerLabel(j.assignedPrinterId)}{' '}
-                  {!j.assignedPrinterId && <span className="stamp yellow">assign</span>}
-                </td>
-                <td>
-                  <BandPill band={j.band} deadline={j.revealDeadlineAt} nowMs={nowMs} />
-                  {j.paymentStatus === 'cash_due' && <span className="stamp yellow" style={{ marginLeft: 6 }}>cash due</span>}
-                </td>
-                <td className="mono">{rupees(j.totalPaise)}</td>
-                <td>
-                  <span className="row" style={{ flexWrap: 'nowrap' }}>
-                    <button className="ghost small danger-text" onClick={() => jobAction(j.id, 'no-show')}>
-                      Mark absent
-                    </button>
-                    {!j.assignedPrinterId && (
-                      <AssignButton jobId={j.id} printers={printers} onDone={refresh} />
-                    )}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {prepared.length > 0 && (
-        <>
-          <div className="section-heading"><div><h2>Prepared, not checked in</h2><p>Remote orders are ready to find by code but do not occupy the physical line.</p></div><span className="summary-pill">{prepared.length}</span></div>
-          <div className="table-shell" tabIndex={0} role="region" aria-label="Prepared orders not checked in">
-            <table>
-              <thead>
-                <tr><th>Arrival plan</th><th>Student</th><th>File</th><th>Specs</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {prepared
-                  .slice()
-                  .sort((a, b) => new Date(a.scheduledTime ?? a.createdAt).getTime() - new Date(b.scheduledTime ?? b.createdAt).getTime())
-                  .map((j) => (
-                    <tr key={j.id}>
-                      <td className="slot">{j.scheduledTime ? slotLabel(j.scheduledTime) : 'Flexible'}</td>
-                      <td>{j.student.name ?? j.student.phoneMasked}</td>
-                      <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {j.file.originalName}
-                      </td>
-                      <td>{specsText(j)}</td>
-                      <td>
-                        {j.absent
-                          ? <span className="stamp red">absent — must check in again</span>
-                          : <span className="stamp yellow">awaiting arrival</span>}
-                        {(j.paymentStatus === 'counter_due' || j.paymentStatus === 'cash_due') && <span className="stamp yellow" style={{ marginLeft: 6 }}>pay at shop</span>}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      <div className="section-heading"><div><h2>Printing and pickup</h2><p>Jobs released at the counter. A Windows spool acknowledgement still needs staff to check the paper before it is marked printed.</p></div><span className="summary-pill">{inFlight.length}</span></div>
-      <div className="table-shell" tabIndex={0} role="region" aria-label="Printing and pickup">
-        <table>
-          <thead>
-            <tr><th>Student</th><th>File</th><th>Printer</th><th>Status</th><th></th></tr>
-          </thead>
-          <tbody>
-            {inFlight.length === 0 && (
-              <tr><td colSpan={5}><div className="table-empty"><strong>No active prints</strong><span>Verified jobs move here while the agent is working.</span></div></td></tr>
-            )}
-            {inFlight.map((j) => (
-              <tr key={j.id}>
-                <td>{j.student.name ?? j.student.phoneMasked}</td>
-                <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {j.file.originalName}
-                </td>
-                <td>{printerLabel(j.assignedPrinterId)}</td>
-                <td>
-                  <span className={`stamp ${j.status === 'ready_for_pickup' ? 'green' : j.status === 'finishing' ? 'yellow' : 'blue'}`}>
-                    {jobActions(j).needsAttention ? 'Needs attention' : j.status === 'finishing' ? 'manual finishing' : j.status.replace(/_/g, ' ')}
-                  </span>
-                  {j.printError && <div className="print-error-detail">{j.printError}</div>}
-                  {j.status === 'printing' && j.printAgentOffline && (
-                    <div className="print-error-detail">The print computer went offline, restarted or stalled while printing this job. Check whether it printed, then pick an option.</div>
-                  )}
-                </td>
-                <td>
-                  {j.status === 'otp_verified' && j.printError && (
-                    <span className="row" style={{ flexWrap: 'nowrap' }}>
-                      <button className="small" onClick={() => retryPrint(j.id)}>
-                        Retry print
-                      </button>
-                      {jobActions(j).paymentReturned && (
-                        <button className="ghost small" onClick={() => returnCounterPaymentAndClose(j.id, j.totalPaise)}>
-                          Payment returned
-                        </button>
-                      )}
-                    </span>
-                  )}
-                  {j.status === 'printing' && (
-                    <span className="row" style={{ flexWrap: 'nowrap' }}>
-                      <button className="small" onClick={() => confirmPrinted(j.id)}>
-                        Printed successfully
-                      </button>
-                      {j.printAgentOffline && (
-                        <>
-                          <button className="ghost small" onClick={() => retryPrint(j.id)}>
-                            Print failed — retry on another computer
-                          </button>
-                          {jobActions(j).paymentReturned && (
-                            <button className="ghost small" onClick={() => returnCounterPaymentAndClose(j.id, j.totalPaise)}>
-                              Cancel &amp; return payment
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </span>
-                  )}
-                  {j.status === 'finishing' && (
-                    <button className="small" onClick={() => completeFinishing(j.id)}>
-                      Mark {j.specs.binding?.replace('_', ' ') ?? 'finishing'} complete
-                    </button>
-                  )}
-                  {j.status === 'ready_for_pickup' && (
-                    <button className="small" onClick={() => jobAction(j.id, 'handover')}>
-                      Handed over
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <details className="disclosure counter-help">
+        <summary>How the counter works</summary>
+        <ul>
+          <li>The student shows a 6-digit code. Type it: the order, amount and printer appear.</li>
+          <li>Take the money, then press <strong>Cash received &amp; print</strong> or <strong>UPI received &amp; print</strong>.</li>
+          <li>When the pages come out, check them and press <strong>Printed OK · hand over</strong>.</li>
+          <li>Students “At the counter” must reach you before their timer ends, or they are marked absent and check in again. Typing their code stops the timer.</li>
+          <li>You can serve someone out of turn; the counter asks you first and keeps a record.</li>
+        </ul>
+      </details>
     </div>
-  );
-}
-
-function AssignButton({
-  jobId,
-  printers,
-  onDone,
-}: {
-  jobId: string;
-  printers: Printer[];
-  onDone: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [choice, setChoice] = useState('');
-
-  async function assign() {
-    await api(`/api/shop/jobs/${jobId}/assign`, {
-      method: 'POST',
-      role: 'shop',
-      body: { printerId: choice },
-    }).catch(() => undefined);
-    setOpen(false);
-    onDone();
-  }
-
-  if (!open) {
-    return (
-      <button className="small" onClick={() => setOpen(true)}>
-        Assign
-      </button>
-    );
-  }
-  return (
-    <span className="row" style={{ flexWrap: 'nowrap' }}>
-      <select value={choice} onChange={(e) => setChoice(e.target.value)}>
-        <option value="">Pick…</option>
-        {printers
-          .filter((p) => p.status === 'online')
-          .map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-      </select>
-      <button className="small" disabled={!choice} onClick={assign}>
-        OK
-      </button>
-    </span>
   );
 }

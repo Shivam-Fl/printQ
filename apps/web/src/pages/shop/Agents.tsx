@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { API_URL, api, getToken } from '../../api.js';
 import { getShopSocket } from '../../socket.js';
 import ShopNav from '../../components/ShopNav.js';
+import ShopTabs from '../../components/ShopTabs.js';
 import { PcLinkShare, PcSteps } from '../../components/PcSetup.js';
 import { WINDOWS_DOWNLOAD_URL, detectPhoneLike } from '../../lib/pcDownload.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
@@ -148,6 +149,7 @@ export default function Agents() {
   return (
     <div className="page wide shop-page">
       <ShopNav />
+      <ShopTabs />
       <header className="page-heading">
         <div>
           <span className="eyebrow-label">Counter computer</span>

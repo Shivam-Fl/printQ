@@ -84,7 +84,7 @@ tasks.counterRelease = async (viewport = { width: 1366, height: 768 }, label = '
     await L.click(page.getByRole('button', { name: 'Cash received & print' }), 'Cash received & print');
     await page.getByText('Sent to printer').waitFor({ timeout: 15_000 });
   } else {
-    const input = page.getByLabel('Counter code', { exact: false }).first();
+    const input = page.getByRole('textbox', { name: 'Counter code' });
     await L.type(input, code, 'counter code');
     await L.click(page.getByRole('button', { name: /Cash received & print/ }), 'Cash received & print');
     await page.getByRole('status').filter({ hasText: /Sent to/ }).first().waitFor({ timeout: 15_000 });
@@ -149,9 +149,10 @@ tasks.counterRush = async () => {
       catch (e) { await page.screenshot({ path: SCRATCH + '/rush-fail.png', fullPage: true }); throw new Error('student ' + idx + ': ' + e.message); }
       await page.getByText('Sent to printer').waitFor({ timeout: 15_000 });
     } else {
-      const input = page.getByLabel('Counter code', { exact: false }).first();
+      const input = page.getByRole('textbox', { name: 'Counter code' });
       await L.type(input, code, 'counter code');
-      await L.click(page.getByRole('button', { name: /Cash received & print/ }), 'Cash received & print');
+      try { await L.click(page.getByRole('button', { name: /Cash received & print/ }), 'Cash received & print'); }
+      catch (e) { await page.screenshot({ path: SCRATCH + '/rush-fail-after.png', fullPage: true }); throw new Error('student ' + idx + ': ' + e.message); }
       await page.getByRole('status').filter({ hasText: /Sent to/ }).first().waitFor({ timeout: 15_000 });
     }
     const job = await waitFor('spooled', async () => {
@@ -368,7 +369,51 @@ tasks.registerGoLive = async (viewport = { width: 1366, height: 768 }, label = '
   }
 };
 
+/** (b-kbd) the counter release with the keyboard only (new UI): 6 digits, Tab, Enter. */
+tasks.counterKeyboard = async () => {
+  await clearLine(); await finishInFlight();
+  const [t] = await lineUp(1);
+  const code = await codeWhenRevealed(t.who, t.jobId);
+  const ctx = await context({ width: 1366, height: 768 }, ['shop', A.token, 'owner']);
+  const page = await ctx.newPage();
+  await page.goto(`${WEB}/dashboard`, { waitUntil: 'networkidle' });
+  const L = new Ledger(page, 'b-counter-release-keyboard');
+  const input = page.getByRole('textbox', { name: 'Counter code' });
+  await L.type(input, code, 'counter code');
+  await page.locator('.order-card').waitFor({ timeout: 10_000 });
+  await L.press('Tab');
+  const focusedText = await page.evaluate(() => document.activeElement?.textContent ?? '');
+  // a habitual Enter while the code box still has focus must not confirm money
+  await L.press('Enter');
+  await page.getByRole('status').filter({ hasText: /Sent to/ }).first().waitFor({ timeout: 15_000 });
+  const backInCodeBox = await page.evaluate(() => document.activeElement?.id === 'counter-code');
+  const s = L.summary({ viewport: '1366x768', tabLandsOn: focusedText, focusBackInCodeBox: backInCodeBox });
+  await ctx.close();
+  return s;
+};
+
+/** Enter pressed twice by habit in the code box never records a payment. */
+tasks.counterDoubleEnter = async () => {
+  await clearLine(); await finishInFlight();
+  const [t] = await lineUp(1);
+  const code = await codeWhenRevealed(t.who, t.jobId);
+  const ctx = await context({ width: 1366, height: 768 }, ['shop', A.token, 'owner']);
+  const page = await ctx.newPage();
+  await page.goto(`${WEB}/dashboard`, { waitUntil: 'networkidle' });
+  const input = page.getByRole('textbox', { name: 'Counter code' });
+  await input.pressSequentially(code, { delay: 15 });
+  await page.keyboard.press('Enter');
+  await page.locator('.order-card').waitFor({ timeout: 10_000 });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1200);
+  const job = await studentJob(S[t.who].token, t.jobId);
+  await ctx.close();
+  return { task: 'b-double-enter-safety', paymentStatusAfterTwoEnters: job.paymentStatus, statusAfterTwoEnters: job.status, ok: job.paymentStatus === 'counter_due' };
+};
+
 const plan = [
+  ['b-counter-release-keyboard', () => (UI === 'after' ? tasks.counterKeyboard() : Promise.resolve({ task: 'n/a' }))],
+  ['b-double-enter-safety', () => (UI === 'after' ? tasks.counterDoubleEnter() : Promise.resolve({ task: 'n/a' }))],
   ['a-register-go-live', () => tasks.registerGoLive()],
   ['b-counter-release', () => tasks.counterRelease()],
   ['b2-printed-and-handover', () => tasks.counterFinish()],

@@ -4,6 +4,7 @@ import { api, ApiError, getShopRole, getToken } from '../../api.js';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import QueueSettings from '../../components/QueueSettings.js';
 import ShopNav from '../../components/ShopNav.js';
+import ShopTabs from '../../components/ShopTabs.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import {
   buildSettingsPatch,
@@ -214,6 +215,7 @@ export default function Settings() {
     return (
       <div className="page wide">
         <ShopNav />
+        <ShopTabs />
         {loadError ? (
           <div className="error-box" role="alert">
             <p style={{ margin: 0 }}>{loadError}</p>
@@ -340,6 +342,7 @@ export default function Settings() {
   return (
     <div className="page wide">
       <ShopNav />
+      <ShopTabs />
       <div className="page-heading">
         <div><span className="eyebrow-label">Storefront &amp; operations</span><h1>Settings</h1><p>Keep the shop details, print menu and team access accurate for students and staff.</p></div>
       </div>

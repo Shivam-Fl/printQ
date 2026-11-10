@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api, getToken } from '../../api.js';
 import ShopNav from '../../components/ShopNav.js';
+import ShopTabs from '../../components/ShopTabs.js';
 import { shouldPollSetup, startSetupPolling } from '../../lib/setupPolling.js';
 import ShopLocationEditor from '../../components/ShopLocationEditor.js';
 import { buildLocationSave, takeRegisterPin } from '../../lib/locationFlow.js';
@@ -158,6 +159,7 @@ export default function ShopSetup() {
   return (
     <main className="page wide shop-page">
       <ShopNav />
+      <ShopTabs />
       <header className="page-heading setup-heading">
         <div>
           <span className="eyebrow-label">Launch checklist</span>

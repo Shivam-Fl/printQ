@@ -87,6 +87,8 @@ export default function App() {
         <Route path="/dashboard/printers" element={<Printers />} />
         <Route path="/dashboard/agents" element={<Agents />} />
         <Route path="/dashboard/settings" element={<Settings />} />
+        {/* prices get their own page in the Shop area (slice 5); until then they live in Settings */}
+        <Route path="/dashboard/prices" element={<Navigate to="/dashboard/settings#prices" replace />} />
         {/* platform administration: separately authenticated from any shop */}
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<AdminConsole />} />
