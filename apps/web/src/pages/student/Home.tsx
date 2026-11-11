@@ -34,18 +34,23 @@ export type NewPrintAction =
   | { kind: 'directory' };
 
 /**
- * "New print": the shops the student ordered from decide (one → that shop, several → the chooser). A student who
- * has not ordered yet goes to the shop they last opened (say, by scanning its QR), but only while it is published.
+ * "New print": the shops the student ordered from decide (one open shop → that shop, several → the chooser). A
+ * student who has not ordered yet goes to the shop they last opened (say, by scanning its QR) while it is published
+ * and open. A closed shop is never opened on its own: that student lands on Find a shop, open shops first.
  */
 export function resolveNewPrintAction(
   rememberedSlug: string | null,
   shops: Array<{ slug: string }>,
-  publishedShops: Array<{ slug: string }> = [],
+  publishedShops: Array<{ slug: string; open?: boolean }> = [],
 ): NewPrintAction {
+  // open unless the public list says it is closed right now
+  const openNow = (slug: string) => publishedShops.find((shop) => shop.slug === slug)?.open !== false;
   const onlyShop = shops[0];
-  if (onlyShop && shops.length === 1) return { kind: 'shop', slug: onlyShop.slug };
+  if (onlyShop && shops.length === 1) return openNow(onlyShop.slug) ? { kind: 'shop', slug: onlyShop.slug } : { kind: 'directory' };
   if (shops.length > 0) return { kind: 'picker' };
-  if (rememberedSlug && publishedShops.some((shop) => shop.slug === rememberedSlug)) return { kind: 'shop', slug: rememberedSlug };
+  if (rememberedSlug && publishedShops.some((shop) => shop.slug === rememberedSlug) && openNow(rememberedSlug)) {
+    return { kind: 'shop', slug: rememberedSlug };
+  }
   return { kind: 'directory' };
 }
 
@@ -84,19 +89,19 @@ export default function Home() {
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerHeadingRef = useRef<HTMLHeadingElement>(null);
 
-  const home = useResource<{ me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string }> }>(
+  const home = useResource<{ me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string; open?: boolean }> }>(
     async (signal) => {
       const [m, j, published] = await Promise.all([
         api<{ student: Me }>('/api/auth/student/me', { role: 'student', signal }),
         api<{ jobs: JobRow[] }>('/api/jobs', { role: 'student', signal }),
-        api<{ shops: Array<{ slug: string }> }>('/api/public/shops', { signal }),
+        api<{ shops: Array<{ slug: string; open?: boolean }> }>('/api/public/shops', { signal }),
       ]);
       return { me: m.student, jobs: j.jobs, publishedShops: published.shops };
     },
     [],
     {
       enabled: signedIn,
-      validate: (v): v is { me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string }> } => {
+      validate: (v): v is { me: Me; jobs: JobRow[]; publishedShops: Array<{ slug: string; open?: boolean }> } => {
         const d = v as { me?: unknown; jobs?: unknown; publishedShops?: unknown };
         return Boolean(d.me) && Array.isArray(d.jobs) && Array.isArray(d.publishedShops);
       },
@@ -112,11 +117,14 @@ export default function Home() {
     if (!signedIn || unauthorized) navigate('/login', { replace: true });
   }, [signedIn, unauthorized, navigate]);
 
-  // distinct live shops from history, most recent first
+  // distinct live shops from history: open ones first, most recent first within each group
   const shops = useMemo(() => {
     const seen = new Map<string, { slug: string; name: string }>();
     for (const j of jobs) if (!seen.has(j.shop.slug)) seen.set(j.shop.slug, j.shop);
-    return filterPublishedHistoryShops([...seen.values()], publishedShops);
+    const openBySlug = new Map(publishedShops.map((shop) => [shop.slug, shop.open !== false]));
+    return filterPublishedHistoryShops([...seen.values()], publishedShops)
+      .map((shop) => ({ ...shop, open: openBySlug.get(shop.slug) ?? true }))
+      .sort((a, b) => Number(b.open) - Number(a.open));
   }, [jobs, publishedShops]);
 
   function startPrint() {
@@ -201,6 +209,7 @@ export default function Home() {
                   }}
                 >
                   <strong>{s.name}</strong>
+                  {!s.open && <span>Closed now</span>}
                 </button>
               ))}
             </div>

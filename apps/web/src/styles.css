@@ -1017,7 +1017,7 @@ div.role-card:hover { border-color: var(--rule); box-shadow: var(--shadow-1); }
 .shop-facts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; color: var(--pencil); font-size: .85rem; }
 .upload-panel { position: relative; min-height: 300px; display: grid; place-items: center; text-align: center; padding: 42px; border: 1.5px dashed #bcc6d6; border-radius: 20px; background: var(--paper); transition: border-color .15s, background .15s; }
 .upload-panel.dragging { border-color: var(--stamp); background: var(--stamp-soft); }
-.upload-panel.closed { opacity: .78; }
+.upload-panel.closed .upload-mark { opacity: .55; filter: grayscale(1); }
 .upload-mark { width: 62px; height: 62px; display: grid; place-items: center; margin: 0 auto 18px; border-radius: 18px; color: var(--stamp); background: var(--stamp-soft); font-size: 1.6rem; }
 .upload-mark svg { width: 28px; height: 28px; }
 .upload-panel h2 { margin: 0 0 7px; font-size: 1.42rem; }
