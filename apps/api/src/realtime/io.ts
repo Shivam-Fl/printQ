@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { verifyToken } from '../lib/tokens.js';
 import { resolveShopSession } from '../lib/shopSession.js';
+import { resolveStudentSession } from '../lib/studentSession.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { parseAgentSessionId } from '../middleware/auth.js';
 import { reconcileAgentSession } from '../modules/jobs/printLease.js';
@@ -56,8 +57,11 @@ export function setupRealtime(httpServer: HttpServer): Server {
     const claims = typeof token === 'string' ? verifyToken(token) : null;
     if (!claims) return next(new Error('unauthorized'));
     if (claims.typ === 'student') {
+      // same revocation rule as the HTTP middleware (sign-out bumps the version)
+      const student = await resolveStudentSession(claims).catch(() => null);
+      if (!student) return next(new Error('unauthorized'));
       socket.data.kind = 'student';
-      socket.data.studentId = claims.sub;
+      socket.data.studentId = student.id;
       return next();
     }
     if (claims.typ !== 'shop') return next(new Error('unauthorized'));

@@ -36,7 +36,7 @@ export interface SetupSnapshot {
   verification?: { publishedAt: string | null };
 }
 
-export const PRICES_PATH = '/dashboard/settings#prices';
+export const PRICES_PATH = '/dashboard/prices';
 
 /** What students see right now. Falls back to ready/publishedAt if the API has no `visibility` yet. */
 export function visibilityState(setup: Pick<SetupSnapshot, 'ready' | 'visibility' | 'verification'>): VisibilityState {

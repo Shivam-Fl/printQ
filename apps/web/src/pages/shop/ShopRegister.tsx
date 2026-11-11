@@ -263,7 +263,11 @@ export default function ShopRegister() {
             </p>
           </form>
         )}
-        {!signedIn && <p className="dim auth-after-card">Already registered? <Link to="/dashboard/login">Sign in →</Link></p>}
+        {!signedIn && <p className="dim auth-after-card">Already registered? <Link to="/dashboard/login">Sign in</Link></p>}
+        {/* phones hide the side panel: say what comes next right under the form */}
+        {!signedIn && (
+          <p className="register-next phone-only">Next: put your shop on the map, check prices, then connect the computer next to your printer. Your shop goes live by itself.</p>
+        )}
       </div>
       <aside className="auth-aside shop-auth-aside">
         <div className="auth-proof">

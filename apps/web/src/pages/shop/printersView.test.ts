@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectedEmptyState, guessPaperSizes } from './printersView.js';
+import { detectedEmptyState, guessPaperSizes, practiceOnly, unlinkedDetectedPrinters } from './printersView.js';
 
 describe('guessPaperSizes', () => {
   it('keeps A4 as the default and adds A3 when the driver reports it', () => {
@@ -27,5 +27,23 @@ describe('detectedEmptyState', () => {
 
   it('says the PC is offline when one was connected before', () => {
     expect(detectedEmptyState({ agentsOnline: 0, agentsTotal: 1, linkedPrinters: 1 }).title).toMatch(/offline/i);
+  });
+});
+
+describe('detected printers and practice mode', () => {
+  it('lists each reported printer once, minus the ones already added', () => {
+    const agents = [
+      { detectedPrinters: [{ name: 'HP LaserJet', paperSizes: ['A4'] }, { name: 'Epson L3250', paperSizes: ['A4', 'A3'] }] },
+      { detectedPrinters: [{ name: 'HP LaserJet', paperSizes: ['A4'] }] },
+      { detectedPrinters: null },
+    ];
+    expect(unlinkedDetectedPrinters(agents, [{ osPrinterName: 'Epson L3250' }]).map((d) => d.name)).toEqual(['HP LaserJet']);
+  });
+  it('keeps the practice warning while the simulator is the only added printer', () => {
+    const isSim = (name: string | null) => name === 'PrintQ Simulator';
+    expect(practiceOnly([{ osPrinterName: 'PrintQ Simulator' }], isSim)).toBe(true);
+    expect(practiceOnly([{ osPrinterName: 'PrintQ Simulator' }, { osPrinterName: 'HP LaserJet' }], isSim)).toBe(false);
+    expect(practiceOnly([], isSim)).toBe(false);
+    expect(practiceOnly([{ osPrinterName: null }], isSim)).toBe(false);
   });
 });

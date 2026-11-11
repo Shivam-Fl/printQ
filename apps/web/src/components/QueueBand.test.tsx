@@ -23,10 +23,11 @@ describe('countdown', () => {
 });
 
 describe('student band panel', () => {
-  it('revealed: perforated ticket with the code and a live countdown', () => {
+  it('revealed: perforated ticket with the code (in two halves) and a live countdown', () => {
     const html = render({ otpCode: '482913', revealDeadlineAt: new Date(NOW + 42_000).toISOString() });
     expect(html).toContain('class="ticket turn band-ticket"');
-    expect(html).toContain('482913');
+    expect(html).toContain('<span aria-hidden="true">482</span><span aria-hidden="true">913</span>');
+    expect(html).toContain('<span class="sr-only">Counter code 4 8 2 9 1 3</span>');
     expect(html).toContain('Be at the counter in 0:42');
     expect(html).not.toContain('urgent');
   });
@@ -45,12 +46,13 @@ describe('student band panel', () => {
   });
   it('revealed without a timer (staff has the order) still shows the code', () => {
     const html = render({ otpCode: '111222' });
-    expect(html).toContain('111222');
+    expect(html).toContain('>111</span><span aria-hidden="true">222<');
     expect(html).toContain('Please be at the counter');
   });
-  it('arriving: banner + position, never a code', () => {
+  it('arriving: head-to-the-counter card + position, never a code', () => {
     const html = render({ band: 'arriving', position: 7, otpCode: null });
-    expect(html).toContain('Your turn is coming up — please head to the shop.');
+    expect(html).toContain('Your turn is coming up');
+    expect(html).toContain('Please head to the shop counter.');
     expect(html).toContain('#7');
     expect(html).not.toContain('otp-band');
   });

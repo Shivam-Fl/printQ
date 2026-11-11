@@ -63,7 +63,7 @@ describe('steps 2 and 4', () => {
   it('prices link straight to the price editor and disclose the fee', () => {
     const prices = setupSteps(snapshot()).find((step) => step.key === 'prices')!;
     expect(prices.to).toBe(PRICES_PATH);
-    expect(prices.to).toBe('/dashboard/settings#prices');
+    expect(prices.to).toBe('/dashboard/prices');
     expect(prices.note).toBe('Students pay your price + a PrintQs fee of 25%.');
   });
   it('formats the fee from basis points, and hides it when there is none', () => {

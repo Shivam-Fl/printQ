@@ -13,7 +13,7 @@ export function jobActions(j: ActionJob) {
   const failedPrint = j.status === 'otp_verified' && Boolean(j.printError);
   const orphanedPrint = j.status === 'printing' && Boolean(j.printAgentOffline);
   return {
-    /** "Retry print" on a failed print / "retry on another computer" when the computer died mid-print. */
+    /** "Print again" on a failed print / "retry on another computer" when the computer died mid-print. */
     retry: failedPrint || orphanedPrint,
     /** Counter refund: the shop physically returns the money and closes the order. */
     paymentReturned: (failedPrint || orphanedPrint) && counterPaid(j),

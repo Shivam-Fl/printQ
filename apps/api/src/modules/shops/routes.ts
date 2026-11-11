@@ -36,7 +36,7 @@ import {
 import { applyTransition } from '../jobs/transitions.js';
 import { env } from '../../config/env.js';
 import { scheduleFileDeletion } from '../../lib/fileRetention.js';
-import { confirmSuccessfulPrint } from '../jobs/printCompletion.js';
+import { confirmSuccessfulPrint, isLatePrintConfirmable } from '../jobs/printCompletion.js';
 import { isPrintOrphaned, markPrintFailedAgentGone, printLostReason } from '../jobs/printLease.js';
 import { describePrintProblem } from '../../lib/printProblem.js';
 import { istDayKey, lastIstDayKeys, startOfIstDay } from '../../lib/istDay.js';
@@ -1045,6 +1045,8 @@ shopRouter.post(
  * Real Windows drivers usually acknowledge a spool submission rather than
  * physical completion. Staff inspect the paper and make this auditable action
  * before PrintQs treats the job as printed, posts commission, or deletes files.
+ * It also covers a print the printer accepted whose confirmation timed out
+ * (spool_timeout): staff found the pages, so it must not be reprinted or refunded.
  */
 shopRouter.post(
   '/jobs/:id/confirm-print-completion',
@@ -1054,7 +1056,9 @@ shopRouter.post(
       where: { id: param(req, 'id'), shopId: req.shopUser!.shopId },
     });
     if (!job) throw notFound();
-    if (job.status !== 'printing') throw conflict('This job is not awaiting print confirmation');
+    if (job.status !== 'printing' && !isLatePrintConfirmable(job)) {
+      throw conflict('This job is not awaiting print confirmation');
+    }
 
     const completed = await confirmSuccessfulPrint(
       job,

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+// shop.css builds on the tokens in styles.css, so check both together
+const css = ['./styles.css', './shop.css'].map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
 
 describe('styles.css', () => {
   // An undefined custom property silently drops the whole declaration

@@ -4,6 +4,8 @@ import { env } from '../config/env.js';
 export interface StudentClaims {
   typ: 'student';
   sub: string;
+  /** Student.sessionVersion at issue time; tokens minted before it existed read as 0. */
+  sv?: number;
 }
 export interface ShopClaims {
   typ: 'shop';
@@ -21,8 +23,8 @@ export interface AdminClaims {
 }
 export type AuthClaims = StudentClaims | ShopClaims | AdminClaims;
 
-export function signStudentToken(studentId: string): string {
-  return jwt.sign({ typ: 'student' }, env.JWT_SECRET, { subject: studentId, expiresIn: '30d' });
+export function signStudentToken(studentId: string, sessionVersion = 0): string {
+  return jwt.sign({ typ: 'student', sv: sessionVersion }, env.JWT_SECRET, { subject: studentId, expiresIn: '30d' });
 }
 
 export function signShopToken(
@@ -78,7 +80,8 @@ export function verifyToken(token: string): AuthClaims | null {
   try {
     const payload = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload;
     if (payload.typ === 'student' && typeof payload.sub === 'string') {
-      return { typ: 'student', sub: payload.sub };
+      const sv = Number.isSafeInteger(payload.sv) && payload.sv >= 0 ? (payload.sv as number) : 0;
+      return { typ: 'student', sub: payload.sub, sv };
     }
     if (
       payload.typ === 'shop' &&

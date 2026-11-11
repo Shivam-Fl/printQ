@@ -3,6 +3,7 @@ import type { JobSpecs } from '@printq/shared';
 import { scheduleVerifiedPrintFileDeletion } from '../../lib/fileRetention.js';
 import { logger } from '../../lib/logger.js';
 import { runInBackground } from '../../lib/background.js';
+import { PRINT_ERROR_SPOOL_TIMEOUT } from '../../lib/printProblem.js';
 import { prisma } from '../../lib/prisma.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 import { publishEvent } from '../../realtime/events.js';
@@ -11,11 +12,21 @@ import { applyTransition, type ActorType } from './transitions.js';
 
 export type PrintConfirmationActor = { type: ActorType; id?: string };
 
+/** A print the printer accepted but nobody confirmed in time: staff may still confirm it. */
+export function isLatePrintConfirmable(job: Pick<Job, 'status' | 'printError'>): boolean {
+  return job.status === 'otp_verified' && job.printError === PRINT_ERROR_SPOOL_TIMEOUT;
+}
+
 /**
  * Commit the one event that means paper was actually produced. The caller has
  * already established either deterministic simulator completion or a staff
  * member's physical inspection. Spool acceptance must use recordSpoolAccepted
  * instead and cannot call this function.
+ *
+ * Normally the job is `printing`. A print whose spool acknowledgement timed out
+ * went back to `otp_verified` with printError = spool_timeout; staff who find the
+ * pages in the tray confirm it from there (the guard keeps a concurrent retry or
+ * refund from being overwritten).
  */
 export async function confirmSuccessfulPrint(
   job: Job,
@@ -25,9 +36,10 @@ export async function confirmSuccessfulPrint(
   const specs = job.specs as unknown as JobSpecs;
   const finishingRequired = Boolean(specs.binding);
   const confirmedAt = new Date();
+  const late = isLatePrintConfirmable(job);
   const updated = await applyTransition(
     job.id,
-    'printing',
+    late ? 'otp_verified' : 'printing',
     finishingRequired ? 'FINISHING_REQUIRED' : 'PRINT_COMPLETED',
     actor,
     {
@@ -37,6 +49,8 @@ export async function confirmSuccessfulPrint(
       printConfirmedById: completionMethod === 'staff_confirmed' ? actor.id ?? null : null,
       printCompletionMethod: completionMethod,
     },
+    late ? 'PRINT_CONFIRMED_AFTER_TIMEOUT' : undefined,
+    late ? { printError: PRINT_ERROR_SPOOL_TIMEOUT } : undefined,
   );
   if (!updated) return null;
 

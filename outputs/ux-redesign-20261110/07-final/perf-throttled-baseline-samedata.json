@@ -1,0 +1,82 @@
+[
+  {
+    "name": "welcome",
+    "path": "/",
+    "fcpMs": 2676,
+    "lcpMs": 2676,
+    "dclMs": 2189,
+    "loadMs": 2193,
+    "transferKB": 235,
+    "runs": 3
+  },
+  {
+    "name": "student-login",
+    "path": "/login",
+    "fcpMs": 3324,
+    "lcpMs": 3324,
+    "dclMs": 2164,
+    "loadMs": 2168,
+    "transferKB": 178,
+    "runs": 3
+  },
+  {
+    "name": "shop-landing",
+    "path": "/s/sharma-xerox-stationery",
+    "fcpMs": 2912,
+    "lcpMs": 3684,
+    "dclMs": 2164,
+    "loadMs": 2170,
+    "transferKB": 183,
+    "runs": 3
+  },
+  {
+    "name": "home",
+    "path": "/home",
+    "fcpMs": 3416,
+    "lcpMs": 3972,
+    "dclMs": 2162,
+    "loadMs": 2168,
+    "transferKB": 205,
+    "runs": 3
+  },
+  {
+    "name": "checkout",
+    "path": "/s/sharma-xerox-stationery/file/:id",
+    "fcpMs": 3344,
+    "lcpMs": 4136,
+    "dclMs": 2177,
+    "loadMs": 2179,
+    "transferKB": 209,
+    "runs": 3
+  },
+  {
+    "name": "job-status",
+    "path": "/jobs/:id",
+    "fcpMs": 3208,
+    "lcpMs": 4208,
+    "dclMs": 2162,
+    "loadMs": 2166,
+    "transferKB": 184,
+    "runs": 3
+  },
+  {
+    "name": "counter",
+    "path": "/dashboard",
+    "fcpMs": 4044,
+    "lcpMs": 4044,
+    "dclMs": 2184,
+    "loadMs": 2188,
+    "transferKB": 195,
+    "runs": 3
+  },
+  {
+    "name": "shop-login",
+    "path": "/dashboard/login",
+    "fcpMs": 4024,
+    "lcpMs": 4024,
+    "dclMs": 2203,
+    "loadMs": 2207,
+    "transferKB": 186,
+    "runs": 3
+  }
+]

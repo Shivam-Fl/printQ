@@ -32,9 +32,9 @@ function ShopAuthLayout({ title, subtitle, children }: { title: string; subtitle
           <span className="eyebrow-label">A calmer counter</span>
           <h2>Every order arrives configured and ready for payment or print.</h2>
           <ol>
-            <li><span>1</span><div><strong>See who actually arrived</strong><p>Remote prepared orders stay separate from the physical walk-in line.</p></div></li>
-            <li><span>2</span><div><strong>Enter one counter code</strong><p>Find the right file, collect cash when due, then print.</p></div></li>
-            <li><span>3</span><div><strong>Hand it over</strong><p>Pickup, history and receipts stay in one place.</p></div></li>
+            <li><span>1</span><div><strong>See who is at your shop</strong><p>Orders placed from home stay out of your line until the student arrives.</p></div></li>
+            <li><span>2</span><div><strong>Type one code</strong><p>The order and the amount appear. Take cash or UPI, and it prints.</p></div></li>
+            <li><span>3</span><div><strong>Hand it over</strong><p>Pickup, history and receipts in one place.</p></div></li>
           </ol>
         </div>
       </aside>
@@ -359,7 +359,7 @@ export default function ShopLogin() {
         </div>
       </form>
       <p className="dim auth-after-card">
-        New shop? <Link to="/dashboard/register">Register your shop (about three minutes) →</Link>
+        New shop? <Link to="/dashboard/register">Register your shop (about three minutes)</Link>
       </p>
     </ShopAuthLayout>
   );

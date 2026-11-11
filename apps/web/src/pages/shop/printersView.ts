@@ -45,3 +45,32 @@ export function detectedEmptyState(input: { agentsOnline: number; agentsTotal: n
     connect: true,
   };
 }
+
+export interface DetectedPrinterLite {
+  name: string;
+  paperSizes: string[];
+}
+
+/** Every OS printer an online or offline PC reported that is not added to PrintQs yet (one entry per name). */
+export function unlinkedDetectedPrinters(
+  agents: { detectedPrinters: DetectedPrinterLite[] | null }[],
+  printers: { osPrinterName: string | null }[],
+): DetectedPrinterLite[] {
+  const linked = new Set(printers.map((p) => p.osPrinterName).filter(Boolean));
+  const byName = new Map<string, DetectedPrinterLite>();
+  for (const a of agents) {
+    for (const d of a.detectedPrinters ?? []) {
+      if (!linked.has(d.name)) byName.set(d.name, d);
+    }
+  }
+  return [...byName.values()];
+}
+
+/**
+ * Practice mode: every added printer is the practice simulator. Computed from the printers
+ * themselves, so the warning survives a reload (it used to vanish once the simulator was added).
+ */
+export function practiceOnly(printers: { osPrinterName: string | null }[], isSimulator: (name: string | null) => boolean): boolean {
+  const linked = printers.filter((p) => p.osPrinterName);
+  return linked.length > 0 && linked.every((p) => isSimulator(p.osPrinterName));
+}

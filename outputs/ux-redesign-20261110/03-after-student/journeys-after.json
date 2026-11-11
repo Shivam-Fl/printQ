@@ -1,0 +1,205 @@
+{
+  "d-first-order": {
+    "task": "d-first-order",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 36.4,
+    "scriptedWallSeconds": 4.2,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "d-first-order-360": {
+    "task": "d-first-order-360",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 36.4,
+    "scriptedWallSeconds": 4.2,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "360x640"
+  },
+  "e-repeat-order": {
+    "task": "e-repeat-order",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 8,
+    "scriptedWallSeconds": 1.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "f-check-in-read-code": {
+    "task": "f-check-in-read-code",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.3,
+    "ops": [
+      {
+        "op": "click",
+        "label": "I'm at the shop",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844",
+    "codeVisibleWithoutScroll": true,
+    "codeTopPx": 256,
+    "codeFontPx": 54.6
+  }
+}

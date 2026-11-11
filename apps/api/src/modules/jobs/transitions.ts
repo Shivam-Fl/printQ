@@ -52,7 +52,7 @@ const FAST_COLUMNS: Readonly<Record<string, ColumnKind>> = {
 /** Columns a guard may compare (all timestamps), with the operators supported. */
 const GUARD_TS_COLUMNS = new Set(['revealedAt', 'revealDeadlineAt']);
 /** Columns a guard may compare for equality / NULL (value is a string or null). */
-const GUARD_TEXT_COLUMNS = new Set(['claimedByAgentId', 'claimedBySessionId']);
+const GUARD_TEXT_COLUMNS = new Set(['claimedByAgentId', 'claimedBySessionId', 'printError']);
 const GUARD_NULL_ONLY_COLUMNS = new Set(['spoolAcceptedAt']);
 
 const ident = (column: string) => Prisma.raw(`"${column}"`);
