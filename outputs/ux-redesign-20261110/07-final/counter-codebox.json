@@ -1,0 +1,62 @@
+[
+  {
+    "viewport": "360x640",
+    "found": true,
+    "focused": true,
+    "top": 185,
+    "bottom": 258,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  },
+  {
+    "viewport": "390x844",
+    "found": true,
+    "focused": true,
+    "top": 185,
+    "bottom": 258,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  },
+  {
+    "viewport": "768x1024",
+    "found": true,
+    "focused": true,
+    "top": 197,
+    "bottom": 282,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  },
+  {
+    "viewport": "1280x720",
+    "found": true,
+    "focused": true,
+    "top": 197,
+    "bottom": 282,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  },
+  {
+    "viewport": "1366x768",
+    "found": true,
+    "focused": true,
+    "top": 197,
+    "bottom": 282,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  },
+  {
+    "viewport": "1920x1080",
+    "found": true,
+    "focused": true,
+    "top": 197,
+    "bottom": 282,
+    "inputMode": "numeric",
+    "scrollY": 0,
+    "onScreen": true
+  }
+]

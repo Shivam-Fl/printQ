@@ -1,0 +1,126 @@
+{
+  "a-register-go-live": {
+    "task": "a-register-go-live",
+    "clicksOrTaps": 8,
+    "keystrokes": 91,
+    "fields": 5,
+    "scrolls": 2,
+    "dialogs": 0,
+    "klmSeconds": 62.2,
+    "scriptedWallSeconds": 15.5,
+    "ops": [
+      {
+        "op": "type",
+        "label": "shop name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus shop address",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "shop address",
+        "chars": 20,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus owner name",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "owner name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus email",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "email",
+        "chars": 30,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus password",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "password",
+        "chars": 17,
+        "fromMouse": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Create shop & continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Save location",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "PC install + sign-in happen in the desktop app (not measured)"
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "No, black & white",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "wentLive": true
+  },
+  "h-add-printer": {
+    "task": "h-add-printer",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 8,
+    "scriptedWallSeconds": 1,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Yes, colour",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  }
+}

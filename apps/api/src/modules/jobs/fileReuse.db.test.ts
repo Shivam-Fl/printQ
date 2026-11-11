@@ -343,10 +343,18 @@ describe.runIf(dbReady)('file reuse reference counting + receipts (database)', (
     it('stay 404 for someone else\'s job', async () => {
       const file = await newFile();
       const order = await orderOn(file.id);
-      const other = await fetch(`${base}/api/jobs/${order.body.job!.id}/receipt`, {
-        headers: { authorization: `Bearer ${signStudentToken(randomUUID())}` },
+      // a real, signed-in second student (a token for an unknown student is a 401 before ownership is checked)
+      const stranger = await prisma.student.create({
+        data: { phone: `+91${Math.floor(1_000_000_000 + Math.random() * 8_999_999_999)}`, name: 'Stranger' },
       });
-      expect(other.status).toBe(404);
+      try {
+        const other = await fetch(`${base}/api/jobs/${order.body.job!.id}/receipt`, {
+          headers: { authorization: `Bearer ${signStudentToken(stranger.id)}` },
+        });
+        expect(other.status).toBe(404);
+      } finally {
+        await prisma.student.delete({ where: { id: stranger.id } });
+      }
     });
   });
 });

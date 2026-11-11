@@ -1,0 +1,223 @@
+[
+  {
+    "page": "welcome",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "student-login",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "shop-directory",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "shop-landing",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "home",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "checkout",
+    "viewport": "phone",
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "nodes": 2,
+        "sample": ".done"
+      },
+      {
+        "id": "scrollable-region-focusable",
+        "impact": "serious",
+        "help": "Scrollable region must have keyboard access",
+        "nodes": 1,
+        "sample": ".checkout-steps"
+      }
+    ]
+  },
+  {
+    "page": "job-prepared",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "job-in-line",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "shop-login",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "shop-register",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "counter",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "setup",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "prices",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "printers",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "settings",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "earnings",
+    "viewport": "phone",
+    "violations": [
+      {
+        "id": "scrollable-region-focusable",
+        "impact": "serious",
+        "help": "Scrollable region must have keyboard access",
+        "nodes": 1,
+        "sample": ".table-shell"
+      }
+    ]
+  },
+  {
+    "page": "history",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "pc",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "support",
+    "viewport": "phone",
+    "violations": []
+  },
+  {
+    "page": "welcome",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "student-login",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "shop-directory",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "shop-landing",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "home",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "checkout",
+    "viewport": "desktop",
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "nodes": 1,
+        "sample": ".done"
+      }
+    ]
+  },
+  {
+    "page": "job-prepared",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "job-in-line",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "shop-login",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "shop-register",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "counter",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "setup",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "prices",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "printers",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "settings",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "earnings",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "history",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "pc",
+    "viewport": "desktop",
+    "violations": []
+  },
+  {
+    "page": "support",
+    "viewport": "desktop",
+    "violations": []
+  }
+]

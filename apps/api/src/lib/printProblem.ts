@@ -24,18 +24,15 @@ export interface PrintProblem {
   message: string;
 }
 
+/** Short, staff-facing: what happened, then what to check. The buttons say "Printed OK" and "Print again". */
 const MESSAGES: Record<PrintProblemCode, string> = {
-  agent_offline:
-    'The print computer stopped responding while printing this job. Check the paper tray, then retry on this or another computer, or cancel and return the payment.',
-  agent_restarted:
-    'The print program on the shop computer restarted while printing this job. Check the paper tray, then retry on this or another computer, or cancel and return the payment.',
-  claim_timeout:
-    'This job never reached the printer. Check the paper tray, then retry on this or another computer, or cancel and return the payment.',
-  spool_timeout:
-    'This job was sent to the printer but nobody confirmed the output. Check the printer first - it may already have printed. If it did not, retry on this or another computer, or cancel and return the payment.',
-  no_agent: 'No connected print computer is online for this printer. Start the PrintQ app on the shop computer, then retry.',
-  printer_not_linked: 'This printer is not linked to a computer printer yet. Link it in Setup, then retry.',
-  printer_error: 'The printer reported a problem. Check the printer, then retry the print.',
+  agent_offline: 'The counter PC stopped responding while printing. If nothing came out, print it again.',
+  agent_restarted: 'PrintQs Shop restarted on the counter PC while printing. If nothing came out, print it again.',
+  claim_timeout: 'This print never reached the printer. Print it again.',
+  spool_timeout: 'Nobody confirmed this print in time. Check the printer: if the pages came out, press Printed OK. If not, print it again.',
+  no_agent: 'No counter PC is online for this printer. Open PrintQs Shop on the counter PC, then print again.',
+  printer_not_linked: 'This printer is not linked to a Windows printer yet. Link it in Printers, then print again.',
+  printer_error: 'The printer reported a problem. Check it, then print again.',
 };
 
 export function describePrintProblem(raw: string | null | undefined): PrintProblem | null {

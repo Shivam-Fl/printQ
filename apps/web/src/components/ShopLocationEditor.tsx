@@ -5,6 +5,7 @@ import {
   autoSearchQuery, desktopLocationTip, deviceFixMessage, isPreciseFix, locationFailureLead, searchMessage, SEARCH_FAILED_MESSAGE,
 } from '../lib/locationFlow.js';
 import { addressIsReplaceable, createPlaceSearch, MIN_QUERY_LENGTH, PINNED_LOCATION, reverseLabel, type PlaceResult, type SearchHit } from '../lib/geocode.js';
+import '../shop.css';
 
 interface Props {
   latitude: number | null;

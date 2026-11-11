@@ -1,0 +1,391 @@
+{
+  "b-counter-release": {
+    "task": "b-counter-release",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 0.8,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover": {
+    "task": "b2-printed-and-handover",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 15.2,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "b-counter-release-1280": {
+    "task": "b-counter-release-1280",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 0.8,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1280x720",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-1280": {
+    "task": "b2-printed-and-handover-1280",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1280x720"
+  },
+  "b-counter-release-phone": {
+    "task": "b-counter-release-phone",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 1.5,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "390x844",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-phone": {
+    "task": "b2-printed-and-handover-phone",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "c-counter-rush-10": {
+    "task": "c-counter-rush-10",
+    "clicksOrTaps": 20,
+    "keystrokes": 60,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 92.5,
+    "scriptedWallSeconds": 33.8,
+    "ops": [
+      {
+        "op": "note",
+        "label": "student 1"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 2"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 3"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 4"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 5"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 6"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 7"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 8"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 9"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 10"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "students": 10
+  },
+  "b-counter-release-keyboard": {
+    "task": "b-counter-release-keyboard",
+    "clicksOrTaps": 0,
+    "keystrokes": 8,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 4.1,
+    "scriptedWallSeconds": 0.6,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Tab",
+        "fromMouse": false
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      }
+    ],
+    "viewport": "1366x768",
+    "tabLandsOn": "Cash received & print",
+    "focusBackInCodeBox": true
+  },
+  "b-double-enter-safety": {
+    "task": "b-double-enter-safety",
+    "paymentStatusAfterTwoEnters": "counter_due",
+    "statusAfterTwoEnters": "queued",
+    "ok": true
+  }
+}

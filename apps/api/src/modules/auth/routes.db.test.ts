@@ -216,4 +216,36 @@ describe.runIf(dbReady)('auth routes (database)', () => {
       expect(await prisma.shopUser.count({ where: { email } })).toBe(0);
     });
   });
+
+  describe('student sign-out', () => {
+    const login = async (phone: string) => {
+      const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      await prisma.loginOtp.create({ data: { phone, otpHash: await hashOtp(otp), expiresAt: new Date(Date.now() + 5 * 60_000) } });
+      const res = await post('/api/auth/student/verify-otp', { phone, otp });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { token: string }).token;
+    };
+    const me = (token: string) => fetch(`${base}/api/auth/student/me`, { headers: { authorization: `Bearer ${token}` } });
+    const logout = (token: string) =>
+      fetch(`${base}/api/auth/student/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+
+    it('ends this session and every older one (another phone, a lab PC); signing in again works', async () => {
+      const phone = `+9197${String(randomInt(0, 100_000_000)).padStart(8, '0')}`;
+      phones.push(phone);
+      const ownPhone = await login(phone);
+      const labPc = await login(phone);
+      expect((await me(ownPhone)).status).toBe(200);
+      expect((await me(labPc)).status).toBe(200);
+
+      expect((await logout(labPc)).status).toBe(200);
+      expect((await me(labPc)).status).toBe(401);
+      expect((await me(ownPhone)).status).toBe(401);
+
+      const fresh = await login(phone);
+      expect((await me(fresh)).status).toBe(200);
+      // an old token can't be used to sign the new session out
+      expect((await logout(ownPhone)).status).toBe(401);
+      expect((await me(fresh)).status).toBe(200);
+    });
+  });
 });

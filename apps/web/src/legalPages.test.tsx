@@ -11,6 +11,7 @@ import Privacy from './pages/legal/Privacy.js';
 import Terms from './pages/legal/Terms.js';
 import Refunds from './pages/legal/Refunds.js';
 import Support from './pages/legal/Support.js';
+import NotFound from './pages/legal/NotFound.js';
 import * as legal from './lib/legal.js';
 
 // Route pages are code-split (React.lazy), which static rendering cannot resolve; render them directly.
@@ -60,7 +61,10 @@ describe('legal and support routes', () => {
   });
 
   it('unknown routes render NotFound with a way back', () => {
-    const html = at('/definitely/not/a/page');
+    // The catch-all route is lazy too: App shows the route placeholder (no crash), and the page itself offers a way back.
+    const viaApp = at('/definitely/not/a/page');
+    expect(viaApp).toContain('role="status"');
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/definitely/not/a/page']}><NotFound /></MemoryRouter>);
     expect(html).toContain('This page is not in the queue');
     expect(html).toContain('href="/"');
     expect(html).toContain('href="/shops"');

@@ -40,11 +40,22 @@ import { prisma } from '../../lib/prisma.js';
 import { timersQueue } from '../../lib/queues.js';
 import { drainBackground } from '../../lib/background.js';
 import { decryptReleaseCode } from '../../lib/otp.js';
-import { signShopToken, signStudentToken } from '../../lib/tokens.js';
+import { signShopToken, signStudentToken, verifyToken } from '../../lib/tokens.js';
 import { errorHandler } from '../../middleware/error.js';
 import { jobsRouter } from '../jobs/routes.js';
 import { shopRouter } from '../shops/routes.js';
 import { preparePayAtShopOrder } from './engine.js';
+import { resolveStudentSession } from '../../lib/studentSession.js';
+
+/**
+ * The student's app loads the job page before "I'm here", so their session
+ * check is already remembered (lib/studentSession.ts); the budget below is for
+ * the check-in request itself.
+ */
+async function openJobPage(token: string): Promise<void> {
+  const claims = verifyToken(token);
+  if (claims?.typ === 'student') await resolveStudentSession(claims);
+}
 
 const LAT = 28.6139;
 const LNG = 77.209;
@@ -187,6 +198,7 @@ describe.runIf(dbReady)('hot queue mutations: round-trip budget (database)', () 
   it('check-in', async () => {
     await checkedIn(); // warm pooled connections / prepared statements
     const o = await prepared();
+    await openJobPage(o.token);
     const { res, onPath, notesAtResponse } = await measure('check-in', () => checkIn(o));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ job: { status: 'queued', band: 'revealed' } });

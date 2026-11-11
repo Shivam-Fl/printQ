@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError, ago, api, getToken, lastShopSlug, rememberShop, rupees } from '../../api.js';
-import { statusMeta } from '../../jobStatus.js';
+import { nextStepLine, stampClass, statusMeta } from '../../jobStatus.js';
 import { nothingCharged } from './jobPayment.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import InstallPrompt from '../../components/InstallPrompt.js';
 import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
 import { useResource } from '../../lib/useResource.js';
-import { IconChevron, IconPlus, IconStore } from '../../components/Icons.js';
+import { IconChevron, IconPlus } from '../../components/Icons.js';
 
 interface JobRow {
   id: string;
@@ -17,6 +17,7 @@ interface JobRow {
   createdAt: string;
   mode: 'instant' | 'scheduled';
   scheduledTime: string | null;
+  checkInCount?: number;
   shop: { name: string; slug: string };
   file: { originalName: string };
   /** Present once the list API returns it; used to say "Nothing charged" on cancelled orders. */
@@ -50,11 +51,30 @@ export function filterPublishedHistoryShops<T extends { slug: string }>(
   return historyShops.filter((shop) => published.has(shop.slug));
 }
 
+function OrderRow({ job }: { job: JobRow }) {
+  const m = statusMeta(job.status);
+  return (
+    <li>
+      <Link to={`/jobs/${job.id}`} className="order-row">
+        <span className="order-row-main">
+          <strong>{job.file.originalName}</strong>
+          {m.active && <span className="order-row-next">{nextStepLine(job)}</span>}
+          <span>{m.active ? job.shop.name : `${job.shop.name} · ${ago(job.createdAt)}`}</span>
+        </span>
+        <span className="order-row-side">
+          <span className={stampClass(m.tone)}>{m.label}</span>
+          <span className="num">{nothingCharged(job.status, job.paymentStatus) ? 'Nothing charged' : rupees(job.totalPaise)}</span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 export default function Home() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const signedIn = Boolean(getToken('student'));
-  const [pickOpen, setPickOpen] = useState(params.get('pick') === '1');
+  const [pickOpen, setPickOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const pickerHeadingRef = useRef<HTMLHeadingElement>(null);
 
@@ -79,24 +99,36 @@ export default function Home() {
   const me = home.data?.me ?? null;
   const jobs = useMemo(() => home.data?.jobs ?? [], [home.data]);
   const publishedShops = useMemo(() => home.data?.publishedShops ?? [], [home.data]);
-  const loading = home.status !== 'ready' && home.status !== 'error';
+  const ready = home.status === 'ready';
   const unauthorized = home.status === 'error' && home.error instanceof ApiError && home.error.status === 401;
 
   useEffect(() => {
     if (!signedIn || unauthorized) navigate('/login', { replace: true });
   }, [signedIn, unauthorized, navigate]);
 
-  // distinct shops from history, most recent first
+  // distinct live shops from history, most recent first
   const shops = useMemo(() => {
     const seen = new Map<string, { slug: string; name: string }>();
     for (const j of jobs) if (!seen.has(j.shop.slug)) seen.set(j.shop.slug, j.shop);
     return filterPublishedHistoryShops([...seen.values()], publishedShops);
   }, [jobs, publishedShops]);
 
+  function startPrint() {
+    const action = resolveNewPrintAction(lastShopSlug(), shops);
+    if (action.kind === 'shop') {
+      rememberShop(action.slug);
+      navigate(`/s/${action.slug}`);
+    } else if (action.kind === 'picker') setPickOpen(true);
+    else navigate('/shops');
+  }
+
+  // the bottom bar's Print button lands here with ?pick=1: same rule as "New print"
+  const wantsPick = params.get('pick') === '1';
   useEffect(() => {
-    if (home.status !== 'ready' || !pickOpen || shops.length > 0) return;
-    navigate('/shops', { replace: true });
-  }, [home.status, navigate, pickOpen, shops.length]);
+    if (!wantsPick || !ready) return;
+    setParams({}, { replace: true });
+    startPrint();
+  }, [wantsPick, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!pickOpen || shops.length === 0) return;
@@ -108,31 +140,30 @@ export default function Home() {
   }, [pickOpen, shops.length]);
 
   const active = jobs.filter((j) => statusMeta(j.status).active);
-  const firstName = me?.name?.split(' ')[0] ?? 'there';
-
-  function startPrint() {
-    const action = resolveNewPrintAction(lastShopSlug(), shops);
-    if (action.kind === 'shop') navigate(`/s/${action.slug}`);
-    else if (action.kind === 'picker') setPickOpen(true);
-    else navigate('/shops');
-  }
+  const earlier = jobs.filter((j) => !statusMeta(j.status).active);
+  const firstName = me?.name?.trim().split(/\s+/)[0] ?? null;
 
   return (
     <StudentShell>
       <div className="page">
         <Topbar right={<Link to="/profile">Profile</Link>} />
         <div className="hero">
-          <span className="hi">Hi {firstName} 👋</span>
+          {ready ? (
+            <h1 className="hi">{firstName ? `Hi ${firstName}` : 'Hi'}</h1>
+          ) : (
+            <span className="skeleton-line wide" aria-hidden />
+          )}
         </div>
 
         <InstallPrompt />
 
         {home.status === 'error' && !unauthorized && <ErrorState onRetry={home.retry} title="Could not load your prints" />}
-        {loading && <LoadingState status={home.status} rows={2} />}
 
         <button
+          type="button"
           className={`cta-print${pickOpen && shops.length > 1 ? ' is-open' : ''}`}
           onClick={startPrint}
+          disabled={!ready}
           aria-expanded={shops.length > 1 ? pickOpen : undefined}
           aria-controls={shops.length > 1 ? 'home-shop-picker' : undefined}
         >
@@ -141,27 +172,22 @@ export default function Home() {
           </span>
           <span style={{ flex: 1 }}>
             <strong>New print</strong>
-            <span>Prepare it now, check in when you arrive</span>
+            <span>Upload now, pay at the shop</span>
           </span>
           <IconChevron />
         </button>
 
         {pickOpen && shops.length > 0 && (
-          <div
-            id="home-shop-picker"
-            ref={pickerRef}
-            className={`shop-picker${pickOpen ? ' is-open' : ''}`}
-            role="region"
-            aria-labelledby="home-shop-picker-title"
-          >
+          <div id="home-shop-picker" ref={pickerRef} className="shop-picker is-open" role="region" aria-labelledby="home-shop-picker-title">
             <div className="section-head">
               <h2 id="home-shop-picker-title" ref={pickerHeadingRef} tabIndex={-1}>Choose a shop</h2>
+              <Link to="/shops">Other shops</Link>
             </div>
-            {pickOpen && <p className="shop-picker-feedback" role="status">Select where you want to print next.</p>}
             <div className="shops-row">
               {shops.map((s) => (
                 <button
                   key={s.slug}
+                  type="button"
                   className="shop-chip"
                   onClick={() => {
                     rememberShop(s.slug);
@@ -169,81 +195,44 @@ export default function Home() {
                   }}
                 >
                   <strong>{s.name}</strong>
-                  <span>{s.slug}</span>
                 </button>
               ))}
             </div>
           </div>
         )}
 
+        {!ready && home.status !== 'error' && (home.status === 'slow' || home.status === 'retrying' ? (
+          <LoadingState status={home.status} rows={2} />
+        ) : (
+          <div className="skeleton-list" role="status" aria-label="Loading your prints">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+          </div>
+        ))}
+
         {active.length > 0 && (
-          <>
-            <div className="section-head">
-              <h2>Happening now</h2>
-              <Link to="/jobs">All jobs</Link>
-            </div>
-            {active.map((j) => {
-              const m = statusMeta(j.status);
-              return (
-                <Link key={j.id} to={`/jobs/${j.id}`} className={`live-card ${j.status === 'notified' ? 'turn' : ''}`}>
-                  <div className="row between">
-                    <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {j.file.originalName}
-                    </strong>
-                    <span className={`stamp ${m.tone}`}>{m.label}</span>
-                  </div>
-                  <div className="dim" style={{ marginTop: 4 }}>
-                    {j.shop.name}
-                    {['awaiting_arrival', 'queued', 'notified'].includes(j.status) ? ' · tap for your counter code' : ''}
-                  </div>
-                </Link>
-              );
-            })}
-          </>
+          <section className="home-section" aria-labelledby="home-now">
+            <h2 id="home-now">Now</h2>
+            <ul className="order-list">{active.map((j) => <OrderRow key={j.id} job={j} />)}</ul>
+          </section>
         )}
 
-        {home.status === 'ready' && jobs.length === 0 && (
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="row" style={{ gap: 12 }}>
-              <span className="ic" style={{ color: 'var(--stamp)' }}>
-                <IconStore />
-              </span>
-              <div>
-                <strong>No prints yet</strong>
-                <p className="dim" style={{ margin: '2px 0 0' }}>
-                  Scan your shop's QR code, or <Link to="/shops">find a nearby shop</Link> to start a print.
-                </p>
-              </div>
-            </div>
+        {ready && jobs.length === 0 && (
+          <div className="empty-state home-empty">
+            <strong>No prints yet</strong>
+            <p>Scan the QR code at a print shop, or find a shop near you.</p>
+            <Link to="/shops" className="button-link" style={{ marginTop: 14 }}>Find a shop</Link>
           </div>
         )}
 
-        {jobs.length > 0 && (
-          <>
+        {earlier.length > 0 && (
+          <section className="home-section" aria-labelledby="home-earlier">
             <div className="section-head">
-              <h2>Recent</h2>
+              <h2 id="home-earlier">Earlier</h2>
               <Link to="/jobs">See all</Link>
             </div>
-            {jobs.slice(0, 3).map((j) => {
-              const m = statusMeta(j.status);
-              return (
-                <Link key={j.id} to={`/jobs/${j.id}`} className="list-row" style={{ borderRadius: 12, border: '1px solid var(--rule)', background: 'var(--paper)', marginBottom: 8 }}>
-                  <div className="lead">
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {j.file.originalName}
-                      </div>
-                      <div className="dim">{j.shop.name} · {ago(j.createdAt)}</div>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span className={`stamp ${m.tone}`}>{m.label}</span>
-                    <div className="dim mono">{nothingCharged(j.status, j.paymentStatus) ? 'Nothing charged' : rupees(j.totalPaise)}</div>
-                  </div>
-                </Link>
-              );
-            })}
-          </>
+            <ul className="order-list">{earlier.slice(0, 3).map((j) => <OrderRow key={j.id} job={j} />)}</ul>
+          </section>
         )}
       </div>
     </StudentShell>

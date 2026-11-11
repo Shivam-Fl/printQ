@@ -1,0 +1,841 @@
+{
+  "b-counter-release-keyboard": {
+    "task": "b-counter-release-keyboard",
+    "clicksOrTaps": 0,
+    "keystrokes": 8,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 4.1,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Tab",
+        "fromMouse": false
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      }
+    ],
+    "viewport": "1366x768",
+    "tabLandsOn": "Cash received & print",
+    "focusBackInCodeBox": true
+  },
+  "b-double-enter-safety": {
+    "task": "b-double-enter-safety",
+    "paymentStatusAfterTwoEnters": "counter_due",
+    "statusAfterTwoEnters": "queued",
+    "ok": true
+  },
+  "a-register-go-live": {
+    "task": "a-register-go-live",
+    "clicksOrTaps": 8,
+    "keystrokes": 91,
+    "fields": 5,
+    "scrolls": 2,
+    "dialogs": 0,
+    "klmSeconds": 62.2,
+    "scriptedWallSeconds": 14.3,
+    "ops": [
+      {
+        "op": "type",
+        "label": "shop name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus shop address",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "shop address",
+        "chars": 20,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus owner name",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "owner name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus email",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "email",
+        "chars": 30,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus password",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "password",
+        "chars": 17,
+        "fromMouse": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Create shop & continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Save location",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "PC install + sign-in happen in the desktop app (not measured)"
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "No, black & white",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "wentLive": true
+  },
+  "b-counter-release": {
+    "task": "b-counter-release",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 0.6,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover": {
+    "task": "b2-printed-and-handover",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "b-counter-release-1280": {
+    "task": "b-counter-release-1280",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 0.7,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1280x720",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-1280": {
+    "task": "b2-printed-and-handover-1280",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1280x720"
+  },
+  "b-counter-release-phone": {
+    "task": "b-counter-release-phone",
+    "clicksOrTaps": 1,
+    "keystrokes": 6,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 6.6,
+    "scriptedWallSeconds": 1.3,
+    "ops": [
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "390x844",
+    "focusAfterRelease": {
+      "focusedTag": "INPUT",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-phone": {
+    "task": "b2-printed-and-handover-phone",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "c-counter-rush-10": {
+    "task": "c-counter-rush-10",
+    "clicksOrTaps": 20,
+    "keystrokes": 60,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 92.5,
+    "scriptedWallSeconds": 32.5,
+    "ops": [
+      {
+        "op": "note",
+        "label": "student 1"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 2"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 3"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 4"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 5"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 6"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 7"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 8"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 9"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 10"
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "Printed OK & handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "students": 10
+  },
+  "d-first-order": {
+    "task": "d-first-order",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 36.4,
+    "scriptedWallSeconds": 2.8,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "d-first-order-360": {
+    "task": "d-first-order-360",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 36.4,
+    "scriptedWallSeconds": 2.8,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "360x640"
+  },
+  "e-repeat-order": {
+    "task": "e-repeat-order",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 8,
+    "scriptedWallSeconds": 0.8,
+    "ops": [
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "f-check-in-read-code": {
+    "task": "f-check-in-read-code",
+    "clicksOrTaps": 1,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 2.7,
+    "scriptedWallSeconds": 0.2,
+    "ops": [
+      {
+        "op": "click",
+        "label": "I'm at the shop",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844",
+    "codeVisibleWithoutScroll": true,
+    "codeTopPx": 256,
+    "codeFontPx": 54.6
+  },
+  "g-change-price": {
+    "task": "g-change-price",
+    "clicksOrTaps": 3,
+    "keystrokes": 5,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 11.6,
+    "scriptedWallSeconds": 0.6,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "focus A4 B/W price",
+        "fromKeyboard": false
+      },
+      {
+        "op": "key",
+        "key": "select-all",
+        "fromMouse": true
+      },
+      {
+        "op": "type",
+        "label": "A4 B/W price",
+        "chars": 4,
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Save prices",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "h-add-printer": {
+    "task": "h-add-printer",
+    "clicksOrTaps": 4,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 10.6,
+    "scriptedWallSeconds": 0.9,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Printers tab",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Yes, colour",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "i-admin-unpublish-publish": {
+    "task": "i-admin-unpublish-publish",
+    "clicksOrTaps": 4,
+    "keystrokes": 20,
+    "fields": 1,
+    "scrolls": 3,
+    "dialogs": 0,
+    "klmSeconds": 23.3,
+    "scriptedWallSeconds": 2.2,
+    "ops": [
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Unpublish",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "reason",
+        "chars": 20,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "confirm Unpublish",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Hidden tab",
+        "fromKeyboard": false
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Publish",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "h-add-printer-from-banner": {
+    "task": "h-add-printer-from-banner",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 8,
+    "scriptedWallSeconds": 0.6,
+    "ops": [
+      {
+        "op": "click",
+        "label": "banner: Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Yes, colour",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  }
+}

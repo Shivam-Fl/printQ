@@ -1,0 +1,1144 @@
+{
+  "b-counter-release": {
+    "task": "b-counter-release",
+    "clicksOrTaps": 2,
+    "keystrokes": 7,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 9.6,
+    "scriptedWallSeconds": 1,
+    "ops": [
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768",
+    "focusAfterRelease": {
+      "focusedTag": "BODY",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover": {
+    "task": "b2-printed-and-handover",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 1,
+    "dialogs": 1,
+    "klmSeconds": 9.5,
+    "scriptedWallSeconds": 1.1,
+    "ops": [
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "b-counter-release-1280": {
+    "task": "b-counter-release-1280",
+    "clicksOrTaps": 2,
+    "keystrokes": 7,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 9.6,
+    "scriptedWallSeconds": 0.8,
+    "ops": [
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1280x720",
+    "focusAfterRelease": {
+      "focusedTag": "BODY",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-1280": {
+    "task": "b2-printed-and-handover-1280",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 1,
+    "dialogs": 1,
+    "klmSeconds": 9.5,
+    "scriptedWallSeconds": 1,
+    "ops": [
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1280x720"
+  },
+  "b-counter-release-phone": {
+    "task": "b-counter-release-phone",
+    "clicksOrTaps": 2,
+    "keystrokes": 7,
+    "fields": 1,
+    "scrolls": 1,
+    "dialogs": 0,
+    "klmSeconds": 11.1,
+    "scriptedWallSeconds": 1,
+    "ops": [
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "390x844",
+    "focusAfterRelease": {
+      "focusedTag": "BODY",
+      "focusedLabel": null
+    }
+  },
+  "b2-printed-and-handover-phone": {
+    "task": "b2-printed-and-handover-phone",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 1,
+    "dialogs": 1,
+    "klmSeconds": 9.5,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "scroll",
+        "label": "horizontal scroll to reach target"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "c-counter-rush-10": {
+    "task": "c-counter-rush-10",
+    "clicksOrTaps": 50,
+    "keystrokes": 70,
+    "fields": 1,
+    "scrolls": 19,
+    "dialogs": 10,
+    "klmSeconds": 203.5,
+    "scriptedWallSeconds": 32.1,
+    "ops": [
+      {
+        "op": "note",
+        "label": "student 1"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 2"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 3"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 4"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 5"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 6"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 7"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 8"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 9"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "student 10"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus counter code",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "counter code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "key",
+        "key": "Enter",
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Cash received & print",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Printed successfully",
+        "fromKeyboard": false
+      },
+      {
+        "op": "dialog",
+        "label": "This records the print as DONE: the student is told it is re"
+      },
+      {
+        "op": "click",
+        "label": "Handed over",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "students": 10
+  },
+  "d-first-order": {
+    "task": "d-first-order",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 1,
+    "dialogs": 0,
+    "klmSeconds": 37.9,
+    "scriptedWallSeconds": 6.6,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "d-first-order-360": {
+    "task": "d-first-order-360",
+    "clicksOrTaps": 8,
+    "keystrokes": 29,
+    "fields": 3,
+    "scrolls": 3,
+    "dialogs": 0,
+    "klmSeconds": 40.9,
+    "scriptedWallSeconds": 4.6,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Start a print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "type",
+        "label": "mobile number",
+        "chars": 10,
+        "fromMouse": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Send code",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "login code",
+        "chars": 6,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Verify and continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "full name",
+        "chars": 13,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "Finish setup",
+        "fromKeyboard": true
+      },
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "360x640"
+  },
+  "e-repeat-order": {
+    "task": "e-repeat-order",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 1,
+    "dialogs": 0,
+    "klmSeconds": 9.5,
+    "scriptedWallSeconds": 1.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "New print",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "choose file",
+        "fromKeyboard": false
+      },
+      {
+        "op": "file",
+        "label": "OS file picker"
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Place order",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844"
+  },
+  "f-check-in-read-code": {
+    "task": "f-check-in-read-code",
+    "clicksOrTaps": 2,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 5.3,
+    "scriptedWallSeconds": 0.5,
+    "ops": [
+      {
+        "op": "click",
+        "label": "I'm at the shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Yes, join the line",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "390x844",
+    "codeVisibleWithoutScroll": true,
+    "codeTopPx": 411,
+    "codeFontPx": 41.6
+  },
+  "g-change-price": {
+    "task": "g-change-price",
+    "clicksOrTaps": 3,
+    "keystrokes": 5,
+    "fields": 1,
+    "scrolls": 2,
+    "dialogs": 0,
+    "klmSeconds": 14.6,
+    "scriptedWallSeconds": 1.3,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Settings",
+        "fromKeyboard": false
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "focus A4 B/W price",
+        "fromKeyboard": false
+      },
+      {
+        "op": "key",
+        "key": "select-all",
+        "fromMouse": true
+      },
+      {
+        "op": "type",
+        "label": "A4 B/W price",
+        "chars": 4,
+        "fromMouse": false
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Save all changes",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "h-add-printer": {
+    "task": "h-add-printer",
+    "clicksOrTaps": 3,
+    "keystrokes": 0,
+    "fields": 0,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 8,
+    "scriptedWallSeconds": 0.9,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Printers",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Add printer",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Yes, colour",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "i-admin-unpublish-publish": {
+    "task": "i-admin-unpublish-publish",
+    "clicksOrTaps": 4,
+    "keystrokes": 20,
+    "fields": 1,
+    "scrolls": 2,
+    "dialogs": 0,
+    "klmSeconds": 21.8,
+    "scriptedWallSeconds": 2.3,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Unpublish",
+        "fromKeyboard": false
+      },
+      {
+        "op": "type",
+        "label": "reason",
+        "chars": 20,
+        "fromMouse": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "confirm Unpublish",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Hidden tab",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Publish",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768"
+  },
+  "a-register-go-live": {
+    "task": "a-register-go-live",
+    "clicksOrTaps": 9,
+    "keystrokes": 91,
+    "fields": 5,
+    "scrolls": 2,
+    "dialogs": 0,
+    "klmSeconds": 64.9,
+    "scriptedWallSeconds": 16.8,
+    "ops": [
+      {
+        "op": "type",
+        "label": "shop name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus shop address",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "shop address",
+        "chars": 20,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus owner name",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "owner name",
+        "chars": 12,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus email",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "email",
+        "chars": 30,
+        "fromMouse": true
+      },
+      {
+        "op": "click",
+        "label": "focus password",
+        "fromKeyboard": true
+      },
+      {
+        "op": "type",
+        "label": "password",
+        "chars": 17,
+        "fromMouse": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Create shop & continue",
+        "fromKeyboard": true
+      },
+      {
+        "op": "scroll",
+        "label": "bring target on screen"
+      },
+      {
+        "op": "click",
+        "label": "Save location",
+        "fromKeyboard": false
+      },
+      {
+        "op": "note",
+        "label": "PC install + sign-in happen in the desktop app (not measured)"
+      },
+      {
+        "op": "click",
+        "label": "Add printer (step 3)",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "Add & configure",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "No, black & white",
+        "fromKeyboard": false
+      }
+    ],
+    "viewport": "1366x768",
+    "wentLive": true
+  }
+}

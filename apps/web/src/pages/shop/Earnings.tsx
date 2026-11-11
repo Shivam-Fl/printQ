@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, getShopRole, getToken, rupees } from '../../api.js';
 import FeeCard, { FeePaymentsTable, FeeStatementsTable } from '../../components/FeeCard.js';
 import ShopNav from '../../components/ShopNav.js';
+import EarningsSummary, { type ShopStats } from './EarningsSummary.js';
 import { enableShopPush } from '../../push.js';
 import { getShopSocket } from '../../socket.js';
 import { outcomeMessage, payFees, type FeeOverview } from '../../lib/fees.js';
@@ -45,6 +46,7 @@ export default function Earnings() {
   const navigate = useNavigate();
   const [data, setData] = useState<CommissionData | null>(null);
   const [fees, setFees] = useState<FeeOverview | null>(null);
+  const [stats, setStats] = useState<ShopStats | null | undefined>(undefined);
   const [error, setError] = useState('');
   const [paying, setPaying] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'info' | 'error'; text: string } | null>(null);
@@ -69,7 +71,9 @@ export default function Earnings() {
       navigate('/dashboard', { replace: true });
       return;
     }
-    refresh().catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load your fees'));
+    refresh().catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load your earnings. Try again.'));
+    // the summary is a bonus: if it fails it disappears (null) instead of loading forever
+    api<{ stats: ShopStats }>('/api/shop/stats', { role: 'shop' }).then((r) => setStats(r.stats)).catch(() => setStats(null));
     const socket = getShopSocket();
     const onUpdate = () => { void refresh().catch(() => undefined); };
     socket?.on('fee:update', onUpdate);
@@ -104,14 +108,15 @@ export default function Earnings() {
   }
 
   return (
-    <div className="page wide">
+    <div className="page wide shop-page earnings-page">
       <ShopNav />
       <div className="page-heading">
         <div>
-          <h1>{fees?.enabled ? 'Earnings and fees' : 'Earnings'}</h1>
-          <p>{fees?.enabled ? 'Students pay you at the counter. PrintQs earns a commission on each completed print, summed into a weekly statement that you pay here.' : 'Students pay you at the counter, and their price includes the PrintQs fee. The fee from each completed print is listed here as money due to PrintQs.'}</p>
+          <h1>Earnings</h1>
+          <p>Students pay you at the counter. You keep your price; the PrintQs fee on each completed print is what you owe PrintQs.</p>
         </div>
       </div>
+      <EarningsSummary stats={stats} />
 
       {error && <div className="error-box" role="alert">{error}</div>}
       {!data || !fees ? <p className="dim">Loading…</p> : (
@@ -156,10 +161,21 @@ export default function Earnings() {
             </>
           )}
 
-          <div className="section-head"><h2>Commission activity</h2></div>
-          <div className="table-shell">
+          {stats && stats.perPrinter.length > 0 && (
+            <details className="disclosure earnings-printers">
+              <summary>By printer, last 30 days</summary>
+              <ul className="staff-list">
+                {stats.perPrinter.map((p) => (
+                  <li key={p.label}><strong>{p.label}</strong><span className="dim">{p.jobs} prints · {p.pages.toLocaleString()} pages</span></li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          <div className="section-head"><h2 id="fee-activity">PrintQs fee per print</h2></div>
+          <div className="table-shell" tabIndex={0} role="region" aria-labelledby="fee-activity">
             <table>
-              <thead><tr><th>Date</th><th>Activity</th><th>Print reference</th><th>Due to PrintQs</th><th>Discount below base</th></tr></thead>
+              <thead><tr><th>Date</th><th>What</th><th>Print</th><th>Due to PrintQs</th><th>Coupon below your price</th></tr></thead>
               <tbody>
                 {data.entries.length === 0 && <tr><td colSpan={5} className="dim">Completed prints will appear here.</td></tr>}
                 {data.entries.map((entry) => (

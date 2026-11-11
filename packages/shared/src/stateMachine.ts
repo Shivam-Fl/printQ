@@ -46,6 +46,11 @@ const TRANSITIONS: Record<JobStatus, Partial<Record<JobEvent, JobStatus>>> = {
   requeued: { ARRIVED: 'queued', COUNTER_RELEASE: 'otp_verified', QUEUE_SKIPPED: 'awaiting_arrival' },
   otp_verified: {
     PRINT_STARTED: 'printing',
+    // Late confirmation of a print the printer DID accept (spool_timeout): it
+    // returned here because nobody confirmed in time, and staff then saw the
+    // pages. The API allows this only for that failure (see confirm-print-completion).
+    PRINT_COMPLETED: 'ready_for_pickup',
+    FINISHING_REQUIRED: 'finishing',
     CASH_RETURNED: 'cancelled',
     COUNTER_PAYMENT_RETURNED: 'cancelled',
   },

@@ -56,6 +56,8 @@ export default function Profile() {
   }
 
   async function logout() {
+    // End the session on the server too (every older token stops working); never block sign-out on it.
+    await api('/api/auth/student/logout', { method: 'POST', role: 'student' }).catch(() => undefined);
     if (import.meta.env.VITE_STUDENT_AUTH_PROVIDER === 'firebase') {
       const { signOutFirebasePhoneAuth } = await import('../../firebasePhoneAuth.js');
       await signOutFirebasePhoneAuth().catch(() => undefined);

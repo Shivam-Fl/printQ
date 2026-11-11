@@ -3,10 +3,10 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import { enablePush, pushPermission } from '../../push.js';
-import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { jobBadge, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
-import { StudentBandPanel, useNow } from '../../components/QueueBand.js';
+import { StudentBandPanel, codeHalves, useNow } from '../../components/QueueBand.js';
 import { studentLoginPath } from '../../lib/studentReturn.js';
 import type { QueueBand } from '@printq/shared';
 import { paymentSummary, type PaymentStatus } from './jobPayment.js';
@@ -105,16 +105,18 @@ const MILESTONES = [
 ];
 const ORDER = ['pending_payment', 'awaiting_arrival', 'queued', 'notified', 'otp_verified', 'printing', 'finishing', 'ready_for_pickup', 'completed'];
 
+const bindingWords = (binding: string | null) => (binding ? binding.replace(/_/g, ' ') : null);
+
 function currentLocation(): Promise<GeolocationPosition> {
   if (!navigator.geolocation) {
-    return Promise.reject(new Error('This browser cannot verify your location. Show your counter code to staff.'));
+    return Promise.reject(new Error('This browser cannot check your location. Show your order to staff at the counter.'));
   }
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       resolve,
       (reason) => reject(new Error(reason.code === reason.PERMISSION_DENIED
-        ? 'Allow precise location to join the queue, or show your counter code to staff.'
-        : 'Could not verify that you are at the shop. Move near the entrance and retry.')),
+        ? 'Allow location for PrintQs to join the line, or show your order to staff.'
+        : 'Could not confirm you are at the shop. Move near the entrance and try again.')),
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 10_000 },
     );
   });
@@ -131,7 +133,6 @@ export default function JobStatus() {
   const [otp, setOtp] = useState<string | null>(null);
   const [pushOffered, setPushOffered] = useState(pushPermission() !== 'default');
   const [error, setError] = useState('');
-  const [confirmingArrival, setConfirmingArrival] = useState(false);
   const [checkingIn, setCheckingIn] = useState(false);
   const nowMs = useNow(Boolean(job?.revealDeadlineAt));
 
@@ -144,7 +145,7 @@ export default function JobStatus() {
       setOtp(res.job.otpCode);
       if (res.job.shop.slug) rememberShop(res.job.shop.slug);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load this job');
+      setError(err instanceof Error ? err.message : 'Could not load this order.');
     }
   }, [id]);
 
@@ -196,37 +197,36 @@ export default function JobStatus() {
     setCheckingIn(true);
     setError('');
     try {
-      const position = await currentLocation();
+      const where = await currentLocation();
       const res = await api<{ job: CheckInResult }>(`/api/jobs/${id}/check-in`, {
         method: 'POST',
         role: 'student',
         body: {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyM: position.coords.accuracy,
-          measuredAt: new Date(position.timestamp).toISOString(),
+          latitude: where.coords.latitude,
+          longitude: where.coords.longitude,
+          accuracyM: where.coords.accuracy,
+          measuredAt: new Date(where.timestamp).toISOString(),
         },
       });
-      setConfirmingArrival(false);
-      // The server already answered with the new place: show it immediately and
-      // let the follow-up fetch / socket events reconcile (e.g. the counter code).
+      // The server already answered with the new place: show it now, let the refresh fetch the code.
       setJob((prev) => (prev ? applyCheckInResult(prev, res.job) : prev));
       setPosition(res.job.position);
       setEta(res.job.etaMinutes);
       void refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not join the live line');
+      setError(err instanceof Error ? err.message : 'Could not join the line. Try again.');
     } finally {
       setCheckingIn(false);
     }
   }
+
   async function cancel() {
-    if (!confirm('Cancel this print job?')) return;
+    if (!confirm('Cancel this order? You have not paid anything yet.')) return;
     try {
       await api(`/api/jobs/${id}/cancel`, { method: 'POST', role: 'student' });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cancel failed');
+      setError(err instanceof Error ? err.message : 'Could not cancel. Try again.');
     }
   }
 
@@ -235,228 +235,149 @@ export default function JobStatus() {
       await api(`/api/jobs/${id}/rating`, { method: 'POST', role: 'student', body: { rating: stars } });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save rating');
+      setError(err instanceof Error ? err.message : 'Could not save your rating.');
     }
   }
 
   if (!job) {
     return (
       <StudentShell>
-        <div className="page">
+        <div className="page job-page">
           <Topbar right={<Link to="/jobs">My jobs</Link>} />
-          <p className="dim">Loading…</p>
-          {error && <p className="error">{error}</p>}
+          {error ? (
+            <div className="empty-state" role="alert">
+              <strong>Could not load this order</strong>
+              <p>{error}</p>
+              <button type="button" onClick={() => { setError(''); void refresh(); }} style={{ marginTop: 14 }}>Try again</button>
+            </div>
+          ) : (
+            <div className="skeleton-list" role="status" aria-label="Loading your order">
+              <div className="skeleton-card" style={{ height: 64 }} />
+              <div className="skeleton-card" style={{ height: 220 }} />
+            </div>
+          )}
         </div>
       </StudentShell>
     );
   }
 
-  const m = statusMeta(job.status);
   const checkInOpen = !job.checkInOpensAt || new Date(job.checkInOpensAt).getTime() <= Date.now();
   const pendingSlot = job.mode === 'scheduled' && job.status === 'awaiting_arrival' && !checkInOpen;
   const terminal = ['completed', 'expired', 'cancelled'].includes(job.status);
   const reachedIdx = ORDER.indexOf(job.status);
   const payment = paymentSummary(job.paymentStatus, job.status);
+  const badge = jobBadge({ status: job.status, band: job.band, absent: job.absent });
+  const inLine = ['queued', 'notified'].includes(job.status);
+  const prepared = ['awaiting_arrival', 'requeued', 'no_show'].includes(job.status);
+  const owes = (job.paymentStatus === 'counter_due' || job.paymentStatus === 'cash_due') && !terminal;
+  const binding = bindingWords(job.specs.binding);
+
+  const checkInButton = (label: string) => (
+    <button type="button" className="large full-button" disabled={checkingIn} onClick={() => void checkIn()}>
+      {checkingIn ? 'Checking your location…' : label}
+    </button>
+  );
 
   return (
     <StudentShell>
-      <div className="page">
+      <div className="page job-page">
         <Topbar right={<Link to="/jobs">My jobs</Link>} />
-        <h1 style={{ wordBreak: 'break-word' }}>{job.file.originalName}</h1>
-        <div className="row">
-          <span className={`stamp ${m.tone}`}>{m.label}</span>
-          <span className="dim">{job.shop.name}</span>
-          {job.paymentStatus === 'refunding' && <span className="stamp yellow">refund processing</span>}
-          {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
-        </div>
-
-        {(job.paymentStatus === 'counter_due' || job.paymentStatus === 'cash_due') && (
-          <div className="notice cash-due-notice">
-            <div>
-              <strong>Pay {rupees(job.totalPaise)} at the shop counter</strong>
-              <p>Pay by cash or the shop’s merchant UPI. Staff checks receipt and confirms the exact total before sending your document to the printer.</p>
-              {job.shop.counterUpi && (
-                <a
-                  className="full-button"
-                  href={counterUpiIntentUri(job.shop.counterUpi.vpa, job.shop.counterUpi.payeeName, job.totalPaise, job.id)}
-                >
-                  Open shop UPI for {rupees(job.totalPaise)}
-                </a>
-              )}
-            </div>
+        <header className="job-head">
+          <p className="job-shop">{job.shop.name}</p>
+          <h1 className="job-title">{job.file.originalName}</h1>
+          <div className="row">
+            <span className={stampClass(badge.tone)}>{badge.label}</span>
+            {job.paymentStatus === 'refunding' && <span className="stamp yellow">refund processing</span>}
+            {job.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
           </div>
-        )}
+        </header>
 
-        {/* ---- hero state ---- */}
+        {/* ---- the one "what to do now" card ---- */}
         {pendingSlot && (
-          <div className="ticket">
-            <div className="eyebrow">planned arrival</div>
-            <div className="ticket-num" style={{ fontSize: '2rem' }}>{slotLabel(job.scheduledTime!)}</div>
-            <div className="sub">
-              Your order is prepared. <strong>Check-in opens at {slotLabel(job.checkInOpensAt ?? job.scheduledTime!)}</strong>
-              {' '}— tap it once you reach the shop.
-            </div>
+          <div className="now-card">
+            <p className="now-kicker">Planned visit</p>
+            <p className="now-title">{slotLabel(job.scheduledTime!)}</p>
+            <p className="now-body">
+              Your order is ready. Check-in opens at {slotLabel(job.checkInOpensAt ?? job.scheduledTime!)}: tap I’m here when you reach {job.shop.name}.
+            </p>
           </div>
         )}
-        {job.absent && (
-          <div className="absent-card" role="alert">
-            <div>
-              <span className="eyebrow-label">Missed your turn</span>
-              <h2>You were not at the counter in time</h2>
-              <p>Your place went to the next student. Your order is still prepared and your counter code has not changed. Check in again at the shop to get a new place at the end of the line.</p>
-            </div>
-            <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Checking location…' : 'I’m at the shop — check in again'}</button>
+        {prepared && !pendingSlot && job.absent && (
+          <div className="now-card danger" role="alert">
+            <p className="now-kicker">You missed your turn</p>
+            <p className="now-body">Your order and your code still work. Check in again to join at the end of the line.</p>
+            {checkInButton('I’m here, check in again')}
           </div>
         )}
-        {['awaiting_arrival', 'requeued'].includes(job.status) && !pendingSlot && !job.absent && (
-          <div className="arrival-card">
-            <div>
-              <span className="eyebrow-label">Order prepared</span>
-              <h2>Join only after you arrive</h2>
-              <p>Your prepared order does not occupy the physical line. Check in at the shop entrance to receive a fair walk-in position.</p>
-            </div>
-            {!confirmingArrival ? (
-              <button onClick={() => setConfirmingArrival(true)}>I’m at the shop</button>
-            ) : (
-              <div className="arrival-confirm">
-                <strong>Are you physically at {job.shop.name}?</strong>
-                <p>{job.checkInCount > 0
-                 ? 'This is a new check-in, so you will join at the end of the current physical line. Your counter code has not changed.'
-                   : 'This adds you to the live line now. If plans change, staff can remove you without cancelling your prepared order.'}</p>
-                <div className="row">
-                  <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'Yes, join the line'}</button>
-                  <button className="ghost" disabled={checkingIn} onClick={() => setConfirmingArrival(false)}>Not yet</button>
-                </div>
-              </div>
-            )}
+        {prepared && !pendingSlot && !job.absent && (
+          <div className="now-card">
+            <p className="now-kicker">Next step</p>
+            <p className="now-title">Go to {job.shop.name}</p>
+            {job.shop.address && <p className="now-body">{job.shop.address}</p>}
+            {checkInButton('I’m here')}
+            <p className="now-note">
+              Tap it at the shop. We check your location once, you join the line, and your code appears when it is your turn.
+            </p>
           </div>
         )}
-        {['queued', 'notified'].includes(job.status) && !pendingSlot && (
+        {inLine && !pendingSlot && (
           <StudentBandPanel
             nowMs={nowMs}
             job={{ status: job.status, position, etaMinutes: eta, band: job.band, revealDeadlineAt: job.revealDeadlineAt, otpCode: otp }}
           />
         )}
-        {otp && job.status === 'ready_for_pickup' && (
-          <div className="ticket turn">
-            <div className="eyebrow">your counter code</div>
-            <div className="otp-band">{otp}</div>
-            <div className="sub">Show this screen at the counter to collect your prints. Staff find your order by your name.</div>
+        {job.status === 'otp_verified' && (
+          <div className={`now-card${job.printError ? ' warn' : ''}`} role="status">
+            <p className="now-kicker">{job.printError ? 'The printer had a problem' : 'Sending to the printer'}</p>
+            <p className="now-body">
+              {job.printError
+                ? 'Staff will print it again. You do not need to do anything or check in again.'
+                : 'Your order is on its way to the printer.'}
+            </p>
           </div>
         )}
-        {job.status === 'ready_for_pickup' && (
-          <div className="ticket turn">
-            <div className="eyebrow">done</div>
-            <div className="ticket-num" style={{ fontSize: '1.7rem' }}>Collect at counter</div>
-          </div>
-        )}
-        {job.status === 'otp_verified' && job.printError && (
-          <div className="notice setup-notice">
-            <div><strong>{job.printError}</strong><p>The shop has your verified order and can retry it without another OTP. You don’t need to rejoin the queue.</p></div>
+        {job.status === 'printing' && (
+          <div className="now-card" role="status">
+            <p className="now-kicker">Printing now</p>
+            <p className="now-body">Wait near the counter. Staff hand it over when it is done.</p>
           </div>
         )}
         {job.status === 'finishing' && (
-          <div className="notice setup-notice">
-            <div><strong>Printing is done</strong><p>The shop is completing your requested {job.specs.binding?.replace('_', ' ')} by hand. We’ll notify you as soon as collection is ready.</p></div>
+          <div className="now-card" role="status">
+            <p className="now-kicker">{binding ? `${binding.charAt(0).toUpperCase()}${binding.slice(1)} by hand` : 'Finishing by hand'}</p>
+            <p className="now-body">Your pages are printed. We will tell you when it is ready to collect.</p>
           </div>
         )}
-        {['no_show', 'requeued'].includes(job.status) && (
-          <div className="card stack">
-            <strong>Your prepared order is still available</strong>
-            <p style={{ margin: 0 }}>{otp
-              ? 'This order left the line. Your permanent counter code still identifies the document, or you can check in again at the end.'
-              : 'This order left the line before its counter code unlocked. Check in again to join at the end of the current line.'}</p>
-            <button disabled={checkingIn} onClick={checkIn}>{checkingIn ? 'Joining…' : 'I’m here — join live line'}</button>
+        {job.status === 'ready_for_pickup' && (
+          <div className="ticket turn ready-ticket" data-band="ready">
+            <p className="ticket-title">Ready to collect</p>
+            {otp && (
+              <div className="otp-band" data-counter-code>
+                <span className="sr-only">Counter code {otp.split('').join(' ')}</span>
+                {codeHalves(otp).map((half, i) => <span key={i} aria-hidden>{half}</span>)}
+              </div>
+            )}
+            <p className="sub">Show this at the counter to collect your prints.</p>
           </div>
         )}
         {job.status === 'pending_payment' && (
-          <div className="notice setup-notice">
-            <div><strong>Order is still preparing</strong><p>No queue position has been reserved. Refresh once preparation completes, or cancel and start again.</p></div>
+          <div className="now-card" role="status">
+            <p className="now-kicker">Preparing your order</p>
+            <p className="now-body">This takes a moment. No place in line is held yet.</p>
           </div>
         )}
-
-        {/* ---- push nudge ---- */}
-        {['awaiting_arrival', 'queued', 'notified'].includes(job.status) && !pushOffered && (
-          <div className="card row between">
-            <span className="dim" style={{ flex: 1 }}>Get alerted even if you close the app?</span>
-            <button className="ghost small" onClick={async () => { await enablePush(); setPushOffered(true); }}>
-              Turn on
-            </button>
-          </div>
-        )}
-
-        {/* ---- details ---- */}
-        <div className="section-head"><h2>Print details</h2></div>
-        <div className="card">
-          <div className="spec-grid">
-            <div><div className="k">Copies</div><div className="v">{job.specs.copies}</div></div>
-            <div><div className="k">Paper</div><div className="v">{job.specs.paperSize}</div></div>
-            <div><div className="k">Colour</div><div className="v">{job.specs.color ? 'Colour' : 'B/W'}</div></div>
-            <div><div className="k">Sides</div><div className="v">{job.specs.duplex ? 'Both' : 'One'}</div></div>
-            <div><div className="k">Binding</div><div className="v">{job.specs.binding ? job.specs.binding.replace('_', ' ') : 'None'}</div></div>
-            <div><div className="k">Pages</div><div className="v">{job.specs.pageRange ?? 'All'}{job.file.pages ? ` / ${job.file.pages}` : ''}</div></div>
-          </div>
-        </div>
-
-        {/* ---- receipt ---- */}
-        <div className="card receipt">
-          <div className="line total">
-            <span>{payment.label}</span>
-            <span style={{ whiteSpace: 'nowrap' }}>{payment.nothingCharged ? <s>{rupees(job.totalPaise)}</s> : rupees(job.totalPaise)}</span>
-          </div>
-          {payment.receiptAvailable ? (
-            <button
-              className="ghost small"
-              style={{ marginTop: 10 }}
-              onClick={() =>
-                downloadFile(`/api/jobs/${job.id}/receipt`, 'student', `printq-receipt-${job.id.slice(0, 8)}.pdf`).catch(
-                  () => setError('Could not download receipt'),
-                )
-              }
-            >
-              Download receipt
-            </button>
-          ) : (
-            <p className="receipt-help">{payment.receiptMessage}</p>
-          )}
-        </div>
-
-        {/* ---- timeline (only for the normal path) ---- */}
-        {!['expired', 'cancelled', 'no_show'].includes(job.status) && (
-          <>
-            <div className="section-head"><h2>Progress</h2></div>
-            <div className="card">
-              <ul className="timeline">
-                {MILESTONES.map((step) => {
-                  const stepIdx = ORDER.indexOf(step.key);
-                  const done = reachedIdx > stepIdx;
-                  const current =
-                    job.status === step.key ||
-                    (step.key === 'queued' && job.status === 'notified') ||
-                    (step.key === 'printing' && job.status === 'otp_verified');
-                  return (
-                    <li key={step.key} className={done ? 'done' : current ? 'current' : ''}>
-                      <div className="t">{step.label}</div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </>
-        )}
-
-        {/* ---- rating ---- */}
         {job.status === 'completed' && (
-          <div className="card">
+          <div className="now-card ok">
+            <p className="now-kicker">Collected</p>
             {job.rating ? (
-              <p style={{ margin: 0 }}>You rated this print {'★'.repeat(job.rating)}{'☆'.repeat(5 - job.rating)}</p>
+              <p className="now-body">You rated this print {job.rating} out of 5.</p>
             ) : (
               <>
-                <strong>How was this print?</strong>
-                <div className="row" style={{ marginTop: 8 }}>
+                <p className="now-body">How was this print?</p>
+                <div className="rating-row" role="group" aria-label="Rate this print">
                   {[1, 2, 3, 4, 5].map((n) => (
-                    <button key={n} className="ghost" style={{ fontSize: '1.2rem', padding: '6px 10px' }} onClick={() => rate(n)}>
-                      {'★'.repeat(n)}
+                    <button key={n} type="button" className="secondary" aria-label={`${n} out of 5`} onClick={() => void rate(n)}>
+                      {n} <span aria-hidden>★</span>
                     </button>
                   ))}
                 </div>
@@ -464,19 +385,108 @@ export default function JobStatus() {
             )}
           </div>
         )}
+        {(job.status === 'cancelled' || job.status === 'expired') && (
+          <div className="now-card">
+            <p className="now-kicker">{job.status === 'expired' ? 'This order expired' : 'Order cancelled'}</p>
+            <p className="now-body">{payment.nothingCharged ? 'Nothing was charged.' : payment.receiptMessage || payment.label}</p>
+          </div>
+        )}
 
-        {/* ---- actions ---- */}
-        <div className="stack" style={{ marginTop: 8 }}>
-          {['pending_payment', 'awaiting_arrival', 'queued', 'notified'].includes(job.status) && (
-            <button className="ghost" onClick={cancel}>Cancel job</button>
-          )}
+        {error && <p className="error-box" role="alert">{error}</p>}
+
+        {/* ---- how to pay (after the code: at the counter the code matters first) ---- */}
+        {owes && (inLine || prepared || job.status === 'pending_payment') && (
+          <div className="pay-line">
+            <div>
+              <strong>Pay {rupees(job.totalPaise)} at the counter</strong>
+              <span>Cash or UPI. Staff confirm it before printing.</span>
+            </div>
+            {job.shop.counterUpi && inLine && (
+              <a className="button-link secondary" href={counterUpiIntentUri(job.shop.counterUpi.vpa, job.shop.counterUpi.payeeName, job.totalPaise, job.id)}>
+                Pay by UPI
+              </a>
+            )}
+          </div>
+        )}
+
+        {(prepared || inLine) && !pushOffered && (
+          <div className="push-nudge">
+            <span>Get an alert when it is your turn, even with the app closed.</span>
+            <button type="button" className="secondary small" onClick={async () => { await enablePush(); setPushOffered(true); }}>
+              Turn on alerts
+            </button>
+          </div>
+        )}
+
+        {/* ---- details ---- */}
+        <section className="job-section" aria-labelledby="order-details">
+          <h2 id="order-details">Your order</h2>
+          <div className="card">
+            <div className="spec-grid">
+              <div><div className="k">Copies</div><div className="v">{job.specs.copies}</div></div>
+              <div><div className="k">Paper</div><div className="v">{job.specs.paperSize}</div></div>
+              <div><div className="k">Colour</div><div className="v">{job.specs.color ? 'Colour' : 'Black & white'}</div></div>
+              <div><div className="k">Sides</div><div className="v">{job.specs.duplex ? 'Both sides' : 'One side'}</div></div>
+              <div><div className="k">Binding</div><div className="v">{binding ?? 'None'}</div></div>
+              <div><div className="k">Pages</div><div className="v">{job.specs.pageRange ?? 'All'}{job.file.pages ? ` of ${job.file.pages}` : ''}</div></div>
+            </div>
+            <div className="receipt job-total">
+              <div className="line total">
+                <span>{payment.label}</span>
+                <span>{payment.nothingCharged ? <s>{rupees(job.totalPaise)}</s> : rupees(job.totalPaise)}</span>
+              </div>
+            </div>
+            {payment.receiptAvailable ? (
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() =>
+                  downloadFile(`/api/jobs/${job.id}/receipt`, 'student', `printq-receipt-${job.id.slice(0, 8)}.pdf`).catch(
+                    () => setError('Could not download the receipt. Try again.'),
+                  )
+                }
+              >
+                Download receipt
+              </button>
+            ) : (
+              <p className="receipt-help dim">{payment.receiptMessage}</p>
+            )}
+          </div>
+        </section>
+
+        {!['expired', 'cancelled', 'no_show'].includes(job.status) && (
+          <section className="job-section" aria-labelledby="order-progress">
+            <h2 id="order-progress">Progress</h2>
+            <div className="card">
+              <ul className="timeline">
+                {MILESTONES.filter((step) => step.key !== 'finishing' || job.specs.binding).map((step) => {
+                  const stepIdx = ORDER.indexOf(step.key);
+                  const done = reachedIdx > stepIdx;
+                  const current =
+                    job.status === step.key ||
+                    (step.key === 'queued' && job.status === 'notified') ||
+                    (step.key === 'printing' && job.status === 'otp_verified');
+                  return (
+                    <li key={step.key} className={done ? 'done' : current ? 'current' : ''} aria-current={current ? 'step' : undefined}>
+                      <div className="t">{step.label}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </section>
+        )}
+
+        <div className="job-foot">
           {terminal && (
-            <button onClick={() => { rememberShop(job.shop.slug); navigate(`/s/${job.shop.slug}`); }}>
+            <button type="button" className="large full-button" onClick={() => { rememberShop(job.shop.slug); navigate(`/s/${job.shop.slug}`); }}>
               Print again at {job.shop.name}
             </button>
           )}
+          {['pending_payment', 'awaiting_arrival', 'queued', 'notified'].includes(job.status) && (
+            <button type="button" className="quiet danger-text" onClick={() => void cancel()}>Cancel order</button>
+          )}
         </div>
-        {error && <p className="error">{error}</p>}
       </div>
     </StudentShell>
   );

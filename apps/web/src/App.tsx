@@ -20,7 +20,6 @@ const Dashboard = lazy(() => import('./pages/shop/Dashboard.js'));
 const Printers = lazy(() => import('./pages/shop/Printers.js'));
 const Agents = lazy(() => import('./pages/shop/Agents.js'));
 const Settings = lazy(() => import('./pages/shop/Settings.js'));
-const Insights = lazy(() => import('./pages/shop/Insights.js'));
 const History = lazy(() => import('./pages/shop/History.js'));
 const ShopSetup = lazy(() => import('./pages/shop/ShopSetup.js'));
 const Earnings = lazy(() => import('./pages/shop/Earnings.js'));
@@ -32,7 +31,7 @@ const Terms = lazy(() => import('./pages/legal/Terms.js'));
 const Refunds = lazy(() => import('./pages/legal/Refunds.js'));
 const Support = lazy(() => import('./pages/legal/Support.js'));
 const PcDownload = lazy(() => import('./pages/legal/PcDownload.js'));
-import NotFound from './pages/legal/NotFound.js';
+const NotFound = lazy(() => import('./pages/legal/NotFound.js'));
 
 function RouteMeta() {
   const { pathname } = useLocation();
@@ -79,7 +78,8 @@ export default function App() {
         <Route path="/dashboard/login" element={<ShopLogin />} />
         <Route path="/dashboard/register" element={<ShopRegister />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/dashboard/insights" element={<Insights />} />
+        {/* Insights merged into Earnings; old links still work */}
+        <Route path="/dashboard/insights" element={<Navigate to="/dashboard/earnings" replace />} />
         <Route path="/dashboard/earnings" element={<Earnings />} />
         <Route path="/dashboard/earnings/receipt/:id" element={<FeeReceipt />} />
         <Route path="/dashboard/history" element={<History />} />
@@ -87,6 +87,7 @@ export default function App() {
         <Route path="/dashboard/printers" element={<Printers />} />
         <Route path="/dashboard/agents" element={<Agents />} />
         <Route path="/dashboard/settings" element={<Settings />} />
+        <Route path="/dashboard/prices" element={<Settings section="prices" />} />
         {/* platform administration: separately authenticated from any shop */}
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<AdminConsole />} />

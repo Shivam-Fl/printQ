@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, getShopRole, getToken } from '../../api.js';
 import { formatDay, formatRupees } from '../../lib/fees.js';
+import '../../shop.css';
 
 interface Receipt {
   receiptNo: string;

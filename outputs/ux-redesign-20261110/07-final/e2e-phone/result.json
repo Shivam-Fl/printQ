@@ -1,0 +1,28 @@
+{
+  "mode": "phone",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "shop": "Gupta Print Point xoh",
+  "steps": [
+    "owner registered and landed on Setup",
+    "location saved from the device position",
+    "counter PC online with the PrintQ Simulator (stand-in for the desktop app)",
+    "shop is live (visibility: live)",
+    "owner opened the counter",
+    "student signed up with a new phone number (login code from the dev console provider)",
+    "student found the new shop in the directory",
+    "student placed the order (checkout showed: \"Total · 3 pages ₹7.50 Pay at the shop · cash or UPI Place order\")",
+    "student checked in with one tap and sees the counter code (6 digits)",
+    "counter found the order after the 6th digit (card: \"Arjun Mehta •••0110 e2e-phone.pdf 3 pages · A4 · B/W Prints on PrintQ Simulator Collect ₹7.50 Cash received & print Not \")",
+    "cash confirmed and sent to print; focus back on: counter-code",
+    "counter PC reported the print as sent; staff asked to check the pages",
+    "handed over: job status completed, payment paid, total ₹7.5",
+    "history lists the order",
+    "earnings: shop keeps ₹6, PrintQs fee ₹1.5, student paid ₹7.5 (adds up)"
+  ],
+  "problems": [],
+  "finalStatus": "completed",
+  "paymentStatus": "paid"
+}

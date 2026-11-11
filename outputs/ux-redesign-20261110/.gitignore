@@ -1,0 +1,2 @@
+# Screenshots stay on disk (too large for git); reports, metrics and tools are tracked.
+*.png
