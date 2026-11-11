@@ -18,7 +18,6 @@ interface PublicShop {
   slug: string;
   name: string;
   address: string;
-  campusName: string | null;
   open: boolean;
   temporarilyUnavailable?: boolean;
   colorAvailable: boolean;
@@ -201,7 +200,6 @@ export default function ShopLanding() {
           <h1 className={shop.name.length > 28 ? 'long-name' : undefined}>{shop.name}</h1>
           <p className="dim">
             {shop.address}
-            {shop.campusName ? ` · ${shop.campusName}` : ''}
           </p>
           <div className="shop-facts">
             {shop.options.papers.length > 0 && <span>{shop.options.papers.map((paper) => paper.label).join(' · ')}</span>}

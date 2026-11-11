@@ -33,13 +33,19 @@ export type NewPrintAction =
   | { kind: 'picker' }
   | { kind: 'directory' };
 
+/**
+ * "New print": the shops the student ordered from decide (one → that shop, several → the chooser). A student who
+ * has not ordered yet goes to the shop they last opened (say, by scanning its QR), but only while it is published.
+ */
 export function resolveNewPrintAction(
-  _rememberedSlug: string | null,
+  rememberedSlug: string | null,
   shops: Array<{ slug: string }>,
+  publishedShops: Array<{ slug: string }> = [],
 ): NewPrintAction {
   const onlyShop = shops[0];
   if (onlyShop && shops.length === 1) return { kind: 'shop', slug: onlyShop.slug };
   if (shops.length > 0) return { kind: 'picker' };
+  if (rememberedSlug && publishedShops.some((shop) => shop.slug === rememberedSlug)) return { kind: 'shop', slug: rememberedSlug };
   return { kind: 'directory' };
 }
 
@@ -114,7 +120,7 @@ export default function Home() {
   }, [jobs, publishedShops]);
 
   function startPrint() {
-    const action = resolveNewPrintAction(lastShopSlug(), shops);
+    const action = resolveNewPrintAction(lastShopSlug(), shops, publishedShops);
     if (action.kind === 'shop') {
       rememberShop(action.slug);
       navigate(`/s/${action.slug}`);
