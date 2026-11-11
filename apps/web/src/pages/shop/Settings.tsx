@@ -67,9 +67,6 @@ function bindingErrors(row: BindingRow): RowErrors {
 interface ShopProfile {
   name: string;
   address: string;
-  campusName: string | null;
-  campusId: string | null;
-  campus: { id: string; name: string; slug: string } | null;
   slug: string;
   autoLive?: boolean;
   latitude: number | null;
@@ -87,13 +84,6 @@ interface PrinterSummary {
   status: string;
   osPrinterName: string | null;
 }
-interface Campus {
-  id: string;
-  slug: string;
-  name: string;
-  address: string;
-}
-
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || `opt-${Date.now()}`;
 /** A fresh id from the label that does not collide with ids already used. */
@@ -115,7 +105,6 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  const [campuses, setCampuses] = useState<Campus[]>([]);
   // What the server last told us — saves send only the difference from this.
   const [baseline, setBaseline] = useState<{ draft: SettingsDraft; menuVersion: number } | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -135,14 +124,11 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
     api<{ printers: PrinterSummary[] }>('/api/shop/printers', { role: 'shop' })
       .then((result) => setPrinters(result.printers))
       .catch(() => setPrinters(null));
-    Promise.all([
-      api<{
-        shop: ShopProfile & { printOptions: StoredOptions; printOptionsVersion: number; autoAssignEnabled: boolean };
-        platformMarkupBps?: number;
-      }>('/api/shop/me', { role: 'shop' }),
-      api<{ campuses: Campus[] }>('/api/public/campuses'),
-    ])
-      .then(([r, campusResult]) => {
+    api<{
+      shop: ShopProfile & { printOptions: StoredOptions; printOptionsVersion: number; autoAssignEnabled: boolean };
+      platformMarkupBps?: number;
+    }>('/api/shop/me', { role: 'shop' })
+      .then((r) => {
         const bps = r.platformMarkupBps;
         setMarkupBps(typeof bps === 'number' && Number.isInteger(bps) && bps >= 0 && bps <= 10_000 ? bps : null);
         setLoadError('');
@@ -152,7 +138,6 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
           draft: {
             name: r.shop.name,
             address: r.shop.address,
-            campusId: r.shop.campusId,
             latitude: r.shop.latitude,
             longitude: r.shop.longitude,
             checkInRadiusM: r.shop.checkInRadiusM,
@@ -166,13 +151,9 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
         });
         setConflict(false);
         setError('');
-        setCampuses(campusResult.campuses);
         setProfile({
           name: r.shop.name,
           address: r.shop.address,
-          campusName: r.shop.campusName,
-          campusId: r.shop.campusId,
-          campus: r.shop.campus,
           slug: r.shop.slug,
           autoLive: r.shop.autoLive,
           latitude: r.shop.latitude,
@@ -280,7 +261,6 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
     const draft: SettingsDraft = {
       name: profile.name,
       address: profile.address,
-      campusId: profile.campusId,
       latitude: profile.latitude,
       longitude: profile.longitude,
       checkInRadiusM: profile.checkInRadiusM,
@@ -475,23 +455,7 @@ export default function Settings({ section = 'shop' }: { section?: 'prices' | 's
           <>
             <section className="settings-block" aria-labelledby="details-title">
               <h2 id="details-title">Shop details</h2>
-              <div className="form-row">
-                <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
-                <div className="field grow">
-                  <label htmlFor="profile-campus">Campus <span className="optional-label">optional</span></label>
-                  <select
-                    id="profile-campus"
-                    value={profile.campusId ?? ''}
-                    onChange={(event) => {
-                      const campus = campuses.find((item) => item.id === event.target.value) ?? null;
-                      setProfile({ ...profile, campusId: campus?.id ?? null, campus, campusName: campus?.name ?? null });
-                    }}
-                  >
-                    <option value="">Not on a campus</option>
-                    {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
-                  </select>
-                </div>
-              </div>
+              <div className="field"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
               <div className="field"><label htmlFor="profile-address">Shop address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
             </section>
 

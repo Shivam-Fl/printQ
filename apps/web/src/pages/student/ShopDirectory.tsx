@@ -11,7 +11,6 @@ import { detectPhoneLike } from '../../lib/pcDownload.js';
 interface ShopRow {
   slug: string;
   name: string;
-  campusName: string | null;
   address: string;
   open: boolean;
   distanceM?: number;
@@ -70,7 +69,7 @@ export default function ShopDirectory() {
 
   function findNearby() {
     if (!navigator.geolocation) {
-      setLocationMessage('This browser cannot share a location. Search by shop or campus instead.');
+      setLocationMessage('This browser cannot share a location. Search by shop name or area instead.');
       return;
     }
     setLocating(true);
@@ -96,14 +95,14 @@ export default function ShopDirectory() {
           setLocationMessage('Nearby results use this one-time location only. PrintQs does not save it.');
         } catch (err) {
           if (isAbortError(err) || !ticket.isCurrent()) return;
-          setLocationMessage('Could not find nearby counters. Search by shop or campus instead.');
+          setLocationMessage('Could not find nearby counters. Search by shop name or area instead.');
         } finally {
           if (ticket.isCurrent()) setLocating(false);
         }
       },
       () => {
         setLocating(false);
-        setLocationMessage('Location access is off. Search by shop or campus instead.');
+        setLocationMessage('Location access is off. Search by shop name or area instead.');
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
     );
@@ -113,7 +112,7 @@ export default function ShopDirectory() {
     <main className="page">
       <Topbar />
       <div className="directory-heading"><span className="eyebrow-label">Print counters near you</span><h1>Find a shop</h1><p>Choose a connected shop now, or scan the QR displayed at your usual counter.</p></div>
-      <div className="search-field"><span aria-hidden>⌕</span><input type="search" aria-label="Search shops" placeholder="Search shop, area or campus" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus={focusSearch} /></div>
+      <div className="search-field"><span aria-hidden>⌕</span><input type="search" aria-label="Search shops" placeholder="Search shop name or area" value={q} onChange={(e) => searchAgain(e.target.value)} autoFocus={focusSearch} /></div>
       <div className="row between" style={{ margin: '10px 0 18px' }}>
         <span className="dim">{locationMessage || 'Open shops are listed first.'}</span>
         <button className="ghost small" onClick={findNearby} disabled={locating}>⌖ Near me</button>
@@ -123,7 +122,7 @@ export default function ShopDirectory() {
       ) : !nearby && list.status === 'error' ? (
         <ErrorState onRetry={list.retry} title="Could not load shops" />
       ) : shops.length === 0 ? (
-        <div className="empty-state"><strong>No matching shops</strong><p>Try another shop or campus name, or scan the QR at your print counter.</p></div>
+        <div className="empty-state"><strong>No matching shops</strong><p>Try another shop name or area, or scan the QR at your print counter.</p></div>
       ) : (
         <div className="directory-list">
           {shops.map((s) => (
@@ -131,7 +130,7 @@ export default function ShopDirectory() {
               <div className="store-avatar" aria-hidden>{s.name.slice(0, 2).toUpperCase()}</div>
               <div className="grow">
                 <strong>{s.name}</strong>
-                <p>{s.address}{s.campusName ? ` · ${s.campusName}` : ''}</p>
+                <p>{s.address}</p>
                 {/* outside the 2-line address clamp, so a long address never hides it */}
                 {s.distanceM != null && <span className="directory-distance">{formatDistance(s.distanceM)}</span>}
               </div>

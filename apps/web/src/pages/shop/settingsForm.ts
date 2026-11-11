@@ -23,7 +23,6 @@ export interface OptionsDraft {
 export interface SettingsDraft {
   name: string;
   address: string;
-  campusId: string | null;
   latitude: number | null;
   longitude: number | null;
   checkInRadiusM: number;
@@ -141,7 +140,6 @@ export function colourPrinterWarning(
 const SCALAR_KEYS = [
   'name',
   'address',
-  'campusId',
   'checkInRadiusM',
   'counterCapacity',
   'revealGraceSeconds',
