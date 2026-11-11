@@ -133,9 +133,117 @@ Bottom bar unchanged (Home, Jobs, **Print**, Profile). Changes:
 
 ## 7. API changes
 
-None planned. If one becomes necessary it will be listed here with the reason, and it will follow every rule in
-`CLAUDE.md`.
+None. `git diff --stat 3ae2475..HEAD -- apps/api packages apps/agent` is empty: no API, Prisma, shared pricing,
+state machine, auth or payment code changed. Every new behaviour uses endpoints that already exist.
 
 ## 8. Decision log (added during implementation)
 
-- *(filled in per slice)*
+Changes to the plan above, and choices the plan did not foresee. Each says what was decided and why.
+
+### Slice 1: foundations (`ea34331`)
+
+- **Badges stay lower-case in data, sentence case on screen.** `.stamp` and `.badge` are `inline-block` so
+  `::first-letter` can capitalise them (it does nothing on `inline-flex`); badges with a dot keep `inline-flex`.
+- **The checkout step indicator ("1 Upload · 2 Settings · 3 Pay") was removed.** Checkout is one screen; the
+  steps described a flow that does not exist.
+
+### Slice 2: counter and navigation (`fe2e49d`)
+
+- **Shop CSS and shop-only icons are split out of the entry bundle.** `shop.css` (shop nav, counter, setup,
+  printers, settings, earnings, admin) is imported by `ShopNav`, `ShopLocationEditor`, `FeeReceipt` and
+  `AdminConsole`, so Vite emits it as a separate chunk. Shop icons moved to `ShopIcons.tsx`. Students never
+  download either. Entry CSS fell from 14.61 KB to 10.65 KB gzip.
+- **Enter in the code box only retries a failed lookup; it never confirms money.** Money is confirmed only by a
+  button whose label names the method ("Cash received & print"). `b-double-enter-safety` checks that two Enters
+  leave the order `counter_due`.
+- **The per-row "Assign printer" button in the line was removed.** Printer choice happens in the order card at
+  release time, where staff already are; a row without a printer shows a "No printer yet" badge. One place to
+  choose a printer instead of two.
+- **The UPI button appears only when the shop's UPI ID is verified.** The API refuses `shop_upi` confirmations
+  otherwise. Without a verified UPI ID, owners see a one-line link to the UPI section of Settings, and staff see
+  plain text instead.
+- **Printing & pickup lists the job sent most recently first**: the one staff are waiting on is on top.
+- **Counts are hidden while the counter loads.** The page no longer flashes "0 in line" before the data arrives.
+- **One shared shop-status store** (`lib/shopStatus.ts`) feeds the nav status chip and the pages, so the setup
+  status is fetched once per page instead of once per component.
+- **Socket refreshes are coalesced (250 ms), added in slice 7 (`0214173`).** One release fires about five queue
+  events within a second, and each one reloaded three endpoints. During the 10-student rush the API's per-user
+  limit (300 requests a minute) answered 429. That rush also had the measuring script polling as the same user,
+  but a busy real counter on a slow link could hit the same limit. The counter now does one reload per burst.
+
+### Slice 3: student core loop (`20967aa`, `a2269f0`)
+
+- **Check-in is one tap ("I’m here"); the "Yes, join the line" confirmation was removed.** The API still checks
+  the student's location against the shop's radius, so a tap away from the shop fails with a plain message, and
+  the browser asks for location permission the first time anyway. The second tap added no information.
+- **Only paper size and sides are remembered** per shop (`lib/printSettings.ts`). Colour, binding and copies always
+  start at the cheapest choice, so a remembered setting can never make an order dearer without the student seeing
+  it.
+- **The counter code is read digit by digit by screen readers.** The two visual halves (482 913) are
+  `aria-hidden`, and a visually hidden text gives "Counter code 4 8 2 9 1 3". An `aria-label` on a plain `div`
+  is not allowed (axe `aria-prohibited-attr`).
+- **"Pay by UPI" shows on the job page only while the student is in line**, the only time it is useful. Before
+  that the page only says "Pay ₹X at the counter. Cash or UPI. Staff confirm it before printing."
+- **The timeline shows "Finishing" only for orders with binding.**
+- **The 404 page is lazy-loaded** to keep the entry JS below baseline (82.56 KB vs 82.62 KB gzip). The 404 test
+  renders the page directly, like the other lazy routes (`a2269f0`).
+
+### Slice 4: onboarding (`603af15`)
+
+- **Setup is one column of three steps, and step 3 lists the printers the counter PC found, with Add.** A new
+  owner adds the printer without leaving Setup (register to live: 9 clicks to 8).
+- **"Your shop is live" is never shown while only the practice simulator is connected.** Setup treats the shop as
+  live only if it is listed and not in practice mode, so the page no longer contradicts the practice notice.
+- **Owners on a phone get the `/pc` link to send to the counter PC** (copy, share, QR). The desktop app is
+  installed on the PC; the owner often registers on a phone.
+- **A late `/api/shop/me` response no longer wipes a pin the owner already placed.** Found when the register
+  journey failed under React's development double-render.
+
+### Slice 5: management pages (`a6ca53d`)
+
+- **Prices got their own page** (`/dashboard/prices`, the first Shop tab once live). It is the same Settings
+  component with `section="prices"`, so no new data code. Links to the old `#prices` anchor redirect there.
+- **Settings is a set of sections with one sticky save bar.** Queue settings, check-in radius and coordinates sit
+  in "Advanced details". The location editor has its own search form, so Settings uses a plain wrapper instead
+  of a form, to avoid a form nested inside another (invalid HTML). Staff management is outside the save bar
+  because each staff action saves on its own. Height at 1366: 3,241 px to 1,916 px.
+- **Insights is merged into Earnings.** Summary tiles and the 7-day bars sit at the top. `/dashboard/insights`
+  redirects, and `Insights.tsx` was deleted.
+- **History has a search box** (student name, masked phone, file name).
+- **Trade-off accepted: live shops reach Printers through Shop → Printers.** Through the nav, adding a printer on
+  a live shop costs 4 clicks instead of 3. The common case (the PC just found a new printer) is covered by the
+  counter banner "PC connected · 1 printer found → Add printer", which is still 3 clicks
+  (`h-add-printer-from-banner`). Shops still in setup add printers inline (2 clicks inside Setup).
+
+### Slice 6: auth, admin, legal (`ced0db5`, `84aebe8`)
+
+- **Unknown or unpublished shop links are hidden from search engines** (`noindex`, no self canonical) and show
+  "This shop link is not valid" with Find a shop and Go home. The single-page app still answers HTTP 200, so this
+  is a `noindex` soft 404, not a status-code 404.
+- **Admin badges the exception.** Shops that need a manual review get a "Manual review" badge. The old
+  "Auto-live" badge sat on almost every shop, so it is gone. The admin page loads the shop stylesheet.
+- **Fee activity table**: it is a keyboard-focusable region with a name (`tabIndex=0`, `role="region"`,
+  `aria-labelledby`), so keyboard users can scroll it on phones (axe `scrollable-region-focusable`).
+
+### Slice 7: fixes found in the final regression (`0214173`, `cb6c031`, `7bdd599`)
+
+- **Counter refreshes are coalesced** (see slice 2): found when the 10-student rush hit the API's per-user limit.
+- **Shop top bar at tablet widths.** At 768 px the account button kept the full shop name and ran 7 px off-screen.
+  The nav links now keep their size and the account button shrinks first, truncating the name; the full name
+  stays in its `title` and in the menu. Checked from 761 to 1280 px with 25- and 40-character names.
+- **The earnings summary can fail quietly.** Loading and failed used to be the same `null`, so a failed
+  `/api/shop/stats` would have left skeleton tiles on screen forever. It now disappears and the rest of Earnings
+  works.
+- **The history search helper is a plain function in `counterFlow.ts`**, so its test no longer loads the whole
+  History page (that import timed out once on a busy machine).
+- **Known, not changed: practice-mode wording in development.** Development lets the simulator print real orders,
+  so the API marks a simulator-only shop live, while Setup still says "Practice mode … add your real printer". In
+  production the API never makes a simulator-only shop live, and both say practice mode. Not worth new logic.
+
+### Not changed, on purpose
+
+- **60 s reveal grace before auto-absent (F5).** It is a queue rule (API), not UI. The counter now shows the
+  countdown in the line and stops it when staff type the code. Whether 60 s is enough at a busy counter is a
+  product call; see `LAUNCH_READINESS.md`.
+- **Staff still confirm "printed" themselves.** Spool acceptance by the PC is not proof that the pages came out.
+- **Cash/UPI confirmation is never automatic.** It is one click, never zero.
