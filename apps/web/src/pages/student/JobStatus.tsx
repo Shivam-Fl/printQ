@@ -352,7 +352,8 @@ export default function JobStatus() {
           <div className="ticket turn ready-ticket" data-band="ready">
             <p className="ticket-title">Ready to collect</p>
             {otp && (
-              <div className="otp-band" data-counter-code aria-label={`Counter code ${otp.split('').join(' ')}`}>
+              <div className="otp-band" data-counter-code>
+                <span className="sr-only">Counter code {otp.split('').join(' ')}</span>
                 {codeHalves(otp).map((half, i) => <span key={i} aria-hidden>{half}</span>)}
               </div>
             )}

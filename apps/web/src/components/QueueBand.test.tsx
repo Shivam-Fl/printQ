@@ -27,7 +27,7 @@ describe('student band panel', () => {
     const html = render({ otpCode: '482913', revealDeadlineAt: new Date(NOW + 42_000).toISOString() });
     expect(html).toContain('class="ticket turn band-ticket"');
     expect(html).toContain('<span aria-hidden="true">482</span><span aria-hidden="true">913</span>');
-    expect(html).toContain('aria-label="Counter code 4 8 2 9 1 3"');
+    expect(html).toContain('<span class="sr-only">Counter code 4 8 2 9 1 3</span>');
     expect(html).toContain('Be at the counter in 0:42');
     expect(html).not.toContain('urgent');
   });

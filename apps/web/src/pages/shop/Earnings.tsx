@@ -172,8 +172,8 @@ export default function Earnings() {
             </details>
           )}
 
-          <div className="section-head"><h2>PrintQs fee per print</h2></div>
-          <div className="table-shell">
+          <div className="section-head"><h2 id="fee-activity">PrintQs fee per print</h2></div>
+          <div className="table-shell" tabIndex={0} role="region" aria-labelledby="fee-activity">
             <table>
               <thead><tr><th>Date</th><th>What</th><th>Print</th><th>Due to PrintQs</th><th>Coupon below your price</th></tr></thead>
               <tbody>

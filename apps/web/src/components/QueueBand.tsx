@@ -80,7 +80,9 @@ export function StudentBandPanel({ job, nowMs }: { job: BandJob; nowMs: number }
     return (
       <div className={`ticket turn band-ticket${cd?.urgent ? ' urgent' : ''}`} data-band="revealed">
         <p className="ticket-title">Your turn</p>
-        <div className="otp-band" data-counter-code aria-label={`Counter code ${job.otpCode.split('').join(' ')}`}>
+        <div className="otp-band" data-counter-code>
+          {/* read digit by digit; the two visual halves are hidden from screen readers */}
+          <span className="sr-only">Counter code {job.otpCode.split('').join(' ')}</span>
           <span aria-hidden>{first}</span>
           <span aria-hidden>{second}</span>
         </div>
