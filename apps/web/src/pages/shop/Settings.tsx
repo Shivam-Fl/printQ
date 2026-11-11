@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { MAX_BINDING_PRICE_PAISE, MAX_PAGE_PRICE_PAISE } from '@printq/shared';
 import { api, ApiError, getShopRole, getToken } from '../../api.js';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -105,8 +105,10 @@ function uniqueId(label: string, taken: Set<string>): string {
   return id;
 }
 
-export default function Settings() {
+/** One component, two pages: /dashboard/prices (the print menu) and /dashboard/settings (everything else). Same save. */
+export default function Settings({ section = 'shop' }: { section?: 'prices' | 'shop' }) {
   const navigate = useNavigate();
+  const pricesPage = section === 'prices';
   const [opts, setOpts] = useState<Options | null>(null);
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [autoAssign, setAutoAssign] = useState(true);
@@ -192,11 +194,10 @@ export default function Settings() {
       });
   }, [navigate, reloadTick]);
 
-  const loaded = opts !== null;
   useEffect(() => {
-    // Setup's "Check your prices" links to #prices; the section only exists after loading.
-    if (loaded && location.hash === '#prices') document.getElementById('prices')?.scrollIntoView({ block: 'start' });
-  }, [loaded, location.hash]);
+    // Old links (emails, bookmarks) to the prices part of Settings now open the Prices page.
+    if (!pricesPage && location.hash === '#prices') navigate('/dashboard/prices', { replace: true });
+  }, [pricesPage, location.hash, navigate]);
 
   const retryLoad = () => {
     setLoadError('');
@@ -213,15 +214,21 @@ export default function Settings() {
 
   if (!opts) {
     return (
-      <div className="page wide">
+      <div className="page wide shop-page settings-page">
         <ShopNav />
         <ShopTabs />
         {loadError ? (
-          <div className="error-box" role="alert">
-            <p style={{ margin: 0 }}>{loadError}</p>
-            <button className="secondary small" style={{ marginTop: 10 }} onClick={retryLoad}>Try again</button>
+          <div className="empty-state" role="alert">
+            <strong>Could not load your {pricesPage ? 'prices' : 'settings'}</strong>
+            <p>{loadError}</p>
+            <button type="button" className="secondary" style={{ marginTop: 14 }} onClick={retryLoad}>Try again</button>
           </div>
-        ) : <p className="dim">Loading…</p>}
+        ) : (
+          <div className="skeleton-list" role="status" aria-label="Loading">
+            <div className="skeleton-card" style={{ height: 120 }} />
+            <div className="skeleton-card" style={{ height: 220 }} />
+          </div>
+        )}
       </div>
     );
   }
@@ -304,12 +311,12 @@ export default function Settings() {
       }
       setOpts(toRows(draft.printOptions));
       setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
+      setTimeout(() => setSaved(false), 2500);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && (err.body as { code?: string } | undefined)?.code === 'SETTINGS_CHANGED_ELSEWHERE') {
         setConflict(true);
       }
-      setError(err instanceof Error ? err.message : 'Only the owner can change settings');
+      setError(err instanceof Error ? err.message : 'Only the owner can change settings.');
     } finally {
       setSaving(false);
     }
@@ -317,7 +324,7 @@ export default function Settings() {
 
   async function verifyMerchantUpi() {
     if (!profile?.counterUpiVpa || !profile.counterUpiPayeeName) {
-      setError('Save both the merchant UPI VPA and payee name first.');
+      setError('Save both the UPI ID and the payee name first.');
       return;
     }
     if (!confirm(`Check ${profile.counterUpiVpa} and “${profile.counterUpiPayeeName}” in the shop’s merchant app now. Continue only if they match exactly.`)) return;
@@ -331,289 +338,266 @@ export default function Settings() {
       });
       setProfile({ ...profile, ...response.counterUpi });
       setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
+      setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not record merchant UPI verification');
+      setError(err instanceof Error ? err.message : 'Could not record the UPI check.');
     } finally {
       setSaving(false);
     }
   }
 
+  const located = Boolean(profile && profile.latitude != null && profile.longitude != null);
+  const SettingsBody = pricesPage ? 'form' : 'div';
+
   return (
-    <div className="page wide">
+    <div className="page wide shop-page settings-page">
       <ShopNav />
       <ShopTabs />
-      <div className="page-heading">
-        <div><span className="eyebrow-label">Storefront &amp; operations</span><h1>Settings</h1><p>Keep the shop details, print menu and team access accurate for students and staff.</p></div>
-      </div>
+      <header className="page-heading">
+        <div>
+          <h1>{pricesPage ? 'Prices' : 'Settings'}</h1>
+          <p>{pricesPage ? 'What you charge. Students see one price: yours plus the PrintQs fee.' : 'Your shop details, location, UPI and staff.'}</p>
+        </div>
+        {profile && <a className="text-link" href={`/s/${profile.slug}`} target="_blank" rel="noreferrer">See your student page</a>}
+      </header>
 
-      {profile && (
-        <section className="settings-section">
-          <div className="settings-section-copy"><h2>Shop profile</h2><p>These details appear on your public order page and QR link.</p><a href={`/s/${profile.slug}`} target="_blank" rel="noreferrer">Preview student page ↗</a></div>
-          <div className="settings-surface stack">
-            <div className="form-row">
-              <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
-              <div className="field grow">
-                <label htmlFor="profile-campus">Campus <span className="optional-label">optional</span></label>
-                <select
-                  id="profile-campus"
-                  value={profile.campusId ?? ''}
-                  onChange={(event) => {
-                    const campus = campuses.find((item) => item.id === event.target.value) ?? null;
-                    setProfile({ ...profile, campusId: campus?.id ?? null, campus, campusName: campus?.name ?? null });
-                  }}
-                >
-                  <option value="">Not on a campus</option>
-                  {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
-                </select>
-                <span className="field-help">Only needed if your shop is on a listed campus. Every shop is visible to students nearby either way.</span>
+      {/* Prices is a real form (Enter saves). Settings is not: the map's address search is its own form and forms cannot nest. */}
+      {/* no onSubmit on the div: the address search inside it submits its own form and must not save the page */}
+      <SettingsBody className="settings-form" {...(pricesPage ? { onSubmit: (event: FormEvent) => { event.preventDefault(); void save(); } } : {})}>
+        {pricesPage ? (
+          <>
+            {markupBps ? (
+              <p className="price-fee-note">
+                Under each price you see what students pay: your price plus the {markupPercent(markupBps)} PrintQs fee. Students pay that full
+                amount to you at the counter; the fee part is added to what you owe PrintQs (see Earnings).
+              </p>
+            ) : null}
+            {colourHint && <p className="warn-note" role="status">{colourHint} <Link to="/dashboard/printers">Open printers</Link></p>}
+
+            <section className="settings-block" aria-labelledby="paper-title">
+              <div className="settings-block-head">
+                <h2 id="paper-title">Paper</h2>
+                <button type="button" className="secondary small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bw: '2.00', color: '' }] })}>Add paper</button>
               </div>
-            </div>
-            <div className="field"><label htmlFor="profile-address">Counter address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
-          </div>
-        </section>
-      )}
+              <p className="dim">Price per page. Leave colour empty if that paper is black &amp; white only.</p>
+              <div className="opt-head" aria-hidden>
+                <span>Paper</span><span>Black &amp; white</span><span>Colour</span><span></span>
+              </div>
+              {opts.papers.map((p, i) => {
+                const errors = paperErrors(p);
+                const bwPays = studentPayText(p.bw, markupBps);
+                const colourPays = studentPayText(p.color, markupBps);
+                const name = p.label || 'this paper';
+                return (
+                  <div key={i} className="opt-row priced-row paper-row">
+                    <input type="text" aria-label="Paper name" placeholder="e.g. College sheet" value={p.label} onChange={(e) => setPaper(i, { label: e.target.value })} />
+                    <div className="opt-price">
+                      <span className="opt-price-label" aria-hidden>Black &amp; white, ₹ per page</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        aria-label={`${name} black and white price per page`}
+                        aria-invalid={Boolean(errors.bw)}
+                        aria-describedby={bwPays ? `paper-${i}-bw-pays` : undefined}
+                        value={p.bw}
+                        onChange={(e) => setPaper(i, { bw: typePrice(p.bw, e.target.value) })}
+                        onBlur={() => setPaper(i, { bw: formatRupeesField(p.bw) })}
+                      />
+                      {bwPays && <span className="student-pays" id={`paper-${i}-bw-pays`}>{bwPays}</span>}
+                    </div>
+                    <div className="opt-price">
+                      <span className="opt-price-label" aria-hidden>Colour, ₹ per page</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        aria-label={`${name} colour price per page`}
+                        aria-invalid={Boolean(errors.color)}
+                        aria-describedby={colourPays ? `paper-${i}-colour-pays` : undefined}
+                        placeholder="No colour"
+                        value={p.color}
+                        onChange={(e) => setPaper(i, { color: typePrice(p.color, e.target.value) })}
+                        onBlur={() => setPaper(i, { color: formatRupeesField(p.color) })}
+                      />
+                      {colourPays && <span className="student-pays" id={`paper-${i}-colour-pays`}>{colourPays}</span>}
+                    </div>
+                    <button type="button" className="rm" aria-label={`Remove ${name}`} title="Remove" onClick={() => setOpts({ ...opts, papers: opts.papers.filter((_, idx) => idx !== i) })}>×</button>
+                    {(errors.bw || errors.color) && <p className="opt-error" role="alert">{errors.bw ?? errors.color}</p>}
+                  </div>
+                );
+              })}
+            </section>
 
-      {profile && (
-        <section className="settings-section">
-          <div className="settings-section-copy">
-            <h2>Counter queue</h2>
-            <p>Decide how many students are called to the counter at once and how long they get to arrive.</p>
-          </div>
-          <QueueSettings
-            capacity={profile.counterCapacity}
-            graceSeconds={profile.revealGraceSeconds}
-            onChange={(next) => setProfile({ ...profile, ...next })}
-          />
-        </section>
-      )}
+            <section className="settings-block" aria-labelledby="binding-title">
+              <div className="settings-block-head">
+                <h2 id="binding-title">Binding and finishing</h2>
+                <button type="button" className="secondary small" onClick={() => setOpts({ ...opts, bindings: [...opts.bindings, { id: '', label: '', price: '0.00' }] })}>Add binding</button>
+              </div>
+              <p className="dim">“None” is always offered. Price per order.</p>
+              {opts.bindings.map((b, i) => {
+                const errors = bindingErrors(b);
+                const pays = studentPayText(b.price, markupBps);
+                const name = b.label || 'this binding';
+                return (
+                  <div key={i} className="opt-row priced-row binding-row">
+                    <input type="text" aria-label="Binding name" placeholder="e.g. Spiral binding" value={b.label} onChange={(e) => setBinding(i, { label: e.target.value })} />
+                    <div className="opt-price">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        aria-label={`${name} price`}
+                        aria-invalid={Boolean(errors.price)}
+                        aria-describedby={pays ? `binding-${i}-pays` : undefined}
+                        value={b.price}
+                        onChange={(e) => setBinding(i, { price: typePrice(b.price, e.target.value) })}
+                        onBlur={() => setBinding(i, { price: formatRupeesField(b.price) })}
+                      />
+                      {pays && <span className="student-pays" id={`binding-${i}-pays`}>{pays}</span>}
+                    </div>
+                    <button type="button" className="rm" aria-label={`Remove ${name}`} title="Remove" onClick={() => setOpts({ ...opts, bindings: opts.bindings.filter((_, idx) => idx !== i) })}>×</button>
+                    {errors.price && <p className="opt-error" role="alert">{errors.price}</p>}
+                  </div>
+                );
+              })}
+            </section>
 
-      {profile && (
-        <section className="settings-section">
-          <div className="settings-section-copy">
-            <h2>Secure arrival check-in</h2>
-            <p>Set the exact shop entrance once. Students must be inside this radius before joining the live line. 200 m lets someone in the next building or across the road check in.</p>
-          </div>
-          <div className="settings-surface stack">
-            <div className="row between">
+            <section className="setting-row">
               <div>
-                <strong>{profile.latitude != null && profile.longitude != null ? 'Counter location captured' : 'Location required before opening'}</strong>
-                <p className="dim" style={{ margin: '4px 0 0' }}>PrintQs checks location once at arrival and does not store the student's coordinates.</p>
+                <strong>Double-sided printing</strong>
+                <p className="dim">Let students choose one side or both sides.</p>
               </div>
-              <span className={`stamp ${profile.latitude != null && profile.longitude != null ? 'green' : 'yellow'}`}>
-                {profile.latitude != null && profile.longitude != null ? 'active' : 'required'}
-              </span>
-            </div>
-            <div className="form-row">
-              <div className="field grow">
-                <label htmlFor="check-in-radius">Allowed distance</label>
+              <button type="button" role="switch" aria-checked={opts.duplexEnabled} className={`toggle-button ${opts.duplexEnabled ? 'on' : ''}`} onClick={() => setOpts({ ...opts, duplexEnabled: !opts.duplexEnabled })}>
+                <span aria-hidden /> {opts.duplexEnabled ? 'On' : 'Off'}
+              </button>
+            </section>
+            <p className="dim settings-footnote">Students only see a paper or binding when an online printer can do it (set on the Printers page).</p>
+          </>
+        ) : profile && (
+          <>
+            <section className="settings-block" aria-labelledby="details-title">
+              <h2 id="details-title">Shop details</h2>
+              <div className="form-row">
+                <div className="field grow"><label htmlFor="profile-name">Shop name</label><input id="profile-name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /></div>
+                <div className="field grow">
+                  <label htmlFor="profile-campus">Campus <span className="optional-label">optional</span></label>
+                  <select
+                    id="profile-campus"
+                    value={profile.campusId ?? ''}
+                    onChange={(event) => {
+                      const campus = campuses.find((item) => item.id === event.target.value) ?? null;
+                      setProfile({ ...profile, campusId: campus?.id ?? null, campus, campusName: campus?.name ?? null });
+                    }}
+                  >
+                    <option value="">Not on a campus</option>
+                    {campuses.map((campus) => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field"><label htmlFor="profile-address">Shop address</label><input id="profile-address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /></div>
+            </section>
+
+            <section className="settings-block" aria-labelledby="location-title">
+              <div className="settings-block-head">
+                <h2 id="location-title">Location</h2>
+                <span className={`badge ${located ? 'ok' : 'warn'}`}>{located ? 'Pin saved' : 'Pin needed'}</span>
+              </div>
+              <p className="dim">Students can join your line only when they are near this pin. PrintQs checks their location once and does not store it.</p>
+              <ShopLocationEditor
+                latitude={profile.latitude}
+                longitude={profile.longitude}
+                address={profile.address}
+                onPin={setPin}
+                onAddress={setAddress}
+                hideAddress
+              />
+              {locationHint && <p className="warn-note" role="status">{locationHint}</p>}
+            </section>
+
+            <section className="settings-block" id="payments" aria-labelledby="upi-title">
+              <div className="settings-block-head">
+                <h2 id="upi-title">UPI at the counter</h2>
+                <span className={`badge ${profile.counterUpiVerifiedAt ? 'ok' : 'warn'}`}>
+                  {profile.counterUpiVerifiedAt ? `Checked ${new Date(profile.counterUpiVerifiedAt).toLocaleDateString()}` : 'Not checked yet'}
+                </span>
+              </div>
+              <p className="dim">Needed for the “UPI received” button at the counter. A payment screen or screenshot is never proof: check your merchant app.</p>
+              <div className="form-row">
+                <div className="field grow"><label htmlFor="merchant-upi-vpa">Shop UPI ID</label><input id="merchant-upi-vpa" placeholder="shop@bank" value={profile.counterUpiVpa ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiVpa: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
+                <div className="field grow"><label htmlFor="merchant-upi-payee">Name shown in your UPI app</label><input id="merchant-upi-payee" placeholder="Shop name as shown to payers" value={profile.counterUpiPayeeName ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiPayeeName: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
+              </div>
+              {!profile.counterUpiVerifiedAt && (
+                <div className="row">
+                  <button type="button" className="secondary small" disabled={saving || !profile.counterUpiVpa || !profile.counterUpiPayeeName} onClick={() => void verifyMerchantUpi()}>I checked it in my UPI app</button>
+                  <span className="dim">Save first, then confirm the ID and name match your merchant app.</span>
+                </div>
+              )}
+            </section>
+
+            <details className="disclosure settings-advanced">
+              <summary>Advanced</summary>
+              <p className="dim">Good defaults are already set. Change these only if you need to.</p>
+              <div className="settings-block">
+                <h3>Students called to the counter</h3>
+                <p className="dim">How many students see their code at once, and how long they get to reach the counter before they lose their place.</p>
+                <QueueSettings
+                  capacity={profile.counterCapacity}
+                  graceSeconds={profile.revealGraceSeconds}
+                  onChange={(next) => setProfile({ ...profile, ...next })}
+                />
+              </div>
+              <div className="settings-block">
+                <label htmlFor="check-in-radius">How close students must be to join the line</label>
                 <select
                   id="check-in-radius"
                   value={profile.checkInRadiusM}
                   onChange={(event) => setProfile({ ...profile, checkInRadiusM: Number(event.target.value) })}
                 >
                   {![20, 50, 100, 200].includes(profile.checkInRadiusM) && (
-                    <option value={profile.checkInRadiusM}>{profile.checkInRadiusM} m · current setting</option>
+                    <option value={profile.checkInRadiusM}>{profile.checkInRadiusM} m (current)</option>
                   )}
-                  <option value={20}>20 m · strict, best near an entrance</option>
-                  <option value={50}>50 m · only at the shop</option>
-                  <option value={100}>100 m · indoor GPS fallback</option>
-                  <option value={200}>200 m · recommended, next building or across the road</option>
+                  <option value={20}>20 m: strict, right at the entrance</option>
+                  <option value={50}>50 m: inside the shop</option>
+                  <option value={100}>100 m: weak phone location indoors</option>
+                  <option value={200}>200 m: recommended, next building or across the road</option>
                 </select>
-                <span className="field-help">Smaller zones reduce remote check-ins but need a more accurate phone location.</span>
+                <span className="field-help">A smaller distance stops check-ins from far away but needs a more accurate phone location.</span>
               </div>
-            </div>
-            <ShopLocationEditor
-              latitude={profile.latitude}
-              longitude={profile.longitude}
-              address={profile.address}
-              onPin={setPin}
-              onAddress={setAddress}
-              hideAddress
-            />
-            {locationHint && <p className="warn-note" role="status">{locationHint}</p>}
-            <details className="location-coordinates">
-              <summary>Enter coordinates manually</summary>
-              <p className="dim">Optional fallback: paste a latitude and longitude from Google Maps.</p>
-              <div className="form-row">
-                <div className="field grow">
-                  <label htmlFor="shop-latitude">Latitude</label>
-                  <input
-                    id="shop-latitude"
-                    type="number"
-                    min={-90}
-                    max={90}
-                    step="any"
-                    placeholder="e.g. 28.613939"
-                    value={profile.latitude ?? ''}
-                    onChange={(event) => setProfile({ ...profile, latitude: event.target.value === '' ? null : Number(event.target.value) })}
-                  />
-                </div>
-                <div className="field grow">
-                  <label htmlFor="shop-longitude">Longitude</label>
-                  <input
-                    id="shop-longitude"
-                    type="number"
-                    min={-180}
-                    max={180}
-                    step="any"
-                    placeholder="e.g. 77.209021"
-                    value={profile.longitude ?? ''}
-                    onChange={(event) => setProfile({ ...profile, longitude: event.target.value === '' ? null : Number(event.target.value) })}
-                  />
+              <div className="settings-block">
+                <h3>Pin by coordinates</h3>
+                <p className="dim">Optional: paste a latitude and longitude, for example from Google Maps.</p>
+                <div className="form-row">
+                  <div className="field grow">
+                    <label htmlFor="shop-latitude">Latitude</label>
+                    <input id="shop-latitude" type="number" min={-90} max={90} step="any" placeholder="28.613939" value={profile.latitude ?? ''} onChange={(event) => setProfile({ ...profile, latitude: event.target.value === '' ? null : Number(event.target.value) })} />
+                  </div>
+                  <div className="field grow">
+                    <label htmlFor="shop-longitude">Longitude</label>
+                    <input id="shop-longitude" type="number" min={-180} max={180} step="any" placeholder="77.209021" value={profile.longitude ?? ''} onChange={(event) => setProfile({ ...profile, longitude: event.target.value === '' ? null : Number(event.target.value) })} />
+                  </div>
                 </div>
               </div>
             </details>
+          </>
+        )}
+
+        {error && <div className="error-box" role="alert">{error}</div>}
+        {conflict && (
+          <div className="notice warn">
+            <div>
+              <strong>These settings changed on another screen</strong>
+              <p>Reload to see the latest. Your unsaved edits on this page will be replaced.</p>
+            </div>
+            <button type="button" className="secondary" onClick={() => setReloadTick((n) => n + 1)}>Reload latest</button>
           </div>
-        </section>
-      )}
+        )}
 
-      <div className="automation-panel">
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <strong>Auto-assign printers</strong>
-          <p className="dim" style={{ margin: '4px 0 0' }}>On: the counter code sends each job to the best printer automatically. Off: you pick from a dropdown.</p>
+        <div className="settings-savebar">
+          <button type={pricesPage ? 'submit' : 'button'} onClick={pricesPage ? undefined : () => void save()} disabled={saving || priceErrorsPresent || !profile?.name.trim() || !profile.address.trim()}>
+            {saving ? 'Saving…' : pricesPage ? 'Save prices' : 'Save changes'}
+          </button>
+          <span className="settings-saved" role="status">{saved ? 'Saved' : ''}</span>
         </div>
-        <button className={autoAssign ? '' : 'ghost'} onClick={() => setAutoAssign((v) => !v)}>{autoAssign ? 'ON' : 'OFF'}</button>
-      </div>
-
-      {profile && (
-        <section className="settings-section">
-          <div className="settings-section-copy">
-            <h2>Counter merchant UPI</h2>
-            <p>Students may pay the shop directly at the counter. A UPI screen, screenshot or typed reference never proves receipt—staff must check the merchant app first.</p>
-          </div>
-          <div className="settings-surface stack">
-            <div className="form-row">
-              <div className="field grow"><label htmlFor="merchant-upi-vpa">Merchant UPI VPA</label><input id="merchant-upi-vpa" placeholder="shop@bank" value={profile.counterUpiVpa ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiVpa: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
-              <div className="field grow"><label htmlFor="merchant-upi-payee">Payee name in merchant app</label><input id="merchant-upi-payee" placeholder="Shop legal/display name" value={profile.counterUpiPayeeName ?? ''} onChange={(event) => setProfile({ ...profile, counterUpiPayeeName: event.target.value || null, counterUpiVerifiedAt: null })} /></div>
-            </div>
-            <div className="row between">
-              <span className={`stamp ${profile.counterUpiVerifiedAt ? 'green' : 'yellow'}`}>{profile.counterUpiVerifiedAt ? `verified ${new Date(profile.counterUpiVerifiedAt).toLocaleDateString()}` : 'verification required'}</span>
-              <button className="ghost small" disabled={saving || !profile.counterUpiVpa || !profile.counterUpiPayeeName} onClick={() => void verifyMerchantUpi()}>I checked the merchant app</button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <div className="settings-surface" id="prices">
-        <div className="row between">
-          <h2 style={{ margin: 0 }}>Paper types &amp; price</h2>
-          <button className="small" onClick={() => setOpts({ ...opts, papers: [...opts.papers, { id: '', label: '', bw: '2.00', color: '' }] })}>+ Add paper</button>
-        </div>
-        <p className="dim" style={{ marginTop: 4 }}>Leave the colour price blank if that paper is black &amp; white only.</p>
-        {markupBps ? (
-          <p className="price-fee-note">
-            Students see one price: your price plus the {markupPercent(markupBps)} PrintQs fee, shown as “Students pay” under each box.
-            They pay that full amount to you at the counter, and the fee part is added to your PrintQs bill on the Earnings page.
-          </p>
-        ) : null}
-        {colourHint && <p className="warn-note" role="status" style={{ marginTop: 10 }}>{colourHint} <Link to="/dashboard/printers">Open Printers</Link></p>}
-        <div className="opt-head" aria-hidden>
-          <span>Name</span><span>₹ B/W / page</span><span>₹ Colour / page</span><span></span>
-        </div>
-        {opts.papers.map((p, i) => {
-          const errors = paperErrors(p);
-          const bwPays = studentPayText(p.bw, markupBps);
-          const colourPays = studentPayText(p.color, markupBps);
-          return (
-            <div key={i} className="opt-row priced-row paper-row">
-              <input type="text" aria-label="Paper name" placeholder="e.g. College sheet" value={p.label} onChange={(e) => setPaper(i, { label: e.target.value })} />
-              <div className="opt-price">
-                <span className="opt-price-label" aria-hidden>₹ B/W / page</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  aria-label={`B/W price per page for ${p.label || 'paper'}`}
-                  aria-invalid={Boolean(errors.bw)}
-                  aria-describedby={bwPays ? `paper-${i}-bw-pays` : undefined}
-                  value={p.bw}
-                  onChange={(e) => setPaper(i, { bw: typePrice(p.bw, e.target.value) })}
-                  onBlur={() => setPaper(i, { bw: formatRupeesField(p.bw) })}
-                />
-                {bwPays && <span className="student-pays" id={`paper-${i}-bw-pays`}>{bwPays}</span>}
-              </div>
-              <div className="opt-price">
-                <span className="opt-price-label" aria-hidden>₹ Colour / page</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  aria-label={`Colour price per page for ${p.label || 'paper'}`}
-                  aria-invalid={Boolean(errors.color)}
-                  aria-describedby={colourPays ? `paper-${i}-colour-pays` : undefined}
-                  placeholder="—"
-                  value={p.color}
-                  onChange={(e) => setPaper(i, { color: typePrice(p.color, e.target.value) })}
-                  onBlur={() => setPaper(i, { color: formatRupeesField(p.color) })}
-                />
-                {colourPays && <span className="student-pays" id={`paper-${i}-colour-pays`}>{colourPays}</span>}
-              </div>
-              <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, papers: opts.papers.filter((_, idx) => idx !== i) })}>×</button>
-              {(errors.bw || errors.color) && <p className="opt-error" role="alert">{errors.bw ?? errors.color}</p>}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="settings-surface">
-        <div className="row between">
-          <h2 style={{ margin: 0 }}>Binding &amp; finishing</h2>
-          <button className="small" onClick={() => setOpts({ ...opts, bindings: [...opts.bindings, { id: '', label: '', price: '0.00' }] })}>+ Add binding</button>
-        </div>
-        <p className="dim" style={{ marginTop: 4 }}>"None" is always offered. Add extras like stapling or spiral.</p>
-        {opts.bindings.map((b, i) => {
-          const errors = bindingErrors(b);
-          const pays = studentPayText(b.price, markupBps);
-          return (
-            <div key={i} className="opt-row priced-row" style={{ gridTemplateColumns: '1.4fr 1fr auto' }}>
-              <input type="text" aria-label="Binding name" placeholder="e.g. Spiral binding" value={b.label} onChange={(e) => setBinding(i, { label: e.target.value })} />
-              <div className="opt-price">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  aria-label={`Price for ${b.label || 'binding'}`}
-                  aria-invalid={Boolean(errors.price)}
-                  aria-describedby={pays ? `binding-${i}-pays` : undefined}
-                  value={b.price}
-                  onChange={(e) => setBinding(i, { price: typePrice(b.price, e.target.value) })}
-                  onBlur={() => setBinding(i, { price: formatRupeesField(b.price) })}
-                />
-                {pays && <span className="student-pays" id={`binding-${i}-pays`}>{pays}</span>}
-              </div>
-              <button className="rm" title="Remove" onClick={() => setOpts({ ...opts, bindings: opts.bindings.filter((_, idx) => idx !== i) })}>×</button>
-              {errors.price && <p className="opt-error" role="alert">{errors.price}</p>}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="settings-surface row between">
-        <div>
-          <strong>Offer double-sided printing</strong>
-          <p className="dim" style={{ margin: '4px 0 0' }}>Let students choose one-sided or both sides.</p>
-        </div>
-        <button className={opts.duplexEnabled ? '' : 'ghost'} onClick={() => setOpts({ ...opts, duplexEnabled: !opts.duplexEnabled })}>{opts.duplexEnabled ? 'ON' : 'OFF'}</button>
-      </div>
-
-      <div className="row" style={{ marginTop: 8 }}>
-        <button disabled={saving || priceErrorsPresent || !profile?.name.trim() || !profile.address.trim()} onClick={save}>{saving ? 'Saving…' : 'Save all changes'}</button>
-        {saved && <span className="stamp green">saved ✓</span>}
-      </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {loadError && (
-        <div className="row" style={{ marginTop: 6 }}>
-          <span className="error" role="alert">{loadError}</span>
-          <button className="secondary small" onClick={retryLoad}>Try again</button>
-        </div>
-      )}
-      {conflict && (
-        <div className="row" style={{ marginTop: 6 }}>
-          <button className="secondary small" onClick={() => setReloadTick((n) => n + 1)}>Reload latest settings</button>
-          <span className="dim">Your unsaved edits on this page will be replaced.</span>
-        </div>
-      )}
-      <p className="dim" style={{ marginTop: 8 }}>Note: a paper/binding only appears to students if a printer that's marked online has it loaded (set that on the Printers page).</p>
-
-      {getShopRole() === 'owner' && <StaffSection />}
+      </SettingsBody>
+      {!pricesPage && profile && getShopRole() === 'owner' && <StaffSection />}
     </div>
   );
 }
@@ -653,78 +637,53 @@ function StaffSection() {
       setShowForm(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add staff member');
+      setError(err instanceof Error ? err.message : 'Could not add this staff member.');
     }
   }
 
   async function removeStaff(id: string) {
-    if (!confirm('Remove this staff member?')) return;
+    if (!confirm('Remove this staff member? They can no longer sign in.')) return;
     try {
       await api(`/api/shop/staff/${id}`, { method: 'DELETE', role: 'shop' });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove staff member');
+      setError(err instanceof Error ? err.message : 'Could not remove this staff member.');
     }
   }
 
   return (
-    <div className="card">
-      <div className="row between">
-        <h2 style={{ margin: 0 }}>Staff</h2>
-        <button className="small" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Close' : '+ Add staff'}
+    <section className="settings-block" aria-labelledby="staff-title">
+      <div className="settings-block-head">
+        <h2 id="staff-title">Staff</h2>
+        <button type="button" className="secondary small" onClick={() => setShowForm((v) => !v)} aria-expanded={showForm}>
+          {showForm ? 'Close' : 'Add staff'}
         </button>
       </div>
-      <p className="dim" style={{ marginTop: 4 }}>
-        Counter staff sign in with a short PIN instead of a password — quicker on a shared PC.
-      </p>
+      <p className="dim">Counter staff sign in with a short PIN, so the shared counter PC is quick to use. They cannot change prices or settings.</p>
 
       {showForm && (
-        <div className="stack" style={{ marginTop: 8 }}>
-          <input
-            type="text"
-            placeholder="Name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-          />
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={6}
-            placeholder="4-6 digit PIN"
-            value={form.pin}
-            onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
-          />
-          <button
-            disabled={!form.name || !form.email || form.pin.length < 4}
-            onClick={addStaff}
-          >
-            Add staff member
-          </button>
+        <div className="staff-form" role="group" aria-label="Add a staff member">
+          <div className="field"><label htmlFor="staff-name">Name</label><input id="staff-name" type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+          <div className="field"><label htmlFor="staff-email">Email</label><input id="staff-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+          <div className="field"><label htmlFor="staff-pin">PIN (4 to 6 digits)</label><input id="staff-pin" type="text" inputMode="numeric" maxLength={6} value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><button type="button" disabled={!form.name || !form.email || form.pin.length < 4} onClick={() => void addStaff()}>Add staff member</button></div>
         </div>
       )}
 
-      <div style={{ marginTop: 10 }}>
+      <ul className="staff-list">
         {staff.map((s) => (
-          <div key={s.id} className="row between" style={{ padding: '6px 0', borderTop: '1px solid var(--rule)' }}>
+          <li key={s.id}>
             <div>
-              <strong>{s.name}</strong>{' '}
-              <span className="dim">{s.email}</span>{' '}
-              {s.role === 'owner' && <span className="stamp blue">owner</span>}
+              <strong>{s.name}</strong>
+              <span className="dim">{s.email}{s.role === 'owner' ? ' · owner' : ''}</span>
             </div>
             {s.role === 'staff' && (
-              <button className="ghost small" onClick={() => removeStaff(s.id)}>Remove</button>
+              <button type="button" className="quiet danger-text" onClick={() => void removeStaff(s.id)}>Remove</button>
             )}
-          </div>
+          </li>
         ))}
-      </div>
-      {error && <p className="error">{error}</p>}
-    </div>
+      </ul>
+      {error && <p className="field-error" role="alert">{error}</p>}
+    </section>
   );
 }

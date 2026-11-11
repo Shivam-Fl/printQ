@@ -25,9 +25,10 @@ describe('shop navigation: four destinations at most', () => {
   it('staff never see Earnings', () => {
     expect(navItems('staff', true).map((i) => i.label)).toEqual(['Counter', 'History', 'Shop']);
   });
-  it('Shop opens the setup checklist until the shop has gone live', () => {
+  it('Shop opens the setup checklist until the shop has gone live, then its first tab', () => {
     expect(navItems('owner', false).find((i) => i.key === 'shop')?.to).toBe('/dashboard/setup');
-    expect(navItems('owner', true).find((i) => i.key === 'shop')?.to).toBe('/dashboard/printers');
+    expect(navItems('owner', true).find((i) => i.key === 'shop')?.to).toBe('/dashboard/prices');
+    expect(navItems('staff', true).find((i) => i.key === 'shop')?.to).toBe('/dashboard/printers');
   });
   it('marks the right item active, including Shop sub-pages and the old Insights link', () => {
     const items = navItems('owner', true);

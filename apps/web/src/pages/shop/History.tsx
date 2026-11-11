@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, downloadFile, getToken, rupees } from '../../api.js';
-import { specsText, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { ApiError, api, downloadFile, getToken, rupees } from '../../api.js';
+import { stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import ShopNav from '../../components/ShopNav.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
+import { specsSummary } from './counterFlow.js';
 
 interface Row {
   id: string;
@@ -18,74 +19,105 @@ interface Row {
   file: string;
 }
 
+const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+
+/** Matches a student name, the last digits of a phone, or a file name. */
+export function matchesHistory(row: Pick<Row, 'student' | 'file'>, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [row.student.name ?? '', row.student.phoneMasked, row.file].some((text) => text.toLowerCase().includes(q));
+}
+
 export default function History() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Row[] | null>(null);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  const load = useCallback(() => {
+    setError('');
+    api<{ jobs: Row[] }>('/api/shop/history', { role: 'shop' })
+      .then((r) => setJobs(r.jobs))
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) navigate(shopLoginPath());
+        else setError(err instanceof Error ? err.message : 'Could not load the history. Try again.');
+      });
+  }, [navigate]);
 
   useEffect(() => {
     if (!getToken('shop')) {
       navigate(shopLoginPath());
       return;
     }
-    api<{ jobs: Row[] }>('/api/shop/history', { role: 'shop' })
-      .then((r) => setJobs(r.jobs))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
-  }, [navigate]);
+    load();
+  }, [navigate, load]);
+
+  const shown = useMemo(() => (jobs ?? []).filter((j) => matchesHistory(j, query)), [jobs, query]);
 
   return (
-    <div className="page wide">
+    <div className="page wide shop-page history-page">
       <ShopNav />
-      <div className="row between">
-        <h1>History</h1>
+      <div className="page-heading">
+        <div>
+          <h1>History</h1>
+          <p>Every finished order: who, what, which printer and how much.</p>
+        </div>
         <button
-          className="ghost small"
-          onClick={() => downloadFile('/api/shop/history.csv', 'shop', 'printq-history.csv').catch(() => setError('Could not download CSV'))}
+          type="button"
+          className="secondary small"
+          onClick={() => downloadFile('/api/shop/history.csv', 'shop', 'printqs-history.csv').catch(() => setError('Could not download the file. Try again.'))}
         >
           Download CSV
         </button>
       </div>
-      <p className="dim">Every finished job and which printer it went to.</p>
-      {error && <p className="error">{error}</p>}
-      <div className="card" style={{ overflowX: 'auto', padding: 6 }}>
-        <table>
-          <thead>
-            <tr><th>When</th><th>Student</th><th>File</th><th>Specs</th><th>Printer</th><th>Status</th><th>Amount</th><th></th></tr>
-          </thead>
-          <tbody>
-            {jobs && jobs.length === 0 && <tr><td colSpan={8} className="dim">No finished jobs yet</td></tr>}
-            {jobs?.map((j) => {
-              const m = statusMeta(j.status);
-              return (
-                <tr key={j.id}>
-                  <td className="dim mono">{new Date(j.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}</td>
-                  <td>{j.student.name ?? j.student.phoneMasked}</td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.file}</td>
-                  <td>{specsText(j.specs, j.pagesPerCopy)}</td>
-                  <td>{j.printer ?? '—'}</td>
-                  <td>
-                    <span className={`stamp ${m.tone}`}>{m.label}</span>
-                    {j.paymentStatus === 'refunded' && <span className="stamp green" style={{ marginLeft: 6 }}>refunded</span>}
-                  </td>
-                  <td className="mono">{rupees(j.totalPaise)}</td>
-                  <td>
-                    <button
-                      className="ghost small"
-                      onClick={() =>
-                        downloadFile(`/api/shop/jobs/${j.id}/receipt`, 'shop', `printq-receipt-${j.id.slice(0, 8)}.pdf`).catch(
-                          () => setError('Could not download receipt'),
-                        )
-                      }
-                    >
-                      Receipt
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+
+      <div className="search-field history-search">
+        <span aria-hidden>⌕</span>
+        <input type="search" aria-label="Find a student, phone or file" placeholder="Find a student, phone or file" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
+
+      {error && (
+        <div className="notice danger" role="alert">
+          <div><strong>{error}</strong></div>
+          <button type="button" className="secondary" onClick={load}>Try again</button>
+        </div>
+      )}
+
+      {!jobs && !error ? (
+        <div className="skeleton-list" role="status" aria-label="Loading history"><div className="skeleton-card" /><div className="skeleton-card" /></div>
+      ) : jobs && jobs.length === 0 ? (
+        <div className="empty-state"><strong>No finished orders yet</strong><p>Orders show up here once they are collected or cancelled.</p></div>
+      ) : jobs && shown.length === 0 ? (
+        <p className="dim">Nothing matches “{query}”.</p>
+      ) : (
+        <ul className="history-list">
+          {shown.map((j) => {
+            const m = statusMeta(j.status);
+            return (
+              <li key={j.id} className="history-row">
+                <span className="history-when">{when(j.at)}</span>
+                <div className="history-main">
+                  <strong>{j.student.name ?? j.student.phoneMasked}</strong>
+                  <span className="history-file" title={j.file}>{j.file}</span>
+                  <span className="history-specs">{specsSummary(j)}{j.printer ? ` · ${j.printer}` : ''}</span>
+                </div>
+                <div className="history-side">
+                  <span className={stampClass(m.tone)}>{m.label}</span>
+                  {j.paymentStatus === 'refunded' && <span className="stamp green">refunded</span>}
+                  <span className="num history-amount">{rupees(j.totalPaise)}</span>
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => downloadFile(`/api/shop/jobs/${j.id}/receipt`, 'shop', `printqs-receipt-${j.id.slice(0, 8)}.pdf`).catch(() => setError('Could not download the receipt. Try again.'))}
+                  >
+                    Receipt
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

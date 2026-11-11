@@ -34,9 +34,9 @@ export interface ShopNavItem {
 }
 
 /**
- * Four destinations at most. Staff never see Earnings; "Shop" opens the setup
- * checklist until the shop has gone live, then the printers (the page staff need
- * when something breaks).
+ * Four destinations at most. Staff never see Earnings. "Shop" opens its first
+ * tab: the setup checklist until the shop has gone live, then Prices for owners
+ * and Printers for staff.
  */
 export function navItems(role: 'owner' | 'staff' | null, live: boolean): ShopNavItem[] {
   const items: ShopNavItem[] = [
@@ -44,7 +44,9 @@ export function navItems(role: 'owner' | 'staff' | null, live: boolean): ShopNav
     { key: 'history', to: '/dashboard/history', label: 'History', match: ['/dashboard/history'] },
   ];
   if (role === 'owner') items.push({ key: 'earnings', to: '/dashboard/earnings', label: 'Earnings', match: EARNINGS_PATHS });
-  items.push({ key: 'shop', to: role === 'owner' && !live ? '/dashboard/setup' : '/dashboard/printers', label: 'Shop', match: SHOP_AREA_PATHS });
+  // Shop opens its first tab: Setup until live, then Prices for owners; staff only manage printers
+  const shopHome = role === 'owner' ? (live ? '/dashboard/prices' : '/dashboard/setup') : '/dashboard/printers';
+  items.push({ key: 'shop', to: shopHome, label: 'Shop', match: SHOP_AREA_PATHS });
   return items;
 }
 

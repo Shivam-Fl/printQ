@@ -105,6 +105,7 @@ const R = [
   ['38-computers', '/dashboard/agents', ['shop', A.token, 'owner'], KEY],
   ['38b-computers-new', '/dashboard/agents', ['shop', state.shopB.token, 'owner'], KEY],
   ['39-settings', '/dashboard/settings', ['shop', A.token, 'owner'], ['m390', 'd1366']],
+  ['39b-prices', '/dashboard/prices', ['shop', A.token, 'owner'], ['m390', 'd1366']],
   ['40-earnings', '/dashboard/earnings', ['shop', A.token, 'owner'], KEY],
   ['41-insights', '/dashboard/insights', ['shop', A.token, 'owner'], KEY],
   ['42-history', '/dashboard/history', ['shop', A.token, 'owner'], KEY],

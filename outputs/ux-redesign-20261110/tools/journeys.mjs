@@ -267,8 +267,9 @@ tasks.changePrice = async (viewport = { width: 1366, height: 768 }, label = 'g-c
     await L.click(page.getByRole('button', { name: 'Save all changes' }), 'Save all changes');
   } else {
     await L.click(page.getByRole('link', { name: 'Shop', exact: true }), 'Shop');
-    await L.click(page.getByRole('link', { name: 'Prices', exact: true }), 'Prices');
-    const a4bw = page.getByLabel(/A4.*black/i).first();
+    if (!page.url().includes('/dashboard/prices')) await L.click(page.getByRole('link', { name: 'Prices', exact: true }), 'Prices');
+    await page.waitForURL(/dashboard\/prices/);
+    const a4bw = page.getByLabel(/A4 black and white/i).first();
     await L.fill(a4bw, '2.50', 'A4 B/W price');
     await L.click(page.getByRole('button', { name: /Save prices/ }), 'Save prices');
   }

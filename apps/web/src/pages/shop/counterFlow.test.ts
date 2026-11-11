@@ -140,3 +140,15 @@ describe('release answers', () => {
     expect(counterErrorText({ status: 0, message: 'Can’t reach PrintQs. Check your internet and try again.' })).toMatch(/Can’t reach/);
   });
 });
+
+describe('history search', () => {
+  it('finds a student by name, phone digits or file', async () => {
+    const { matchesHistory } = await import('./History.js');
+    const row = { student: { name: 'Priya Nair', phoneMasked: '••••• 00002' }, file: 'Physics-lab-record.pdf' };
+    expect(matchesHistory(row, 'priya')).toBe(true);
+    expect(matchesHistory(row, '0002')).toBe(true);
+    expect(matchesHistory(row, 'physics')).toBe(true);
+    expect(matchesHistory(row, 'rohan')).toBe(false);
+    expect(matchesHistory(row, '  ')).toBe(true);
+  });
+});

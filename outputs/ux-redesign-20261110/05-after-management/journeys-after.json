@@ -1,0 +1,41 @@
+{
+  "g-change-price": {
+    "task": "g-change-price",
+    "clicksOrTaps": 3,
+    "keystrokes": 5,
+    "fields": 1,
+    "scrolls": 0,
+    "dialogs": 0,
+    "klmSeconds": 11.6,
+    "scriptedWallSeconds": 0.7,
+    "ops": [
+      {
+        "op": "click",
+        "label": "Shop",
+        "fromKeyboard": false
+      },
+      {
+        "op": "click",
+        "label": "focus A4 B/W price",
+        "fromKeyboard": false
+      },
+      {
+        "op": "key",
+        "key": "select-all",
+        "fromMouse": true
+      },
+      {
+        "op": "type",
+        "label": "A4 B/W price",
+        "chars": 4,
+        "fromMouse": false
+      },
+      {
+        "op": "click",
+        "label": "Save prices",
+        "fromKeyboard": true
+      }
+    ],
+    "viewport": "1366x768"
+  }
+}
