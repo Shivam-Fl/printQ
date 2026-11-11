@@ -46,6 +46,14 @@ describe('job state machine', () => {
     expect(transition('printing', 'PRINT_FAILED')).toBe('otp_verified');
   });
 
+  it('lets staff confirm a print the printer accepted after it timed out (the API limits this to spool_timeout)', () => {
+    expect(transition('otp_verified', 'PRINT_COMPLETED')).toBe('ready_for_pickup');
+    expect(transition('otp_verified', 'FINISHING_REQUIRED')).toBe('finishing');
+    // still no way to skip payment or hand over without a confirmed print
+    expect(() => transition('otp_verified', 'HANDED_OVER')).toThrow(InvalidTransitionError);
+    expect(() => transition('queued', 'PRINT_COMPLETED')).toThrow(InvalidTransitionError);
+  });
+
   it('waits for staff to complete manual finishing before pickup', () => {
     expect(transition('printing', 'FINISHING_REQUIRED')).toBe('finishing');
     expect(transition('finishing', 'FINISHING_COMPLETED')).toBe('ready_for_pickup');

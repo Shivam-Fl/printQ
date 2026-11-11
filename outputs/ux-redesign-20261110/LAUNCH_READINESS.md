@@ -16,7 +16,7 @@ Evidence labels used below:
 | Launch | Verdict | In one line |
 |---|---|---|
 | **Small pilot** (1-2 shops you know, one campus, you at the counter on day one) | **GO WITH CONDITIONS** | The core loop works end to end and the counter is fast and safe; four owner actions must happen first. |
-| **Wider campus launch** | **NO-GO for now** | No real-printer evidence yet, the desktop app cannot update itself and is unsigned, student sign-out does not end the session, and (per your notes) the database has no backups. |
+| **Wider campus launch** | **NO-GO for now** | No real-printer evidence yet, the desktop app cannot update itself and is unsigned, and (per your notes) the database has no backups. |
 
 **Conditions for the pilot** (all owner actions; none needs new code):
 1. **Unpublish the two test shops in production.** "Tenx" (address "Shanti Avenue, Charnipada, Bhiwandi") is
@@ -67,7 +67,7 @@ came from the development console provider, not SMS.
 | Money handling | 85 | verified by test, read in code only | Staff confirm cash/UPI explicitly for the server-computed amount; UPI hidden until the shop's UPI ID is verified. Platform fee collection is off by default (`FEE_PAYMENT_PROVIDER=disabled`). |
 | Printing on real hardware | 40 | not verifiable here | All printing in this session went through a stand-in PC. A real-printer order in production is still missing. |
 | Desktop app distribution | 35 | read in code only | Unsigned NSIS installer, no auto-update: each fix means a manual reinstall on every counter PC. |
-| Sessions | 65 | read in code only | Shop sessions are 12 h and revocable; student tokens last 30 days and sign-out only clears the phone. |
+| Sessions | 85 | verified by test | Shop sessions are 12 h and revocable. Student sign-out now ends every session of that student on the next request (L6, fixed); student tokens still last 30 days otherwise. |
 | Hosting and operations | 60 | verified by request; not verifiable here | API answered in 0.17-0.50 s (Singapore). Database plan, backups and Redis persistence not visible from here. |
 | Production data hygiene | 40 | verified by request | Two test shops public, one open. |
 | Automated tests | 85 | verified by test | `typecheck` green. `test:launch` (2026-11-11): build ✓; web 334/334, shared 109/109, agent 30/30; API 279 passed, 1 timeout (L15), 158 database tests skipped (no test database configured here); simulator end-to-end 102/102 assertions, run separately because the chain stops at the timeout. |
@@ -80,7 +80,7 @@ came from the development console provider, not SMS.
 | Counter PCs on desktop v0.1.0, no auto-update | The repo's app is **v0.1.1**; there is **no updater** in the code (no `electron-updater` or update check). Which version each PC runs is unknown here. | read in code only; not verifiable here | Founder (reinstall); engineering (auto-update) |
 | Unsigned installer / SmartScreen | **Still unsigned**: `electron-builder` has no certificate or signing settings. | read in code only | Founder (buy a code-signing certificate, or use a signing service) |
 | QA shops and users in the database | The public list shows no other test shops. Unpublished QA shops and QA users can't be seen from here. | verified by request; not verifiable here | Founder (database purge) |
-| Student sign-out does not revoke the 30-day token | **Still true.** `Student` has no `sessionVersion` (shop and admin users do); sign-out clears the token on the phone only; the token lives 30 days. | read in code only | Engineering (API: add `Student.sessionVersion`, check it in `requireStudent`, bump it on sign-out) |
+| Student sign-out does not revoke the 30-day token | **Fixed after this report (L6):** `Student.sessionVersion`, checked by `requireStudent` and the socket handshake; `POST /api/auth/student/logout` bumps it and the app calls it on sign-out. | verified by test (database tests) | Engineering — done |
 | Live Razorpay / fee collection | Students pay at the shop (cash or UPI to the shop). Platform fee collection defaults to `disabled`; the production value is not visible here. | read in code only; not verifiable here | Founder (live key secret, webhook, then switch on) |
 | No real-printer end-to-end | **Still missing** as far as this session can see. | not verifiable here | Founder, with the first pilot shop |
 | Hosting region / cold starts | The API is in Singapore since 2026-11-07 (your notes). Health check today: 0.50 s first, then 0.31 s and 0.17 s; no cold start seen. If the API runs on Render's free plan it sleeps after 15 minutes without traffic, and the first request after that can take up to about a minute. | verified by request; not verifiable here (plan) | Founder |
@@ -101,8 +101,8 @@ came from the development console provider, not SMS.
 |---|---|---|---|
 | L4 | Desktop app cannot update itself; every counter PC needs a manual reinstall for each fix. | read in code only | Engineering |
 | L5 | Unsigned installer: SmartScreen warning on every install. | read in code only | Founder (certificate) + engineering (build config) |
-| L6 | Student sign-out does not end the session (30-day token). Matters on shared or lab phones. | read in code only | Engineering (API) |
-| L7 | If staff don't press "Printed OK" within 15 minutes of the print reaching the printer, the job turns into a print problem whose only options are **Retry print** (prints again) or **Cancel & return payment**, even when the pages came out. `confirm-print-completion` only accepts jobs still `printing`. | read in code only (`printLease.ts`, `shops/routes.ts`); seen in browser on leftover jobs | Engineering (API: let staff confirm "It printed" on a `spool_timeout` problem, through `applyTransition`, with an audit event) |
+| L6 | ~~Student sign-out does not end the session (30-day token).~~ **Fixed** after this report: sign-out revokes every older session of that student. | verified by test | Engineering — done |
+| L7 | ~~A print nobody confirmed within 15 minutes could only be reprinted or refunded.~~ **Fixed** after this report: the card now offers **Printed OK · hand over** first (then Print again / return payment), and the API accepts the late confirmation for `spool_timeout` only, with audit event `PRINT_CONFIRMED_AFTER_TIMEOUT`. | verified by test (database test) | Engineering — done |
 | L8 | Data tier: per your 2026-10 notes the database is on Supabase free (pauses after about a week idle, no backups) and Redis is memory-only. Not re-checked here. | not verifiable here | Founder |
 | L9 | Platform fee collection is not live, so commission accrues but can't be collected. | read in code only | Founder |
 | L10 | Reveal grace (F5): a called student is marked absent 60 s after the code appears unless staff type it. With 3+ students called at once, the last may lose their place while staff serve the first. The counter now shows the countdown in the line, but the rule is unchanged. | read in code only; audit F5 | Product: decide after a week of pilot data (metric 3 below); 2 min is the safest pilot setting |
@@ -111,7 +111,7 @@ came from the development console provider, not SMS.
 
 | # | Finding | Evidence | Owner |
 |---|---|---|---|
-| L11 | Print-problem messages are long API sentences (four lines of red on a phone) and use " - " as a dash. A shorter staff message per problem code would scan faster. | verified in browser (`07-final/32-counter@390x844.png`) | Engineering (`apps/api/src/lib/printProblem.ts`, copy only) |
+| L11 | ~~Print-problem messages are long API sentences.~~ **Fixed** after this report: one or two short sentences that name the counter's buttons. | read in code only | Engineering — done |
 | L12 | Adding a printer on a live shop through the nav is one click longer than before (Shop → Printers tab). The counter banner covers the common case. | verified in browser (task h) | Watch: if owners ask "where are printers?", add Printers to the account menu |
 | L13 | "Ordered, not here yet" can hold many orders; it is collapsed with a count, but has no search. | verified in browser (43 in the test data) | Engineering, if pilot shops have many prepared orders |
 
@@ -138,7 +138,7 @@ came from the development console provider, not SMS.
 8. Stay at the counter for the first rush hour. Write down every question staff or students ask.
 
 **During the day**
-9. A red "Print problem" card: check the printer first. Pages came out → tell engineering (see L7); not printed → Retry print.
+9. A red card: check the printer first. Pages came out → **Printed OK · hand over**; not printed → **Print again**.
 10. If the PC goes offline the chip turns red; restart PrintQs Shop on the PC.
 
 **Closing**

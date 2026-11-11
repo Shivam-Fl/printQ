@@ -158,24 +158,29 @@ export function nextStep(job: QueueJob): NextStep {
   const actions = jobActions(job);
   const binding = bindingLabel(job.specs.binding);
   const returnPayment = actions.paymentReturned ? [{ action: 'returnPayment' as const, label: 'Cancel & return payment' }] : [];
+  const printAgain = { action: 'retry' as const, label: 'Print again' };
+  const printed = binding
+    ? { action: 'printedStartBinding' as const, label: `Printed OK · start ${binding.toLowerCase()}` }
+    : { action: 'printedHandover' as const, label: 'Printed OK · hand over' };
+  const later = binding ? [] : [{ action: 'printedOnly' as const, label: 'Printed, student not here yet' }];
   if (job.status === 'otp_verified' && job.printError) {
-    return { tone: 'danger', status: 'Print problem', detail: job.printError, primary: { action: 'retry', label: 'Retry print' }, secondary: returnPayment };
+    if (job.printErrorCode === 'spool_timeout') {
+      // The printer took it, but nobody pressed Printed OK in time: the pages are usually in the tray.
+      return { tone: 'danger', status: 'Printed? Check the tray', detail: job.printError, primary: printed, secondary: [...later, printAgain, ...returnPayment] };
+    }
+    return { tone: 'danger', status: 'Print problem', detail: job.printError, primary: printAgain, secondary: returnPayment };
   }
   if (job.status === 'otp_verified') {
     return { tone: 'info', status: 'Sending to printer', detail: null, primary: null, secondary: [] };
   }
   if (job.status === 'printing') {
-    const printed = binding
-      ? { action: 'printedStartBinding' as const, label: `Printed OK · start ${binding.toLowerCase()}` }
-      : { action: 'printedHandover' as const, label: 'Printed OK · hand over' };
-    const later = binding ? [] : [{ action: 'printedOnly' as const, label: 'Printed, student not here yet' }];
     if (job.printAgentOffline) {
       return {
         tone: 'danger',
         status: 'Printer computer went offline',
         detail: 'Check whether it printed. If it did not, print it again.',
         primary: printed,
-        secondary: [{ action: 'retry', label: 'Print again' }, ...returnPayment],
+        secondary: [printAgain, ...returnPayment],
       };
     }
     return {

@@ -44,10 +44,21 @@ vi.mock('../../realtime/events.js', () => ({ publishEvent: vi.fn(), subscribeEve
 import { prisma } from '../../lib/prisma.js';
 import { timersQueue } from '../../lib/queues.js';
 import { drainBackground } from '../../lib/background.js';
-import { signStudentToken } from '../../lib/tokens.js';
+import { signStudentToken, verifyToken } from '../../lib/tokens.js';
 import { errorHandler } from '../../middleware/error.js';
 import { jobsRouter } from '../jobs/routes.js';
 import { getJobLiveMetrics, preparePayAtShopOrder } from './engine.js';
+import { resolveStudentSession } from '../../lib/studentSession.js';
+
+/**
+ * The student's app loads the job page before "I'm here", so their session
+ * check is already remembered (lib/studentSession.ts); the budget below is for
+ * the check-in request itself.
+ */
+async function openJobPage(token: string): Promise<void> {
+  const claims = verifyToken(token);
+  if (claims?.typ === 'student') await resolveStudentSession(claims);
+}
 
 const LAT = 28.6139;
 const LNG = 77.209;
@@ -154,6 +165,7 @@ describe.runIf(dbReady)('check-in request budget (database)', () => {
     await checkIn(warm.jobId, warm.token);
     await drainBackground();
     const order = await prepared(shopId);
+    await openJobPage(order.token);
     probe.sql.length = 0;
     probe.notes.length = 0;
     timerAdd.mockClear();

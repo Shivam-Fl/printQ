@@ -373,6 +373,9 @@ model Student {
   /// Local-development students intentionally have no Firebase identity.
   firebaseUid String?  @unique
   name        String?
+  /// Bumped on sign-out. Tokens carry the value they were issued under; a
+  /// mismatch means the session was revoked (tokens without one read as 0).
+  sessionVersion Int   @default(0)
   createdAt   DateTime @default(now())
 
   jobs                   Job[]
@@ -561,6 +564,8 @@ model UploadedFile {
 
   @@index([studentId, createdAt])
   @@index([status, deleteAfter])
+  // Created by migration 20260916090000_verified_print_retention; declared here so migrate dev stops dropping it.
+  @@index([contentDeletedAt])
 }
 
 model Job {

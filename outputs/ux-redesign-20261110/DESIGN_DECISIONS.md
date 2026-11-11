@@ -100,7 +100,7 @@ Bottom bar unchanged (Home, Jobs, **Print**, Profile). Changes:
 | Out of turn | Inline warning in the same card: "Not called yet: #4 in line" (or "Not checked in"), with **Print anyway** and **Keep queue order**. Print anyway then shows the payment buttons in place. The audit event is unchanged (the API writes `COUNTER_QUEUE_OVERRIDE_RELEASE` when `overrideQueue` is sent). | Invariant kept: visible warning + audit. |
 | Printer choice | When auto-assign is off or the assigned printer is not eligible, a compact select inside the card with the recommended printer preselected (eligible printers and ETA come from the API). No extra panel. | F1, fewer steps. |
 | After sending | The card closes, the code box clears and refocuses, a short status line "Sent to Counter laser · Priya Nair · ₹300 cash" stays for 6 s (`role="status"`, non-blocking). | |
-| Printing & pickup | Sits beside the code box (desktop) or right under it (phone). One card per job, one next button: **Printed OK · hand over** (printing, no binding), **Printed OK · start binding** (printing, binding), **Binding done** then **Hand over** (finishing / ready), **Retry print** + **Return payment** (failed), **Hand over** (ready). Secondary quiet action "Printed, student not here yet" confirms without handing over. | Invariant kept: staff confirm "printed" themselves; spool acceptance is never proof. "Printed OK · hand over" calls the existing `confirm-print-completion` then `handover` endpoints in order, exactly the transitions the state machine already allows; no API change. The blocking confirm() is replaced by the explicit label plus help text ("Check every page first. The file is deleted 10 minutes later."). F14. |
+| Printing & pickup | Sits beside the code box (desktop) or right under it (phone). One card per job, one next button: **Printed OK · hand over** (printing, no binding), **Printed OK · start binding** (printing, binding), **Binding done** then **Hand over** (finishing / ready), **Print again** + **Return payment** (failed; a print nobody confirmed in time offers **Printed OK** first), **Hand over** (ready). Secondary quiet action "Printed, student not here yet" confirms without handing over. | Invariant kept: staff confirm "printed" themselves; spool acceptance is never proof. "Printed OK · hand over" calls the existing `confirm-print-completion` then `handover` endpoints in order, exactly the transitions the state machine already allows; no API change. The blocking confirm() is replaced by the explicit label plus help text ("Check every page first. The file is deleted 10 minutes later."). F14. |
 | Walk-in line | One list grouped **At the counter** (with a large countdown, red under 15 s), **Coming up**, **Waiting**; each row: position, name, file, pages and specs, amount, time left. "Mark absent" only on called students, as a quiet action. Phones: stacked rows, nothing off-screen. | F2, F5. |
 | Prepared, not here yet | Collapsed by default with a count; expands to a compact list (planned time, name, file). | Not actionable at the counter. |
 | Pause new orders | In the counter header next to the live status, secondary button + the existing confirm (prevent accidental taps); while paused, a warn notice with "Resume new orders" (primary). | Easy to find, hard to hit by accident. |
@@ -133,8 +133,20 @@ Bottom bar unchanged (Home, Jobs, **Print**, Profile). Changes:
 
 ## 7. API changes
 
-None. `git diff --stat 3ae2475..HEAD -- apps/api packages apps/agent` is empty: no API, Prisma, shared pricing,
-state machine, auth or payment code changed. Every new behaviour uses endpoints that already exist.
+The redesign itself (slices 1-7) changed no API code. After the launch report, the founder asked for the three
+engineering findings to be fixed (L6, L7, L11 in `LAUNCH_READINESS.md`). Those are the only API changes, all
+following `CLAUDE.md`:
+
+| Change | Files | Rules kept |
+|---|---|---|
+| **Late "Printed OK" (L7).** A print the printer accepted but nobody confirmed in time (`spool_timeout`) can still be confirmed. `confirm-print-completion` now accepts a job back in `otp_verified` only with that error. It reuses `confirmSuccessfulPrint`, so file deletion, the fee receivable and the student notice are unchanged. Audit event `PRINT_CONFIRMED_AFTER_TIMEOUT`. | `packages/shared/src/stateMachine.ts` (otp_verified → ready_for_pickup / finishing), `jobs/printCompletion.ts`, `jobs/transitions.ts` (guard on `printError`), `shops/routes.ts` | Status only via `applyTransition`, with a guard on `printError` in the same conditional UPDATE; owner filter (`shopId`) in the WHERE; other problem codes still 409 |
+| **Student sign-out revokes the session (L6).** `Student.sessionVersion` (additive migration, default 0); tokens carry `sv`; `requireStudent`, the preview-token header path and the socket handshake reject a stale version; new `POST /api/auth/student/logout` (requireStudent) bumps it. Tokens issued before the change read as version 0, so nobody is logged out by the deploy. The version is remembered in-process for 5 minutes (sign-out updates it at once) so hot student endpoints keep their round-trip budgets. | `prisma/schema.prisma`, migration `20261111160702_student_session_version`, `lib/tokens.ts`, `lib/studentSession.ts`, `middleware/auth.ts`, `realtime/io.ts`, `auth/routes.ts`; web `Profile.tsx` calls it | Auth middleware on the new route; owner filter (`id = req.student.id`); schema changed through `db:migrate` |
+| **Short print-problem messages (L11).** One or two short sentences naming the counter's buttons ("Printed OK", "Print again"); no " - " dashes. | `lib/printProblem.ts` | Raw agent text still never reaches staff |
+
+Schema hygiene found on the way: `UploadedFile_contentDeletedAt_idx` (created by migration
+`20260916090000_verified_print_retention`) was missing from `schema.prisma`, so `migrate dev` generated a
+`DROP INDEX` for it. The index is now declared in the schema and the new migration is additive only;
+`prisma migrate diff` reports no difference between the migrations and the schema.
 
 ## 8. Decision log (added during implementation)
 

@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js';
 import { verifyPreviewToken, verifyToken } from '../lib/tokens.js';
 import { hashAgentToken } from '../lib/otp.js';
 import { resolveShopSession } from '../lib/shopSession.js';
+import { resolveStudentSession } from '../lib/studentSession.js';
 import { forbidden, unauthorized } from '../lib/errors.js';
 
 declare global {
@@ -25,12 +26,19 @@ function bearer(req: Request): string | null {
   return header.slice('Bearer '.length);
 }
 
-export function requireStudent(req: Request, _res: Response, next: NextFunction): void {
+export async function requireStudent(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const token = bearer(req);
   const claims = token ? verifyToken(token) : null;
   if (!claims || claims.typ !== 'student') return next(unauthorized());
-  req.student = { id: claims.sub };
-  next();
+  try {
+    // Revocation: sign-out (and a deleted student) invalidates every older token here.
+    const session = await resolveStudentSession(claims);
+    if (!session) return next(unauthorized());
+    req.student = session;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 /**
@@ -39,14 +47,8 @@ export function requireStudent(req: Request, _res: Response, next: NextFunction)
  * cannot attach a header. The long-lived session token is never accepted in a
  * URL. Requires the route to have an `:id` file param.
  */
-export function requireStudentOrPreviewToken(req: Request, _res: Response, next: NextFunction): void {
-  const header = bearer(req);
-  if (header) {
-    const claims = verifyToken(header);
-    if (!claims || claims.typ !== 'student') return next(unauthorized());
-    req.student = { id: claims.sub };
-    return next();
-  }
+export async function requireStudentOrPreviewToken(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (bearer(req)) return requireStudent(req, res, next);
   const fileId = typeof req.params.id === 'string' ? req.params.id : '';
   const preview = typeof req.query.pt === 'string' ? req.query.pt : '';
   const studentId = preview && fileId ? verifyPreviewToken(preview, fileId) : null;

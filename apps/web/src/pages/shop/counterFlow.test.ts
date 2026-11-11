@@ -105,11 +105,27 @@ describe('the one next action for a released job', () => {
     expect(s.primary?.action).toBe('printedStartBinding');
     expect(s.primary?.label).toBe('Printed OK · start spiral binding');
   });
-  it('a failed print offers Retry and, for a counter-paid order, returning the money', () => {
+  it('a failed print offers Print again and, for a counter-paid order, returning the money', () => {
     const s = nextStep(job({ status: 'otp_verified', printError: 'The printer reported a problem.', counterPaymentConfirmedAt: '2026-11-10T10:00:00Z' }));
     expect(s.tone).toBe('danger');
-    expect(s.primary?.action).toBe('retry');
+    expect(s.primary).toEqual({ action: 'retry', label: 'Print again' });
     expect(s.secondary.map((x) => x.action)).toEqual(['returnPayment']);
+  });
+  it('a print nobody confirmed in time (spool_timeout): Printed OK first, then print again or return the money', () => {
+    const s = nextStep(job({
+      status: 'otp_verified',
+      printError: 'Nobody confirmed this print in time.',
+      printErrorCode: 'spool_timeout',
+      counterPaymentConfirmedAt: '2026-11-10T10:00:00Z',
+    }));
+    expect(s.tone).toBe('danger');
+    expect(s.primary).toEqual({ action: 'printedHandover', label: 'Printed OK · hand over' });
+    expect(s.secondary.map((x) => x.action)).toEqual(['printedOnly', 'retry', 'returnPayment']);
+    // with binding, the confirmed print goes to finishing instead
+    const bound = nextStep(job({ status: 'otp_verified', printError: 'x', printErrorCode: 'spool_timeout', specs: { ...job().specs, binding: 'spiral_binding' } }));
+    expect(bound.primary?.action).toBe('printedStartBinding');
+    // any other problem can't be confirmed as printed
+    expect(nextStep(job({ status: 'otp_verified', printError: 'x', printErrorCode: 'claim_timeout' })).primary?.action).toBe('retry');
   });
   it('a print whose computer went offline: confirm if it printed, else print again', () => {
     const s = nextStep(job({ status: 'printing', printAgentOffline: true }));

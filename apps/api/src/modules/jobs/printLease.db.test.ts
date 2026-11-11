@@ -448,6 +448,32 @@ describe.runIf(dbReady)('print lease recovery (database)', () => {
       expect((await shopCall(`/jobs/${abandoned.id}/counter-payment-returned`)).status).toBe(200);
     });
 
+    it('staff can still confirm a timed-out spooled print whose pages came out; other problems cannot be confirmed', async () => {
+      const a = await makeAgent({ alive: true });
+      const spooled = await printingJob(a.agent.id, { ageMs: 1_000_000, spooled: true });
+      const neverReached = await printingJob(a.agent.id, { ageMs: 150_000 });
+      await failOrphanedPrints();
+      expect((await fresh(spooled.id)).printError).toBe('spool_timeout');
+      expect((await fresh(neverReached.id)).printError).toBe('claim_timeout');
+
+      // a print that never reached the printer cannot be called printed
+      expect((await shopCall(`/jobs/${neverReached.id}/confirm-print-completion`)).status).toBe(409);
+      expect((await fresh(neverReached.id)).status).toBe('otp_verified');
+
+      // the timed-out spooled one can: no reprint, no refund
+      expect((await shopCall(`/jobs/${spooled.id}/confirm-print-completion`)).status).toBe(200);
+      const done = await fresh(spooled.id);
+      expect(done.status).toBe('ready_for_pickup');
+      expect(done.printError).toBeNull();
+      expect(done.printCompletionMethod).toBe('staff_confirmed');
+      expect(done.printConfirmedAt).not.toBeNull();
+      const audit = await prisma.jobEvent.findFirst({ where: { jobId: spooled.id, event: 'PRINT_CONFIRMED_AFTER_TIMEOUT' } });
+      expect(audit).toMatchObject({ fromStatus: 'otp_verified', toStatus: 'ready_for_pickup', actorType: 'shop' });
+
+      // pressing it again is a clean conflict, never a second transition
+      expect((await shopCall(`/jobs/${spooled.id}/confirm-print-completion`)).status).toBe(409);
+    });
+
     it('concurrent staff confirmations + restart recovery: exactly one transition, exactly one commission', async () => {
       const s1 = sid();
       const a = await makeAgent({ alive: true, sessionId: s1 });

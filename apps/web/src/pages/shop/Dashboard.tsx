@@ -87,7 +87,7 @@ export default function Dashboard() {
       timer = setTimeout(() => void refresh(), 250);
     };
     const onPrintFailed = (p: { jobId: string; message?: string }) => {
-      setAlert(p.message ?? 'A print hit a problem. Check the printer, then press Retry print.');
+      setAlert(p.message ?? 'A print hit a problem. Check the printer, then press Print again.');
       onAny();
     };
     const onNoAgent = () => setAlert('No counter PC is running for that printer. Open PrintQs Shop on the counter PC.');

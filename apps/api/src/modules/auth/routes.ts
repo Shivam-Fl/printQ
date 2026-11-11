@@ -16,6 +16,7 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound, tooMany, unauthorized } from '../../lib/errors.js';
 import { generateOtp, hashOtp, verifyOtpHash } from '../../lib/otp.js';
 import { signShopToken, signStudentToken } from '../../lib/tokens.js';
+import { rememberStudentSignOut } from '../../lib/studentSession.js';
 import { validateBody } from '../../middleware/validate.js';
 import {
   firebaseSessionLimiter,
@@ -117,7 +118,7 @@ authRouter.post(
       update: {},
     });
     res.json({
-      token: signStudentToken(student.id),
+      token: signStudentToken(student.id, student.sessionVersion),
       student: { id: student.id, phone: student.phone, name: student.name },
     });
   }),
@@ -155,7 +156,7 @@ authRouter.post(
       return tx.student.create({ data: { phone: identity.phone, firebaseUid: identity.uid } });
     });
     res.json({
-      token: signStudentToken(student.id),
+      token: signStudentToken(student.id, student.sessionVersion),
       student: { id: student.id, phone: student.phone, name: student.name },
     });
   }),
@@ -170,6 +171,25 @@ authRouter.get(
       select: { id: true, phone: true, name: true },
     });
     res.json({ student });
+  }),
+);
+
+/**
+ * Student sign-out: bumps the session version, so this token and every other
+ * token issued before it (another phone, a lab computer) stops working on the
+ * next request. Same rule as shop sign-out.
+ */
+authRouter.post(
+  '/student/logout',
+  requireStudent,
+  asyncHandler(async (req, res) => {
+    const [student] = await prisma.student.updateManyAndReturn({
+      where: { id: req.student!.id },
+      data: { sessionVersion: { increment: 1 } },
+      select: { id: true, sessionVersion: true },
+    });
+    if (student) rememberStudentSignOut(student.id, student.sessionVersion);
+    res.json({ ok: true });
   }),
 );
 
