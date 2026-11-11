@@ -79,10 +79,16 @@ export default function Dashboard() {
   useEffect(() => {
     const socket = getShopSocket();
     if (!socket) return;
-    const onAny = () => void refresh();
+    // One release fires several events within a second (update, printing, ready...). Coalesce
+    // them into one refresh so a busy counter stays far below the API's per-user request limit.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAny = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void refresh(), 250);
+    };
     const onPrintFailed = (p: { jobId: string; message?: string }) => {
       setAlert(p.message ?? 'A print hit a problem. Check the printer, then press Retry print.');
-      void refresh();
+      onAny();
     };
     const onNoAgent = () => setAlert('No counter PC is running for that printer. Open PrintQs Shop on the counter PC.');
     const events = ['queue:update', 'queue:job_printing', 'queue:finishing_required', 'queue:job_ready', 'queue:print_confirmation_required', 'queue:manual_assign_needed', 'agent:offline'];
@@ -90,6 +96,7 @@ export default function Dashboard() {
     socket.on('queue:print_failed', onPrintFailed);
     socket.on('queue:no_agent', onNoAgent);
     return () => {
+      clearTimeout(timer);
       for (const e of events) socket.off(e, onAny);
       socket.off('queue:print_failed', onPrintFailed);
       socket.off('queue:no_agent', onNoAgent);

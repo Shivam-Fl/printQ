@@ -16,6 +16,11 @@ const S = state.students;
 const A = state.shopA;
 const results = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : {};
 const browser = await chromium.launch();
+// The harness polls with the staff login, a separate per-user request budget from the owner's
+// browser session (polling as the owner made the API rate-limit the page under test).
+const POLL = state.staffA
+  ? (await api('/api/auth/shop/staff-login', { method: 'POST', body: { email: state.staffA.email, pin: state.staffA.pin } })).data.token ?? A.token
+  : A.token;
 const pdfPath = `${SCRATCH}/upload-sample.pdf`;
 writeFileSync(pdfPath, await makePdf(6, 'Lab-report'));
 
@@ -30,18 +35,18 @@ async function context(viewport, auth, extra = {}) {
 
 // ---- queue helpers -----------------------------------------------------------
 async function clearLine() {
-  const q = await api('/api/shop/queue', { token: A.token });
+  const q = await api('/api/shop/queue', { token: POLL });
   for (const j of q.data.jobs ?? []) {
     if (['queued', 'notified'].includes(j.status)) await api(`/api/shop/jobs/${j.id}/no-show`, { method: 'POST', token: A.token });
   }
 }
 async function finishInFlight() {
   // leave no printing/pickup rows from earlier runs (keeps the screen comparable)
-  const q = await api('/api/shop/queue', { token: A.token });
+  const q = await api('/api/shop/queue', { token: POLL });
   for (const j of q.data.jobs ?? []) {
     if (j.status === 'printing' && j.spoolAcceptedAt) await api(`/api/shop/jobs/${j.id}/confirm-print-completion`, { method: 'POST', token: A.token });
   }
-  const q2 = await api('/api/shop/queue', { token: A.token });
+  const q2 = await api('/api/shop/queue', { token: POLL });
   for (const j of q2.data.jobs ?? []) {
     if (j.status === 'ready_for_pickup') await api(`/api/shop/jobs/${j.id}/handover`, { method: 'POST', token: A.token });
     if (j.status === 'finishing') {
@@ -98,9 +103,9 @@ tasks.counterRelease = async (viewport = { width: 1366, height: 768 }, label = '
 
 /** (b2) the same print came out: confirm printed, hand over. */
 tasks.counterFinish = async (viewport = { width: 1366, height: 768 }, label = 'b2-printed-and-handover') => {
-  const q = await api('/api/shop/queue', { token: A.token });
+  const q = await api('/api/shop/queue', { token: POLL });
   const printing = await waitFor('a spooled job', async () => {
-    const r = await api('/api/shop/queue', { token: A.token });
+    const r = await api('/api/shop/queue', { token: POLL });
     return r.data.jobs?.find((j) => j.status === 'printing' && j.spoolAcceptedAt);
   }, 30_000);
   void q;
@@ -118,7 +123,7 @@ tasks.counterFinish = async (viewport = { width: 1366, height: 768 }, label = 'b
     await L.click(card.getByRole('button', { name: /Printed OK/ }), 'Printed OK & handed over');
   }
   await waitFor('completed', async () => {
-    const r = await api('/api/shop/history', { token: A.token });
+    const r = await api('/api/shop/history', { token: POLL });
     return (r.data.jobs ?? []).some((j) => j.id === printing.id && j.status === 'completed');
   }, 15_000).catch(() => null);
   const s = L.summary({ viewport: `${viewport.width}x${viewport.height}` });
@@ -156,7 +161,7 @@ tasks.counterRush = async () => {
       await page.getByRole('status').filter({ hasText: /Sent to/ }).first().waitFor({ timeout: 15_000 });
     }
     const job = await waitFor('spooled', async () => {
-      const r = await api('/api/shop/queue', { token: A.token });
+      const r = await api('/api/shop/queue', { token: POLL });
       return r.data.jobs?.find((j) => j.id === t.jobId && j.status === 'printing' && j.spoolAcceptedAt);
     }, 30_000);
     const name = job.file.originalName;
@@ -167,7 +172,7 @@ tasks.counterRush = async () => {
       await L.click(page.locator('[data-job-card]', { hasText: name }).getByRole('button', { name: /Printed OK/ }), 'Printed OK & handed over');
     }
     await waitFor('row gone', async () => {
-      const r = await api('/api/shop/queue', { token: A.token });
+      const r = await api('/api/shop/queue', { token: POLL });
       return !(r.data.jobs ?? []).some((j) => j.id === t.jobId);
     }, 15_000);
   }
@@ -299,8 +304,15 @@ tasks.addPrinter = async (viewport = { width: 1366, height: 768 }, label = 'h-ad
     // Shop opens Setup (not live) or Printers (live); both list the printers the PC found, with Add
     await L.click(page.getByRole('link', { name: 'Shop', exact: true }), 'Shop');
   }
-  await L.click(page.getByRole('button', { name: /Add & configure|Add for practice|^Add / }).first(), 'Add printer');
-  await L.click(page.getByRole('button', { name: /Yes, colour/ }).first(), 'Yes, colour');
+  try {
+    // a live shop opens Prices first: printers are one tab over
+    if (UI !== 'before' && !/setup|printers/.test(page.url())) await L.click(page.getByRole('link', { name: 'Printers', exact: true }), 'Printers tab');
+    await L.click(page.locator('.detected-list, .detected-grid').getByRole('button', { name: /Add/ }).first(), 'Add printer');
+    await L.click(page.getByRole('button', { name: /Yes, colour/ }).first(), 'Yes, colour');
+  } catch (e) {
+    await page.screenshot({ path: SCRATCH + '/addprinter-fail.png', fullPage: true });
+    throw e;
+  }
   await waitFor('printer row', async () => ((await api('/api/shop/printers', { token: C.token })).data.printers ?? []).length > 0 || null, 10_000);
   const s = L.summary({ viewport: `${viewport.width}x${viewport.height}` });
   await ctx.close();
