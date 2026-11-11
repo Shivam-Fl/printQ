@@ -201,7 +201,7 @@ export default function ShopRegister() {
         <div className="auth-copy">
           <span className="eyebrow-label">Get your counter online</span>
           <h1>Set up your shop.</h1>
-          {!signedIn && <p>Five fields and about three minutes. Any shop can join, on a campus or not.</p>}
+          {!signedIn && <p>Five fields and about three minutes. Any print shop can join.</p>}
         </div>
         {signedIn ? (
           <ShopSignedIn

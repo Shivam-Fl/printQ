@@ -82,7 +82,6 @@ describe('price field typing (OWN-3)', () => {
 const base: SettingsDraft = {
   name: 'Sharma Xerox',
   address: '1 Lane',
-  campusId: 'c1',
   latitude: 28.6139,
   longitude: 77.209,
   checkInRadiusM: 200,

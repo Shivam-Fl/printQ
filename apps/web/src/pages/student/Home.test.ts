@@ -10,6 +10,14 @@ describe('home new print action', () => {
     expect(resolveNewPrintAction(null, [])).toEqual({ kind: 'directory' });
   });
 
+  it('sends a student who has not ordered yet to the shop they last opened, while it is published', () => {
+    const published = [{ slug: 'qr-shop' }, { slug: 'other' }];
+    expect(resolveNewPrintAction('qr-shop', [], published)).toEqual({ kind: 'shop', slug: 'qr-shop' });
+    expect(resolveNewPrintAction('gone-shop', [], published)).toEqual({ kind: 'directory' });
+    // order history always wins over the last opened shop
+    expect(resolveNewPrintAction('qr-shop', [{ slug: 'other' }], published)).toEqual({ kind: 'shop', slug: 'other' });
+  });
+
   it('opens the only available shop directly', () => {
     expect(resolveNewPrintAction('stale-shop', [{ slug: 'shop-a' }])).toEqual({ kind: 'shop', slug: 'shop-a' });
   });
