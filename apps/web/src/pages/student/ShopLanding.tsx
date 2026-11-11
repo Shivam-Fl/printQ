@@ -77,25 +77,23 @@ function useFileConversionRedirect(
   }, [loggedIn, fileId, navigate, slug, onDone, onError]);
 }
 
-/** Self-contained: manages its own "requested" state so the parent doesn't need to. */
+/** Self-contained: manages its own "requested" state so the parent doesn't need to. Signed-in students only. */
 function NotifyWhenOpen({ slug }: { slug: string }) {
   const [requested, setRequested] = useState(false);
   return (
-    <div className="row between">
-      <p className="dim" style={{ margin: 0 }}>The shop has no printer online right now.</p>
-      <button
-        className="ghost small"
-        disabled={requested}
-        onClick={async () => {
-          await api(`/api/public/shops/${slug}/notify-when-open`, { method: 'POST', role: 'student' }).catch(
-            () => undefined,
-          );
-          setRequested(true);
-        }}
-      >
-        {requested ? 'We\'ll let you know ✓' : 'Notify me when open'}
-      </button>
-    </div>
+    <button
+      type="button"
+      className="ghost"
+      disabled={requested}
+      onClick={async () => {
+        await api(`/api/public/shops/${slug}/notify-when-open`, { method: 'POST', role: 'student' }).catch(
+          () => undefined,
+        );
+        setRequested(true);
+      }}
+    >
+      {requested ? 'We’ll tell you when it opens' : 'Notify me when open'}
+    </button>
   );
 }
 
@@ -229,13 +227,13 @@ export default function ShopLanding() {
         >
           <div>
             <div className="upload-mark" aria-hidden><IconUpload /></div>
-            <h2>{shop.open ? 'Choose your files' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Orders are paused'}</h2>
+            <h2>{shop.open ? 'Choose your files' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Not taking orders right now'}</h2>
             <p>
               {shop.open
                 ? 'PDF, Word or photos. Pick one or several; they print as one order. You pay at the counter.'
                 : shop.temporarilyUnavailable
                   ? 'New orders are not available here right now. Please try again later or choose another shop.'
-                  : 'This shop has no printer online right now. Ask to be notified when ordering resumes.'}
+                  : 'This shop’s printer is not online. Try another shop nearby, or ask us to tell you when it opens.'}
             </p>
           </div>
           <input
@@ -271,8 +269,13 @@ export default function ShopLanding() {
               <div className="upload-meta">Your files are private and deleted soon after printing. On a computer you can also drop them here.</div>
             </>
           )}
-          {!shop.open && !shop.temporarilyUnavailable && <NotifyWhenOpen slug={slug} />}
-          {!shop.open && shop.temporarilyUnavailable && <Link to="/shops">Browse other shops</Link>}
+          {!shop.open && (
+            // never a dead end: another shop is one tap away
+            <div className="upload-actions">
+              <Link to="/shops" className="button-link">Find another shop</Link>
+              {!shop.temporarilyUnavailable && getToken('student') && <NotifyWhenOpen slug={slug} />}
+            </div>
+          )}
           {error && <div className="error-box" role="alert">{error}</div>}
         </div>
       )}
