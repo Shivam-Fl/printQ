@@ -243,3 +243,10 @@ export function counterErrorText(err: { status?: number; message?: string; body?
   if (err.status === 409 && /merchant UPI/i.test(err.message ?? '')) return 'UPI is not set up for this shop yet. Take cash, or add your UPI ID in Shop → Settings.';
   return err.message || 'That did not work. Try again.';
 }
+
+/** History search: matches a student name, the last digits of a phone, or a file name. */
+export function matchesHistory(row: { student: { name: string | null; phoneMasked: string }; file: string }, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [row.student.name ?? '', row.student.phoneMasked, row.file].some((text) => text.toLowerCase().includes(q));
+}

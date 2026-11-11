@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  counterErrorText, inFlightJobs, lineGroups, nextStep, outOfTurnText, preparedJobs, releaseStep, sanitizeCode,
-  spacedCode, specsSummary, studentLabel, type QueueJob,
+  counterErrorText, inFlightJobs, lineGroups, matchesHistory, nextStep, outOfTurnText, preparedJobs, releaseStep,
+  sanitizeCode, spacedCode, specsSummary, studentLabel, type QueueJob,
 } from './counterFlow.js';
 
 const job = (over: Partial<QueueJob> = {}): QueueJob => ({
@@ -142,8 +142,7 @@ describe('release answers', () => {
 });
 
 describe('history search', () => {
-  it('finds a student by name, phone digits or file', async () => {
-    const { matchesHistory } = await import('./History.js');
+  it('finds a student by name, phone digits or file', () => {
     const row = { student: { name: 'Priya Nair', phoneMasked: '••••• 00002' }, file: 'Physics-lab-record.pdf' };
     expect(matchesHistory(row, 'priya')).toBe(true);
     expect(matchesHistory(row, '0002')).toBe(true);

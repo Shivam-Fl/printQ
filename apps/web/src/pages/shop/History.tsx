@@ -4,7 +4,7 @@ import { ApiError, api, downloadFile, getToken, rupees } from '../../api.js';
 import { stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import ShopNav from '../../components/ShopNav.js';
 import { shopLoginPath } from '../../lib/locationFlow.js';
-import { specsSummary } from './counterFlow.js';
+import { matchesHistory, specsSummary } from './counterFlow.js';
 
 interface Row {
   id: string;
@@ -20,13 +20,6 @@ interface Row {
 }
 
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
-
-/** Matches a student name, the last digits of a phone, or a file name. */
-export function matchesHistory(row: Pick<Row, 'student' | 'file'>, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return [row.student.name ?? '', row.student.phoneMasked, row.file].some((text) => text.toLowerCase().includes(q));
-}
 
 export default function History() {
   const navigate = useNavigate();

@@ -289,7 +289,7 @@ tasks.changePrice = async (viewport = { width: 1366, height: 768 }, label = 'g-c
 };
 
 /** (h) owner adds a detected printer (shop C, practice simulator). */
-tasks.addPrinter = async (viewport = { width: 1366, height: 768 }, label = 'h-add-printer') => {
+tasks.addPrinter = async (viewport = { width: 1366, height: 768 }, label = 'h-add-printer', via = 'nav') => {
   const C = state.shopC;
   // remove an earlier run's printer so the detected one is offered again
   const list = await api('/api/shop/printers', { token: C.token });
@@ -300,8 +300,11 @@ tasks.addPrinter = async (viewport = { width: 1366, height: 768 }, label = 'h-ad
   const L = new Ledger(page, label);
   if (UI === 'before') {
     await L.click(page.getByRole('link', { name: 'Printers', exact: true }), 'Printers');
+  } else if (via === 'banner') {
+    // what the owner sees first on the counter: "PC connected · 1 printer found" with Add printer
+    await L.click(page.locator('.counter-notice').getByRole('link', { name: 'Add printer' }), 'banner: Add printer');
   } else {
-    // Shop opens Setup (not live) or Printers (live); both list the printers the PC found, with Add
+    // Shop opens Setup (not live) or Prices (live); printers are on Setup or one tab over
     await L.click(page.getByRole('link', { name: 'Shop', exact: true }), 'Shop');
   }
   try {
@@ -444,6 +447,7 @@ const plan = [
   ['f-check-in-read-code', () => tasks.checkInCode()],
   ['g-change-price', () => tasks.changePrice()],
   ['h-add-printer', () => tasks.addPrinter()],
+  ['h-add-printer-from-banner', () => (UI === 'after' ? tasks.addPrinter(undefined, 'h-add-printer-from-banner', 'banner') : Promise.resolve({ task: 'n/a' }))],
   ['i-admin-unpublish-publish', () => tasks.adminReview()],
 ];
 
