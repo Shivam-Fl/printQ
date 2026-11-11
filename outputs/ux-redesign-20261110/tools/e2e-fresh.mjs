@@ -28,6 +28,7 @@ const step = (text) => { log.push(text); console.log(`- ${text}`); };
 async function snap(page, name) {
   shot += 1;
   const file = `${DIR}/${String(shot).padStart(2, '0')}-${name}.png`;
+  await page.waitForTimeout(350); // let the 160-200 ms entrance animations finish
   await page.screenshot({ path: file });
   return file;
 }
@@ -120,7 +121,7 @@ try {
   await s.waitForURL(/\/shops/, { timeout: 15_000 });
   await s.waitForLoadState('networkidle');
   const listed = s.getByRole('link', { name: new RegExp(SHOP_NAME) }).first();
-  if (await listed.isVisible().catch(() => false)) {
+  if (await listed.waitFor({ timeout: 10_000 }).then(() => true, () => false)) {
     await snap(s, 'directory');
     await listed.click();
     step('student found the new shop in the directory');
@@ -193,13 +194,16 @@ try {
   step('history lists the order');
   await o.getByRole('link', { name: 'Earnings', exact: true }).first().click();
   await o.waitForURL(/earnings/);
-  await o.waitForLoadState('networkidle');
-  await o.waitForTimeout(1000);
+  await o.locator('.earnings-summary').waitFor({ timeout: 20_000 });
+  await o.waitForTimeout(500);
   await snap(o, 'earnings');
-  const earnings = (await o.locator('main, .page').first().innerText()).replace(/\s+/g, ' ');
-  const shows = earnings.includes(String(finalJob.totalPaise / 100));
-  step(`earnings page ${shows ? 'shows' : 'does NOT show'} ₹${finalJob.totalPaise / 100}`);
-  if (!shows) problems.push('earnings did not show the order amount');
+  const earnings = (await o.locator('.page').first().innerText()).replace(/\s+/g, ' ');
+  const money = (re) => Number((earnings.match(re)?.[1] ?? 'NaN').replace(/,/g, ''));
+  const earned = money(/₹([\d,.]+) You earned today · 1 print\b/);
+  const due = money(/Due to PrintQs ₹([\d,.]+)/);
+  const adds = Math.round((earned + due) * 100) === finalJob.totalPaise;
+  step(`earnings: shop keeps ₹${earned}, PrintQs fee ₹${due}, student paid ₹${finalJob.totalPaise / 100} (${adds ? 'adds up' : 'DOES NOT add up'})`);
+  if (!adds) problems.push(`earnings do not add up: ${earned} + ${due} != ${finalJob.totalPaise / 100}`);
 
   writeFileSync(`${DIR}/result.json`, JSON.stringify({ mode: MODE, viewport: VIEWPORT, shop: SHOP_NAME, steps: log, problems, finalStatus: finalJob.status, paymentStatus: finalJob.paymentStatus }, null, 2));
   console.log(problems.length ? `PROBLEMS:\n${problems.join('\n')}` : 'no problems');

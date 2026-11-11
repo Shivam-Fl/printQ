@@ -13,7 +13,9 @@ export interface ShopStats {
 }
 
 /** Today, all time and the last 7 days, at the top of Earnings (this used to be a separate Insights page). */
-export default function EarningsSummary({ stats }: { stats: ShopStats | null }) {
+/** `undefined` while loading; `null` when the summary could not load (the rest of the page still works). */
+export default function EarningsSummary({ stats }: { stats: ShopStats | null | undefined }) {
+  if (stats === null) return null;
   if (!stats) {
     return <div className="stat-grid" aria-hidden><div className="skeleton-card" /><div className="skeleton-card" /><div className="skeleton-card" /></div>;
   }

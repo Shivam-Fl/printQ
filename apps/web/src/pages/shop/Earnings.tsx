@@ -46,7 +46,7 @@ export default function Earnings() {
   const navigate = useNavigate();
   const [data, setData] = useState<CommissionData | null>(null);
   const [fees, setFees] = useState<FeeOverview | null>(null);
-  const [stats, setStats] = useState<ShopStats | null>(null);
+  const [stats, setStats] = useState<ShopStats | null | undefined>(undefined);
   const [error, setError] = useState('');
   const [paying, setPaying] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'info' | 'error'; text: string } | null>(null);
@@ -72,7 +72,7 @@ export default function Earnings() {
       return;
     }
     refresh().catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load your earnings. Try again.'));
-    // the summary is a bonus: the page still works if it fails
+    // the summary is a bonus: if it fails it disappears (null) instead of loading forever
     api<{ stats: ShopStats }>('/api/shop/stats', { role: 'shop' }).then((r) => setStats(r.stats)).catch(() => setStats(null));
     const socket = getShopSocket();
     const onUpdate = () => { void refresh().catch(() => undefined); };

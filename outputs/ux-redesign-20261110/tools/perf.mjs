@@ -6,7 +6,7 @@ import { writeFileSync } from 'node:fs';
 import { loadState } from './lib.mjs';
 
 const OUT = process.argv[2];
-const BASE = 'http://localhost:4173';
+const BASE = process.env.UX_PREVIEW ?? 'http://localhost:4173';
 const state = loadState();
 const S = state.students;
 const A = state.shopA;
