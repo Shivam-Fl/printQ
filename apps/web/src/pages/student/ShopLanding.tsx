@@ -7,6 +7,7 @@ import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
 import { IconUpload } from '../../components/Icons.js';
+import { hideFromSearch } from '../../lib/searchVisibility.js';
 
 interface Paper {
   id: string;
@@ -155,6 +156,8 @@ export default function ShopLanding() {
   }
 
   const notFound = !validSlug || (shopResource.status === 'error' && shopResource.error instanceof ApiError && shopResource.error.status === 404);
+  // an unknown or unpublished shop link is a 404 for search engines too (no index, no self canonical)
+  useEffect(() => (notFound ? hideFromSearch(document) : undefined), [notFound]);
   if (notFound) {
     // Never a dead end: a bad/unpublished link offers the directory and home.
     return (

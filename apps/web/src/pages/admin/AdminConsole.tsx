@@ -293,7 +293,8 @@ export default function AdminConsole() {
                       <div className="row">
                         <strong>{shop.name}</strong>
                         <span className={`stamp ${label.tone}`}>{label.text}</span>
-                        {shop.autoLive && <span className="stamp" title="Went live by itself when setup was complete, without a review">Auto-live</span>}
+                        {/* almost every shop goes live by itself: badge only the exception */}
+                        {!shop.autoLive && <span className="stamp yellow" title="Older shop that needs a manual review before it is listed">Manual review</span>}
                       </div>
                       <p className="dim">{shop.owner ? <>{shop.owner.name} · <a href={`mailto:${shop.owner.email}`}>{shop.owner.email}</a></> : 'No owner account'} · <span title={new Date(shop.createdAt).toLocaleString()}>joined {ago(shop.createdAt)}</span></p>
                       <p className="dim">{shop.campus ? `${shop.campus.name} · ` : ''}{shop.address} · {pcStatus(shop)}</p>
@@ -384,7 +385,7 @@ export default function AdminConsole() {
       </section>
 
       <section className="settings-section">
-        <div className="settings-section-copy"><h2>Decision trail</h2><p>Every decision made from this console, with who made it and when. Shops that go live by themselves are not listed here; look for the Auto-live badge under Shops.</p></div>
+        <div className="settings-section-copy"><h2>Decision trail</h2><p>Every decision made from this console, with who made it and when. Shops that go live by themselves are not listed here; older shops that need a manual review carry a badge under Shops.</p></div>
         <div className="settings-surface stack">
           {failed.events ? <LoadError what="the decision trail" onRetry={() => void loadOthers()} />
             : events.length === 0 ? <p className="dim">No decisions have been recorded yet.</p>
