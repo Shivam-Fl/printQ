@@ -12,6 +12,7 @@ import { logger } from '../lib/logger.js';
 import { env } from '../config/env.js';
 import { storage } from '../providers/storage/index.js';
 import { publishEvent } from '../realtime/events.js';
+import { readParts, type FilePart } from '../lib/fileParts.js';
 import {
   ACTIVE_FILE_JOB_STATUSES,
   ensureFileDeletionJob,
@@ -134,6 +135,35 @@ async function sourceToPdf(buffer: Buffer, mime: string): Promise<{ pdf: Buffer;
 
 type Source = { key: string; mime: string; name: string };
 
+/**
+ * Merge already-converted uploads of the same student, in order. Each part is
+ * re-read from its own record (owner in the WHERE clause), so a part deleted
+ * since the compose request fails clearly instead of printing a stale copy.
+ */
+async function composeParts(studentId: string, parts: FilePart[]): Promise<{ pdf: Buffer; pages: number }> {
+  const rows = await prisma.uploadedFile.findMany({
+    where: {
+      id: { in: parts.map((part) => part.fileId) },
+      studentId,
+      status: 'ready',
+      convertedKey: { not: null },
+      contentDeletedAt: null,
+    },
+    select: { id: true, convertedKey: true },
+  });
+  const keyById = new Map(rows.map((row) => [row.id, row.convertedKey!]));
+  const merged = await PDFDocument.create();
+  for (const part of parts) {
+    const key = keyById.get(part.fileId);
+    if (!key) throw new ConversionError('PARTS_UNAVAILABLE');
+    // a storage outage stays a retryable CONVERSION_FAILED
+    const doc = await PDFDocument.load(await storage.get(key));
+    const pages = await merged.copyPages(doc, doc.getPageIndices());
+    for (const page of pages) merged.addPage(page);
+  }
+  return { pdf: Buffer.from(await merged.save()), pages: merged.getPageCount() };
+}
+
 /** BullMQ 'convert' handler: upload(s) → one normalized print-ready PDF. */
 export async function convertFile(fileId: string): Promise<void> {
   const file = await prisma.uploadedFile.findUnique({ where: { id: fileId } });
@@ -146,7 +176,10 @@ export async function convertFile(fileId: string): Promise<void> {
       : [{ key: file.originalKey, mime: file.mimeType, name: file.originalName }];
 
     let result: { pdf: Buffer; pages: number };
-    if (sources.length === 1) {
+    const parts = readParts(file.parts);
+    if (parts) {
+      result = await composeParts(file.studentId, parts);
+    } else if (sources.length === 1) {
       const buf = await storage.get(sources[0]!.key);
       result = await sourceToPdf(buf, sources[0]!.mime);
     } else {
@@ -249,6 +282,7 @@ async function deleteDueFile(file: DueFile, now: Date): Promise<'deleted' | 'def
         originalKey: `deleted/${file.id}`,
         originalName: 'Document deleted',
         sources: Prisma.DbNull,
+        parts: Prisma.DbNull,
         contentDeletedAt: now,
         deletionAttempts: { increment: 1 },
         lastDeletionError: null,

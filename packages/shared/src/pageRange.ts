@@ -42,21 +42,30 @@ export function countSelectedPages(range: string | null, totalPages: number): nu
 export function normalizePageRange(range: string | null, totalPages: number | null): string | null {
   if (!range || !range.trim()) return null;
   try {
-    const pages = parsePageRange(range, totalPages ?? Number.MAX_SAFE_INTEGER);
-    const parts: string[] = [];
-    let start = pages[0]!;
-    let prev = start;
-    for (const p of [...pages.slice(1), Infinity]) {
-      if (p === prev + 1) {
-        prev = p;
-        continue;
-      }
-      parts.push(start === prev ? `${start}` : `${start}-${prev}`);
-      start = p;
-      prev = p;
-    }
-    return parts.join(',');
+    return formatPageList(parsePageRange(range, totalPages ?? Number.MAX_SAFE_INTEGER));
   } catch {
     return range.trim();
   }
+}
+
+/**
+ * The shortest range string for a set of 1-based pages ([1,2,3,5] -> "1-3,5").
+ * Order and duplicates in the input do not matter; an empty set gives "".
+ */
+export function formatPageList(pages: Iterable<number>): string {
+  const sorted = [...new Set(pages)].filter((p) => Number.isInteger(p) && p > 0).sort((a, b) => a - b);
+  if (sorted.length === 0) return '';
+  const parts: string[] = [];
+  let start = sorted[0]!;
+  let prev = start;
+  for (const p of [...sorted.slice(1), Infinity]) {
+    if (p === prev + 1) {
+      prev = p;
+      continue;
+    }
+    parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+    start = p;
+    prev = p;
+  }
+  return parts.join(',');
 }

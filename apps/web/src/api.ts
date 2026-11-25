@@ -291,6 +291,62 @@ export async function api<T>(
   return requestJson<T>(path, options, true);
 }
 
+/**
+ * Multipart upload that reports progress (fetch cannot report upload
+ * progress). Same header auth, one silent student renewal and the same error
+ * words as api().
+ */
+export async function uploadForm<T>(
+  path: string,
+  formData: FormData,
+  options: { role: Role; onProgress?: (fraction: number) => void; signal?: AbortSignal },
+  allowStudentRenewal = true,
+): Promise<T> {
+  const appCheck = await appCheckHeaders();
+  const token = getToken(options.role);
+  const { status, data, retryAfter } = await new Promise<{ status: number; data: ErrorBody; retryAfter: string | null }>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_URL}${path}`);
+      for (const [name, value] of Object.entries(appCheck)) xhr.setRequestHeader(name, value);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) options.onProgress?.(event.loaded / event.total);
+      };
+      xhr.onload = () => {
+        let body: ErrorBody = {};
+        try {
+          body = JSON.parse(xhr.responseText || '{}') as ErrorBody;
+        } catch {
+          /* non-JSON gateway page: handled by status below */
+        }
+        resolve({ status: xhr.status, data: body, retryAfter: xhr.getResponseHeader('Retry-After') });
+      };
+      xhr.onerror = () => reject(new ApiError(0, NETWORK_ERROR_MESSAGE));
+      xhr.onabort = () => reject(new DOMException('The upload was cancelled.', 'AbortError'));
+      if (options.signal?.aborted) {
+        reject(new DOMException('The upload was cancelled.', 'AbortError'));
+        return;
+      }
+      options.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+      xhr.send(formData);
+    },
+  );
+  if (status >= 200 && status < 300) return data as T;
+  if (status === 401 && options.role === 'student' && allowStudentRenewal) {
+    const fresh = await renewStudentSession();
+    if (fresh) return uploadForm<T>(path, formData, options, false);
+  }
+  if (status === 401) {
+    clearToken(options.role);
+    if (options.role === 'student') {
+      expireStudentSession();
+      throw new ApiError(401, STUDENT_SESSION_EXPIRED_MESSAGE, data);
+    }
+  }
+  throw new ApiError(status, errorMessageFor(status, data, retryAfter), data, status === 429 ? retryAfterSeconds(retryAfter) : null);
+}
+
 export const rupees = (paise: number): string => `₹${(paise / 100).toFixed(2)}`;
 
 /** Authenticated binary fetch (header auth, one silent student renewal). Used by the PDF preview. */

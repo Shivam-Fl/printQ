@@ -1,4 +1,23 @@
-import type { QueueBand } from '@printq/shared';
+import { parsePageRange, type QueueBand } from '@printq/shared';
+
+/**
+ * A page range short enough to read ("1-4, 9"), or the count of chosen pages
+ * ("23 chosen") when a page-by-page pick makes the list long.
+ */
+export function compactRange(range: string): string {
+  if (range.length <= 24) return range;
+  try {
+    return `${parsePageRange(range, Number.MAX_SAFE_INTEGER).length} chosen`;
+  } catch {
+    return 'chosen';
+  }
+}
+
+/** "pages 1-4" or "23 chosen pages", for one-line order summaries. */
+export function pagesPhrase(range: string): string {
+  const compact = compactRange(range);
+  return compact === range ? `pages ${range}` : `${compact} pages`;
+}
 
 export type StatusTone = 'neutral' | 'blue' | 'green' | 'red' | 'yellow';
 
@@ -74,7 +93,7 @@ export function specsText(s: SpecsLite, pagesPerCopy?: number): string {
     `${s.copies}× ${s.paperSize} · ${s.color ? 'Colour' : 'B/W'}` +
     `${s.duplex ? ' · both sides' : ''}` +
     `${s.binding ? ` · ${s.binding.replace('_', ' ')}` : ''}` +
-    `${s.pageRange ? ` · pages ${s.pageRange}` : ''}` +
+    `${s.pageRange ? ` · ${pagesPhrase(s.pageRange)}` : ''}` +
     `${pagesPerCopy ? ` · ${pagesPerCopy}pp` : ''}`
   );
 }

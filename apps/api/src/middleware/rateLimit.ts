@@ -99,6 +99,12 @@ export const uploadLimiter: RequestHandler = chain(
   makeLimiter('upload-user', 60_000, env.RATE_LIMIT_UPLOAD_PER_USER, false, (req) =>
     req.student ? `student:${req.student.id}` : ipOf(req)),
 );
+/** Composing an order from already-uploaded files: per student, plus the general per-IP upload ceiling. */
+export const composeLimiter: RequestHandler = chain(
+  makeLimiter('compose-ip', 60_000, env.RATE_LIMIT_UPLOAD_PER_IP, false, ipOf),
+  makeLimiter('compose-user', 60_000, env.RATE_LIMIT_COMPOSE_PER_USER, false, (req) =>
+    req.student ? `student:${req.student.id}` : ipOf(req)),
+);
 
 /**
  * Failure-only throttle for the counter-code release (guessing protection).

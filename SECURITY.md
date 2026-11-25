@@ -101,6 +101,12 @@ This file records the decisions so future sessions (human or AI) don't undo them
   paid orders—before deleting bytes. Prepared orders that never arrive are automatically cancelled
   and refunded after `PREPARED_ORDER_TTL_HOURS`; an hourly DB sweep also retries terminal refunds
   after provider outages.
+- **Multi-file orders**: each file is uploaded as its own record (`POST /api/files/parts`) and the
+  order is a separate joined document (`POST /api/files/compose`, owner in the WHERE clause, ready
+  parts only, ≤15 files / 500 pages, own rate limit). The joined document holds its own merged copy
+  and never shares storage keys with its parts; when its deletion deadline is set (print or
+  terminal job), the same deadline is passed to each part unless that part backs an active job of
+  its own. Unused parts still fall under the 24-hour hard maximum.
 
 ## Arrival and queue integrity
 

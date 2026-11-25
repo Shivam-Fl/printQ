@@ -115,6 +115,35 @@ async function upload(token, shopSlug, pages, name) {
   return fileId;
 }
 
+/**
+ * The web app's path: each file uploaded separately (/parts), then joined in
+ * print order into one order document (/compose). Returns the joined file id.
+ */
+async function uploadOrder(token, shopSlug, files) {
+  const formData = new FormData();
+  formData.append('shopSlug', shopSlug);
+  for (const { pages, name } of files) formData.append('files', new Blob([await makePdf(pages)], { type: 'application/pdf' }), name);
+  const uploaded = await request('/api/files/parts', { method: 'POST', token, formData });
+  assert(uploaded.status === 201 && uploaded.data.files?.length === files.length, `${files.length} files uploaded separately`);
+  const ids = uploaded.data.files.map((file) => file.id);
+  for (const [index, id] of ids.entries()) {
+    const file = await waitFor(`${files[index].name} conversion`, async () => {
+      const result = await request(`/api/files/${id}`, { token });
+      return result.data.file?.status === 'ready' ? result.data.file : null;
+    });
+    assert(file.pages === files[index].pages, `${files[index].name} prepared on its own`);
+  }
+  const composed = await request('/api/files/compose', { method: 'POST', token, body: { fileIds: ids } });
+  assert(composed.status === 201 && composed.data.file?.id, 'files joined into one order document');
+  const joined = await waitFor('order document', async () => {
+    const result = await request(`/api/files/${composed.data.file.id}`, { token });
+    return result.data.file?.status === 'ready' ? result.data.file : null;
+  });
+  const total = files.reduce((sum, file) => sum + file.pages, 0);
+  assert(joined.pages === total && joined.parts?.length === files.length, `order document has all ${total} pages, file by file`);
+  return joined.id;
+}
+
 async function createPayAtShop(token, fileId, specs) {
   const created = await request('/api/jobs', {
     method: 'POST',
@@ -325,7 +354,11 @@ async function main() {
   const studentToken = verified.data.token;
   await request('/api/auth/student/me', { method: 'PATCH', token: studentToken, body: { name: 'E2E Student' } });
 
-  const fileId = await upload(studentToken, shopSlug, 3, 'market-ready-test.pdf');
+  // two files (2 + 1 pages) joined into one 3-page order: priced, queued and printed as one job
+  const fileId = await uploadOrder(studentToken, shopSlug, [
+    { pages: 2, name: 'market-ready-test.pdf' },
+    { pages: 1, name: 'market-ready-cover.pdf' },
+  ]);
   const specs = { copies: 2, paperSize: 'A4', color: true, duplex: true, binding: 'stapling', pageRange: '1-2' };
   const quote = await request('/api/jobs/quote', { method: 'POST', token: studentToken, body: { fileId, specs } });
   assert(quote.status === 200 && quote.data.quote.pagesPerCopy === 2, 'server quote honors page range and options');
