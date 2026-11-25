@@ -33,7 +33,7 @@ export function titleForPath(pathname: string): string {
   const clean = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
   const exact = EXACT[clean];
   if (exact) return clean === '/' ? exact : `${exact} · ${BRAND}`;
-  if (/^\/s\/[^/]+\/file\/[^/]+$/.test(clean)) return `Print settings · ${BRAND}`;
+  if (/^\/s\/[^/]+\/order$/.test(clean) || /^\/s\/[^/]+\/file\/[^/]+$/.test(clean)) return `Print settings · ${BRAND}`;
   if (/^\/s\/[^/]+$/.test(clean)) return `Print at this shop · ${BRAND}`;
   if (/^\/dashboard\/earnings\/receipt\/[^/]+$/.test(clean)) return `Fee receipt · ${BRAND}`;
   if (/^\/jobs\/[^/]+$/.test(clean)) return `Print status · ${BRAND}`;

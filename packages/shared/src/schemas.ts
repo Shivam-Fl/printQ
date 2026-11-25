@@ -14,10 +14,13 @@ export const phoneSchema = z
       .transform((v) => (v.startsWith('+91') ? v : `+91${v}`)),
   );
 
+/** Long enough for a page-by-page pick across a 500-page order (e.g. every other page). */
+export const MAX_PAGE_RANGE_LENGTH = 2000;
+
 export const pageRangeSchema = z
   .string()
   .trim()
-  .max(200)
+  .max(MAX_PAGE_RANGE_LENGTH, 'Too many separate page ranges. Choose fewer, longer runs of pages.')
   .regex(/^\d+(-\d+)?(\s*,\s*\d+(-\d+)?)*$/, 'Use a format like 1-5,8');
 
 /** Paper/binding are shop-defined ids — validated against the shop at request time. */

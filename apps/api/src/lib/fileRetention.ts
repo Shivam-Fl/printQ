@@ -2,6 +2,7 @@ import { env } from '../config/env.js';
 import { conflict } from './errors.js';
 import { logger } from './logger.js';
 import { prisma } from './prisma.js';
+import { readParts } from './fileParts.js';
 import { fileRetentionQueue } from './queues.js';
 
 /**
@@ -100,7 +101,7 @@ export function assertFileCanBackNewJobFrom(
  * retention, and a stale retry cannot undo a confirmed-print deletion time.
  * Deadlines are only started once no active job still references the file.
  */
-async function scheduleEarlierDeletion(fileId: string, deadline: Date, now: Date): Promise<void> {
+async function scheduleEarlierDeletion(fileId: string, deadline: Date, now: Date, cascade = true): Promise<void> {
   if (await fileHasActiveJobs(fileId)) {
     logger.info({ fileId }, 'file_deletion_deferred_active_jobs');
     return;
@@ -116,6 +117,16 @@ async function scheduleEarlierDeletion(fileId: string, deadline: Date, now: Date
   if (updated.count === 0) return;
 
   await ensureFileDeletionJob(fileId, deadline, now);
+
+  // A composed order document passes its deadline on to the uploads it was
+  // merged from, so their own copies never outlive the printed or cancelled
+  // order. A part that backs a job of its own is still protected (checked
+  // above, per part). Parts are never composed documents themselves.
+  if (!cascade) return;
+  const composed = await prisma.uploadedFile.findUnique({ where: { id: fileId }, select: { parts: true } });
+  for (const part of readParts(composed?.parts) ?? []) {
+    await scheduleEarlierDeletion(part.fileId, deadline, now, false);
+  }
 }
 
 /** Re-enqueue a durable deadline after a Redis/worker outage. Job IDs are

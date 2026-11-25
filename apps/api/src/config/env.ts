@@ -156,6 +156,8 @@ const envSchema = z.object({
   RATE_LIMIT_GENERAL_PER_IP: z.coerce.number().int().min(10).max(1_000_000).default(3_000),
   RATE_LIMIT_UPLOAD_PER_USER: z.coerce.number().int().min(1).max(10_000).default(10),
   RATE_LIMIT_UPLOAD_PER_IP: z.coerce.number().int().min(1).max(100_000).default(120),
+  /// Joining already-uploaded files into one order document (no new bytes, but a merge job each time).
+  RATE_LIMIT_COMPOSE_PER_USER: z.coerce.number().int().min(1).max(10_000).default(30),
   PRINT_LEASE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(90),
   /// Hard backstop: a printing job the spooler never acknowledged (no spoolAcceptedAt) is failed after this long even if its computer is online.
   PRINT_CLAIM_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(120),

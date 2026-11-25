@@ -14,6 +14,7 @@ export const CONVERSION_ERRORS = {
   TOO_MANY_PAGES: 'This document has too many pages for one order. Split it and upload the parts separately.',
   CONVERSION_TIMEOUT: 'Preparing this file took too long. Try again, or upload it as a PDF.',
   CONVERSION_FAILED: 'We hit a problem preparing this file. Please try again in a moment.',
+  PARTS_UNAVAILABLE: 'One of these files is no longer available. Remove it and add it again.',
 } as const;
 
 export type ConversionErrorCode = keyof typeof CONVERSION_ERRORS;

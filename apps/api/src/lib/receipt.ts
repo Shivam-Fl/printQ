@@ -3,9 +3,21 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
 // @pdf-lib/fontkit's Indic (Devanagari) shaper is built with babel and needs this global at runtime
 import 'regenerator-runtime/runtime.js';
 import fontkit from '@pdf-lib/fontkit';
-import { normalizePageRange, type JobSpecs, type PriceBreakdown } from '@printq/shared';
+import { countSelectedPages, normalizePageRange, type JobSpecs, type PriceBreakdown } from '@printq/shared';
 import { logger } from './logger.js';
 import { prisma } from './prisma.js';
+
+/** A page-by-page pick can be a long list: past a line or so, the receipt states the count instead. */
+export function receiptPages(range: string | null, totalPages: number | null): string {
+  const normalized = normalizePageRange(range, totalPages);
+  if (normalized === null) return 'All';
+  if (normalized.length <= 60 || totalPages === null) return normalized;
+  try {
+    return `${countSelectedPages(normalized, totalPages)} selected pages`;
+  } catch {
+    return normalized;
+  }
+}
 
 /** Hand-over time from the audit trail (updatedAt also moves when a rating is saved). */
 export async function loadCompletedAt(jobId: string, status: string): Promise<Date | null> {
@@ -263,7 +275,7 @@ function buildOps(data: ReceiptData, files: FontFiles, fonts: { regular: FontSet
   text(`Paper: ${data.specs.paperSize}${data.specs.color ? ' (colour)' : ' (B/W)'}`);
   text(`Sides: ${data.specs.duplex ? 'Both' : 'One'}`);
   text(`Binding: ${data.specs.binding ?? 'None'}`);
-  text(`Pages: ${normalizePageRange(data.specs.pageRange, data.totalPages ?? null) ?? 'All'}`);
+  text(`Pages: ${receiptPages(data.specs.pageRange, data.totalPages ?? null)}`, { maxLines: 2 });
   space(4);
   rule();
 

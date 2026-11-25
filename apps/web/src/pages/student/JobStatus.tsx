@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import { enablePush, pushPermission } from '../../push.js';
-import { jobBadge, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { compactRange, jobBadge, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { StudentBandPanel, codeHalves, useNow } from '../../components/QueueBand.js';
@@ -428,7 +428,7 @@ export default function JobStatus() {
               <div><div className="k">Colour</div><div className="v">{job.specs.color ? 'Colour' : 'Black & white'}</div></div>
               <div><div className="k">Sides</div><div className="v">{job.specs.duplex ? 'Both sides' : 'One side'}</div></div>
               <div><div className="k">Binding</div><div className="v">{binding ?? 'None'}</div></div>
-              <div><div className="k">Pages</div><div className="v">{job.specs.pageRange ?? 'All'}{job.file.pages ? ` of ${job.file.pages}` : ''}</div></div>
+              <div><div className="k">Pages</div><div className="v">{job.specs.pageRange ? compactRange(job.specs.pageRange) : 'All'}{job.file.pages ? ` of ${job.file.pages}` : ''}</div></div>
             </div>
             <div className="receipt job-total">
               <div className="line total">

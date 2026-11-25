@@ -1,11 +1,16 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { parsePageRange } from '@printq/shared';
-import { ApiError, api, rupees } from '../../api.js';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ApiError, api, getToken, rupees } from '../../api.js';
 import { createLatestRequest, isAbortError } from '../../lib/latestRequest.js';
 import { loadRemembered, saveRemembered, startingSpecs } from '../../lib/printSettings.js';
+import { addFiles, clearDraft, docMatches, getDraft, openDoc, readyParts, retryJoin, setExcluded, useOrderDraft, type Draft } from '../../lib/orderDraft.js';
+import { MAX_ORDER_FILES } from '../../lib/fileChoice.js';
+import { compileRange, rangeProblem, totalPages, type Excluded } from '../../lib/pageSelection.js';
+import { studentLoginPath } from '../../lib/studentReturn.js';
 import { enablePush, pushPermission } from '../../push.js';
 import Topbar from '../../components/Topbar.js';
+import OrderFiles, { useFileDrop } from '../../components/OrderFiles.js';
+import type { PendingFile } from '../../components/PageBoard.js';
 
 interface Paper {
   id: string;
@@ -35,7 +40,7 @@ interface Quote {
 }
 
 // pdf.js is ~400 KB: load it only when this screen is opened.
-const PdfPreview = lazy(() => import('../../components/PdfPreview.js'));
+const PageBoard = lazy(() => import('../../components/PageBoard.js'));
 
 /** Why colour can't be chosen, or null when it can. */
 export function inkUnavailableNote(papers: Paper[], paperId: string): string | null {
@@ -43,6 +48,26 @@ export function inkUnavailableNote(papers: Paper[], paperId: string): string | n
   if (paper?.colorAvailable) return null;
   if (!papers.some((p) => p.colorAvailable)) return 'This shop prints black & white only right now.';
   return `Colour isn’t available on ${paper?.label ?? 'this paper'} here. Choose another paper size for colour.`;
+}
+
+/**
+ * What still stands between the student and "Place order", or null. `wait`
+ * reasons resolve by themselves (uploads, preparing); `fix` reasons need the
+ * student (a broken file, no pages chosen).
+ */
+export function orderBlocker(draft: Draft | null, rangeIssue: string | null): { kind: 'wait' | 'fix'; text: string } | null {
+  const items = draft?.items ?? [];
+  if (items.length === 0) return { kind: 'fix', text: 'Add a file to continue.' };
+  const count = (status: string) => items.filter((it) => it.status === status).length;
+  const files = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
+  if (count('uploading')) return { kind: 'wait', text: `Uploading ${files(count('uploading'))}…` };
+  if (count('preparing')) return { kind: 'wait', text: `Preparing ${files(count('preparing'))}…` };
+  const failed = count('failed');
+  if (failed) return { kind: 'fix', text: failed === 1 ? 'One file could not be added. Remove it to continue.' : `${failed} files could not be added. Remove them to continue.` };
+  if (draft?.doc?.status === 'failed') return { kind: 'fix', text: draft.doc.error ?? 'Could not put your files together.' };
+  if (!docMatches(draft)) return { kind: 'wait', text: 'Putting your files together…' };
+  if (rangeIssue) return { kind: 'fix', text: rangeIssue };
+  return null;
 }
 
 function toLocalInput(d: Date): string {
@@ -80,74 +105,95 @@ function Choice<T extends string>({ label, value, options, onChange, describedBy
   );
 }
 
+const NO_EXCLUSIONS: Excluded = {};
+
 export default function NewJob() {
-  const { slug = '', fileId = '' } = useParams();
+  const { slug = '' } = useParams();
+  const [params, setParams] = useSearchParams();
+  const docParam = params.get('doc');
   const navigate = useNavigate();
+  const draft = useOrderDraft(slug);
+  const signedIn = Boolean(getToken('student'));
+
   const [opts, setOpts] = useState<ShopOptions | null>(null);
   const [shopName, setShopName] = useState('');
-  const [fileName, setFileName] = useState('');
   const [specs, setSpecs] = useState<Specs | null>(null);
   const [planTime, setPlanTime] = useState(false);
   const [slot, setSlot] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60_000)));
-  const [pages, setPages] = useState<number | null>(null);
   const [quoted, setQuoted] = useState<{ key: string; quote: Quote; unsupported?: { code: string; message: string }[] } | null>(null);
   const [quoteErrorKey, setQuoteErrorKey] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const [pageMode, setPageMode] = useState<'all' | 'custom'>('all');
-  const [rangeAdvanced, setRangeAdvanced] = useState(false);
-  const [rangeFrom, setRangeFrom] = useState(1);
-  const [rangeTo, setRangeTo] = useState(1);
-  const [rawRange, setRawRange] = useState('');
-  const [rangeError, setRangeError] = useState('');
-
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [couponError, setCouponError] = useState('');
 
-  const mode: 'instant' | 'scheduled' = planTime ? 'scheduled' : 'instant';
-  const quoteKey = specs ? JSON.stringify([specs, appliedCoupon]) : '';
-  // The quote is only trusted while it answers EXACTLY the options on screen.
-  const quoteCurrent = quoted !== null && quoted.key === quoteKey;
-  const quoteFailed = quoteErrorKey !== null && quoteErrorKey === quoteKey;
-  const quote = quoteCurrent ? quoted.quote : null;
-  // The shop cannot produce these options (e.g. colour on a B/W-only shop): say so now, not at the counter.
-  const unsupported = quoteCurrent ? (quoted.unsupported ?? []) : [];
+  // a file dropped anywhere on the page joins the order
+  const drop = useFileDrop(Boolean(draft) && (draft?.items.length ?? 0) < MAX_ORDER_FILES, (files) => addFiles(slug, files));
+
   const latestQuote = useRef(createLatestRequest());
   const submitting = useRef(false);
   const idemKey = useRef(crypto.randomUUID());
 
-  // the shop's options and this file, in parallel; settings start from last time at this shop
+  // Signed out: sign in and come back here. No files and no link: start at the shop page.
+  useEffect(() => {
+    if (!signedIn) navigate(studentLoginPath(`/s/${slug}/order${docParam ? `?doc=${encodeURIComponent(docParam)}` : ''}`), { replace: true });
+    else if (!docParam && !getDraft(slug)) navigate(`/s/${slug}`, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A link (or a refresh) names the joined document: rebuild the order from it.
+  useEffect(() => {
+    if (signedIn && docParam) void openDoc(slug, docParam);
+  }, [slug, docParam, signedIn]);
+
+  // Keep the address pointing at the current joined document, so a refresh brings it back.
+  useEffect(() => {
+    if (!draft || draft.loading) return;
+    if (docMatches(draft) && draft.doc.fileId !== docParam) setParams({ doc: draft.doc.fileId }, { replace: true });
+    else if (draft.items.length === 0 && docParam && !draft.loadError) setParams({}, { replace: true });
+  }, [draft, docParam, setParams]);
+
+  // the shop's options; settings start from last time at this shop
   useEffect(() => {
     let cancelled = false;
     setLoadFailed(false);
-    Promise.all([
-      api<{ shop: { name: string; options: ShopOptions } }>(`/api/public/shops/${slug}`),
-      api<{ file: { originalName: string; pages: number | null } }>(`/api/files/${fileId}`, { role: 'student' }).catch(() => null),
-    ])
-      .then(([shopRes, fileRes]) => {
+    api<{ shop: { name: string; options: ShopOptions } }>(`/api/public/shops/${slug}`)
+      .then((res) => {
         if (cancelled) return;
-        setOpts(shopRes.shop.options);
-        setShopName(shopRes.shop.name);
-        if (fileRes) {
-          setFileName(fileRes.file.originalName);
-          if (fileRes.file.pages) setPages(fileRes.file.pages);
-        }
-        setSpecs(startingSpecs(shopRes.shop.options.papers, shopRes.shop.options.duplexEnabled, loadRemembered(slug)));
+        setOpts(res.shop.options);
+        setShopName(res.shop.name);
+        setSpecs((prev) => prev ?? startingSpecs(res.shop.options.papers, res.shop.options.duplexEnabled, loadRemembered(slug)));
       })
       .catch(() => {
         if (!cancelled) setLoadFailed(true);
       });
     return () => { cancelled = true; };
-  }, [slug, fileId]);
+  }, [slug]);
+
+  const parts = useMemo(() => readyParts(draft), [draft]);
+  const excluded = draft?.excluded ?? NO_EXCLUSIONS;
+  const docFileId = docMatches(draft) ? draft.doc.fileId : null;
+  const range = useMemo(() => compileRange(parts, excluded), [parts, excluded]);
+  const rangeIssue = rangeProblem(range);
+  const blocker = orderBlocker(draft, rangeIssue);
+  const blockerText = blocker?.text ?? null;
+  const orderSpecs = useMemo(() => (specs ? { ...specs, pageRange: range } : null), [specs, range]);
+
+  const quoteKey = docFileId && orderSpecs ? JSON.stringify([docFileId, orderSpecs, appliedCoupon]) : '';
+  // The quote is only trusted while it answers EXACTLY the order on screen.
+  const quoteCurrent = quoted !== null && quoted.key === quoteKey;
+  const quoteFailed = quoteErrorKey !== null && quoteErrorKey === quoteKey;
+  const quote = quoteCurrent ? quoted.quote : null;
+  // The shop cannot produce these options (e.g. colour on a B/W-only shop): say so now, not at the counter.
+  const unsupported = quoteCurrent ? (quoted.unsupported ?? []) : [];
 
   // Debounced (250 ms) quote refresh with abort + sequencing: the total shown
-  // always belongs to the options on screen, never to an older request.
+  // always belongs to the order on screen, never to an older request.
   useEffect(() => {
-    if (!specs) return;
-    const key = JSON.stringify([specs, appliedCoupon]);
+    if (!docFileId || !orderSpecs || blockerText) return;
+    const key = JSON.stringify([docFileId, orderSpecs, appliedCoupon]);
     const guard = latestQuote.current;
     const t = setTimeout(() => {
       const ticket = guard.begin();
@@ -155,13 +201,12 @@ export default function NewJob() {
         method: 'POST',
         role: 'student',
         signal: ticket.signal,
-        body: appliedCoupon ? { fileId, specs, couponCode: appliedCoupon } : { fileId, specs },
+        body: appliedCoupon ? { fileId: docFileId, specs: orderSpecs, couponCode: appliedCoupon } : { fileId: docFileId, specs: orderSpecs },
       })
         .then((res) => {
           if (!ticket.isCurrent()) return;
           setQuoted({ key, quote: res.quote, unsupported: res.unsupported });
           setQuoteErrorKey(null);
-          setPages(res.pages);
           setError('');
         })
         .catch((err) => {
@@ -175,19 +220,19 @@ export default function NewJob() {
       clearTimeout(t);
       guard.cancel();
     };
-  }, [specs, appliedCoupon, fileId]);
+  }, [docFileId, orderSpecs, appliedCoupon, blockerText]);
 
   async function applyCoupon() {
-    if (!specs || !couponInput.trim()) return;
+    if (!orderSpecs || !docFileId || !couponInput.trim()) return;
     setCouponError('');
     try {
+      const code = couponInput.trim();
       const res = await api<{ quote: Quote; pages: number; unsupported?: { code: string; message: string }[] }>('/api/jobs/quote', {
         method: 'POST',
         role: 'student',
-        body: { fileId, specs, couponCode: couponInput.trim() },
+        body: { fileId: docFileId, specs: orderSpecs, couponCode: code },
       });
-      const code = couponInput.trim();
-      setQuoted({ key: JSON.stringify([specs, code]), quote: res.quote, unsupported: res.unsupported });
+      setQuoted({ key: JSON.stringify([docFileId, orderSpecs, code]), quote: res.quote, unsupported: res.unsupported });
       setAppliedCoupon(code);
     } catch (err) {
       setCouponError(err instanceof Error ? err.message : 'This coupon does not work.');
@@ -207,48 +252,22 @@ export default function NewJob() {
     if (specs?.color && !colorAvailable) set('color', false);
   }, [specs?.paperSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // once the page count is known, default the custom-range "to" field to the last page
-  useEffect(() => {
-    if (pages && rangeFrom === 1 && rangeTo === 1) setRangeTo(pages);
-  }, [pages]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // compose + validate the page range client-side before it ever reaches pricing/checkout
-  useEffect(() => {
-    if (pageMode === 'all') {
-      setRangeError('');
-      set('pageRange', null);
-      return;
-    }
-    const candidate = rangeAdvanced ? rawRange.trim() : rangeFrom === rangeTo ? `${rangeFrom}` : `${rangeFrom}-${rangeTo}`;
-    if (!candidate) {
-      setRangeError('Enter the pages you want, for example 1-5');
-      return;
-    }
-    if (!pages) return;
-    try {
-      parsePageRange(candidate, pages);
-      setRangeError('');
-      set('pageRange', candidate === `1-${pages}` ? null : candidate);
-    } catch (err) {
-      setRangeError(err instanceof Error ? err.message : 'Those pages are not in this file.');
-    }
-  }, [pageMode, rangeAdvanced, rangeFrom, rangeTo, rawRange, pages]); // eslint-disable-line react-hooks/exhaustive-deps
-
   async function placeOrder() {
-    if (!specs || busy || submitting.current) return; // double-tap guard (state is async)
+    if (!orderSpecs || !docFileId || blocker || busy || submitting.current) return; // double-tap guard (state is async)
     submitting.current = true;
     setBusy(true);
     setError('');
     try {
-      const body: Record<string, unknown> = { fileId, specs, mode };
-      if (mode === 'scheduled') body.scheduledTime = new Date(slot).toISOString();
+      const body: Record<string, unknown> = { fileId: docFileId, specs: orderSpecs, mode: planTime ? 'scheduled' : 'instant' };
+      if (planTime) body.scheduledTime = new Date(slot).toISOString();
       if (appliedCoupon) body.couponCode = appliedCoupon;
       const res = await api<{
         job: { id: string };
         checkout: { mode: 'pay_at_shop'; amountPaise: number };
       }>('/api/jobs', { method: 'POST', role: 'student', body, idempotencyKey: idemKey.current });
-      saveRemembered(slug, { paperSize: specs.paperSize, duplex: specs.duplex });
+      saveRemembered(slug, { paperSize: orderSpecs.paperSize, duplex: orderSpecs.duplex });
       if (pushPermission() === 'default') void enablePush();
+      clearDraft(slug);
       navigate(`/jobs/${res.job.id}`);
     } catch (err) {
       // A real answer ends this attempt; a network failure keeps the key so a
@@ -261,10 +280,25 @@ export default function NewJob() {
     }
   }
 
-  if (!opts || !specs) {
+  const back = <Link to={`/s/${slug}`}>Shop page</Link>;
+
+  if (draft?.loadError && draft.items.length === 0) {
     return (
       <div className="page wide checkout-page">
-        <Topbar right={<Link to={`/s/${slug}`}>Change file</Link>} />
+        <Topbar right={back} />
+        <div className="empty-state" role="alert">
+          <strong>This order can’t be opened</strong>
+          <p>{draft.loadError}</p>
+          <Link to={`/s/${slug}`} className="button-link" style={{ marginTop: 14 }} onClick={() => clearDraft(slug)}>Add your files again</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!opts || !specs || !draft || draft.loading) {
+    return (
+      <div className="page wide checkout-page">
+        <Topbar right={back} />
         {loadFailed ? (
           <div className="empty-state" role="alert">
             <strong>Could not open this order</strong>
@@ -283,23 +317,35 @@ export default function NewJob() {
 
   const minSlot = toLocalInput(new Date(Date.now() + 20 * 60_000));
   const maxSlot = toLocalInput(new Date(Date.now() + 72 * 3_600_000));
-  const blocked = !quote || busy || !!rangeError || unsupported.length > 0;
+  const blocked = Boolean(blocker) || !quote || busy || unsupported.length > 0;
   const bindingOptions = [{ value: 'none', label: 'None' }, ...opts.bindings.map((b) => ({ value: b.id, label: b.label }))];
-  const totalPages = quote ? quote.pagesPerCopy * specs.copies : null;
+  const printedPages = quote ? quote.pagesPerCopy * specs.copies : null;
+  const sheets = quote && specs.duplex ? Math.ceil(quote.pagesPerCopy / 2) * specs.copies : null;
+  const pending: PendingFile[] = draft.items
+    .filter((it) => it.status !== 'ready')
+    .map((it) => ({ key: it.key, name: it.name, status: it.status as PendingFile['status'] }));
+  const fileCount = draft.items.length;
+  const allPages = totalPages(parts);
+  const title = fileCount === 1 ? draft.items[0]!.name : 'Your print order';
 
   return (
-    <div className="page wide checkout-page">
-      <Topbar right={<Link to={`/s/${slug}`}>Change file</Link>} />
+    <div className="page wide checkout-page" {...drop.handlers}>
+      <Topbar right={back} />
       <div className="checkout-grid">
         <div className="checkout-main">
           <header className="checkout-head">
             <p className="checkout-shop">{shopName}</p>
-            <h1>{fileName || 'Your print'}</h1>
-            <p className="dim">{pages ? `${pages} page${pages === 1 ? '' : 's'}` : 'Counting pages…'} · nothing to pay now</p>
+            <h1>{title}</h1>
+            <p className="dim">
+              {fileCount > 1 ? `${fileCount} files · ` : ''}
+              {allPages ? `${allPages} page${allPages === 1 ? '' : 's'}` : 'Getting your pages ready…'} · nothing to pay now
+            </p>
           </header>
 
-          <section className="checkout-card" aria-labelledby="settings-title">
-            <h2 id="settings-title" className="sr-only">Print settings</h2>
+          <OrderFiles slug={slug} draft={draft} dragging={drop.dragging} />
+
+          <section className="checkout-card settings-card" aria-labelledby="settings-title">
+            <h2 id="settings-title" className="card-title">Print settings</h2>
             <div className="field copies-field">
               <label htmlFor="copies">Copies</label>
               <div className="stepper">
@@ -348,33 +394,6 @@ export default function NewJob() {
                 </select>
               </div>
             ))}
-
-            <Choice
-              label="Pages"
-              value={pageMode}
-              options={[{ value: 'all', label: pages ? `All ${pages}` : 'All' }, { value: 'custom', label: 'Choose pages' }]}
-              onChange={(v) => setPageMode(v)}
-            />
-            {pageMode === 'custom' && (
-              <div className="page-range">
-                {rangeAdvanced ? (
-                  <>
-                    <label htmlFor="advanced-range">Page numbers or ranges</label>
-                    <input id="advanced-range" type="text" placeholder="For example: 1-5, 8, 11-14" value={rawRange} onChange={(e) => setRawRange(e.target.value)} aria-invalid={rangeError ? true : undefined} aria-describedby={rangeError ? 'range-error' : undefined} autoFocus />
-                    <button type="button" className="quiet" onClick={() => setRangeAdvanced(false)}>Use from and to</button>
-                  </>
-                ) : (
-                  <>
-                    <div className="form-row">
-                      <div className="field grow"><label htmlFor="rfrom">From page</label><input id="rfrom" type="number" inputMode="numeric" min={1} max={pages ?? 1} value={rangeFrom} onChange={(e) => setRangeFrom(Math.max(1, Number(e.target.value) || 1))} aria-invalid={rangeError ? true : undefined} aria-describedby={rangeError ? 'range-error' : undefined} /></div>
-                      <div className="field grow"><label htmlFor="rto">To page</label><input id="rto" type="number" inputMode="numeric" min={1} max={pages ?? 1} value={rangeTo} onChange={(e) => setRangeTo(Math.max(1, Number(e.target.value) || 1))} aria-invalid={rangeError ? true : undefined} aria-describedby={rangeError ? 'range-error' : undefined} /></div>
-                    </div>
-                    <button type="button" className="quiet" onClick={() => setRangeAdvanced(true)}>Need separate ranges?</button>
-                  </>
-                )}
-                {rangeError && <p id="range-error" className="field-error" role="alert">{rangeError}</p>}
-              </div>
-            )}
           </section>
 
           <section className="checkout-extras" aria-label="Optional">
@@ -396,7 +415,7 @@ export default function NewJob() {
                 <summary>Have a coupon?</summary>
                 <form className="row nowrap coupon-form" onSubmit={(e) => { e.preventDefault(); void applyCoupon(); }}>
                   <input type="text" aria-label="Coupon code" placeholder="Coupon code" value={couponInput} onChange={(e) => setCouponInput(e.target.value.toUpperCase())} aria-invalid={couponError ? true : undefined} />
-                  <button type="submit" className="secondary" disabled={!couponInput.trim()}>Apply</button>
+                  <button type="submit" className="secondary" disabled={!couponInput.trim() || !docFileId}>Apply</button>
                 </form>
                 {couponError && <p className="field-error" role="alert">{couponError}</p>}
               </details>
@@ -405,24 +424,37 @@ export default function NewJob() {
         </div>
 
         <aside className="checkout-side">
-          <div className="preview-card">
-            <div className="preview-card-head"><strong>Preview</strong><span>{pages ? `${pages} pages` : 'Preparing…'}</span></div>
-            <Suspense fallback={<div className="pdf-status" role="status">Preparing preview…</div>}>
-              <PdfPreview fileId={fileId} totalPages={pages} pageRange={specs.pageRange} />
-            </Suspense>
-          </div>
+          <Suspense fallback={<section className="pages-card"><div className="pdf-status" role="status">Loading pages…</div></section>}>
+            <PageBoard
+              parts={parts}
+              pending={pending}
+              excluded={excluded}
+              onChange={(next) => setExcluded(slug, next)}
+              grayscale={!specs.color}
+              docFileId={docFileId}
+            />
+          </Suspense>
 
           <div className="checkout-bar">
-            {(unsupported.length > 0 || error) && (
+            {blocker?.kind === 'wait' && (
+              <div className="bar-wait" role="status"><span className="spinner" aria-hidden /> {blocker.text}</div>
+            )}
+            {(blocker?.kind === 'fix' || unsupported.length > 0 || error) && (
               <div className="bar-alert" role="alert">
-                {unsupported.map((u) => <p key={u.code}>{u.message}</p>)}
-                {error && <p>{error}</p>}
+                {blocker?.kind === 'fix' && <p>{blocker.text}</p>}
+                {blocker?.kind === 'fix' && draft.doc?.status === 'failed' && (
+                  <button type="button" className="quiet" onClick={() => retryJoin(slug)}>Try again</button>
+                )}
+                {!blocker && unsupported.map((u) => <p key={u.code}>{u.message}</p>)}
+                {!blocker && error && <p>{error}</p>}
               </div>
             )}
             <div className="bar-total" aria-live="polite">
-              <span className="bar-label">Total{totalPages ? ` · ${totalPages} page${totalPages === 1 ? '' : 's'}` : ''}</span>
-              <strong className="num" aria-busy={!quote && !quoteFailed}>
-                {quote ? rupees(quote.totalPaise) : quoteFailed ? 'Unavailable' : <span className="total-loading">Updating…</span>}
+              <span className="bar-label">
+                Total{printedPages ? ` · ${printedPages} page${printedPages === 1 ? '' : 's'}` : ''}{sheets ? ` on ${sheets} sheet${sheets === 1 ? '' : 's'}` : ''}
+              </span>
+              <strong className="num" aria-busy={!quote && !quoteFailed && !blocker}>
+                {quote && !blocker ? rupees(quote.totalPaise) : quoteFailed && !blocker ? 'Unavailable' : blocker ? '—' : <span className="total-loading">Updating…</span>}
               </strong>
               <span className="bar-sub">Pay at the shop · cash or UPI</span>
             </div>
