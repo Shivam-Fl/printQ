@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import ErrorBoundary from './components/ErrorBoundary.js';
 import SessionGuard from './components/SessionGuard.js';
 import { titleForPath } from './lib/routeTitles.js';
@@ -54,6 +54,12 @@ function RouteFallback() {
   );
 }
 
+/** /s/:slug/file/:fileId → /s/:slug/order?doc=:fileId (the order page rebuilds itself from the document). */
+function LegacyOrderRedirect() {
+  const { slug = '', fileId = '' } = useParams();
+  return <Navigate to={`/s/${encodeURIComponent(slug)}/order?doc=${encodeURIComponent(fileId)}`} replace />;
+}
+
 export default function App() {
   const { pathname } = useLocation();
   return (
@@ -73,7 +79,9 @@ export default function App() {
         <Route path="/jobs/:id" element={<JobStatus />} />
         <Route path="/shops" element={<ShopDirectory />} />
         <Route path="/s/:slug" element={<ShopLanding />} />
-        <Route path="/s/:slug/file/:fileId" element={<NewJob />} />
+        <Route path="/s/:slug/order" element={<NewJob />} />
+        {/* older address of the order page: one file id in the path */}
+        <Route path="/s/:slug/file/:fileId" element={<LegacyOrderRedirect />} />
         {/* shop */}
         <Route path="/dashboard/login" element={<ShopLogin />} />
         <Route path="/dashboard/register" element={<ShopRegister />} />

@@ -542,6 +542,11 @@ model UploadedFile {
   originalKey         String
   /// multi-file uploads: [{ key, mime, name }] merged in order; null = single
   sources             Json?
+  /// A composed order document: [{ fileId, name, pages }], the student's own
+  /// ready uploads merged in this order by the worker. Its originalKey is a
+  /// placeholder; the content lives only at convertedKey, and the parts keep
+  /// their own content and deadlines (see fileRetention.ts).
+  parts               Json?
   convertedKey        String?
   previewKey          String?
   mimeType            String

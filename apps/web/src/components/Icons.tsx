@@ -49,3 +49,33 @@ export const IconUpload = (p: P) => (
 export const IconPin = (p: P) => (
   <svg {...base} {...p}><path d="M12 21s-7-6.2-7-11.5a7 7 0 1 1 14 0C19 14.8 12 21 12 21Z" /><circle cx="12" cy="9.5" r="2.5" /></svg>
 );
+export const IconCamera = (p: P) => (
+  <svg {...base} {...p}><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+);
+export const IconClose = (p: P) => (
+  <svg {...base} {...p}><path d="M6 6l12 12M18 6 6 18" /></svg>
+);
+export const IconArrowUp = (p: P) => (
+  <svg {...base} {...p}><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+);
+export const IconArrowDown = (p: P) => (
+  <svg {...base} {...p}><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+);
+export const IconExpand = (p: P) => (
+  <svg {...base} {...p}><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" /></svg>
+);
+export const IconCheck = (p: P) => (
+  <svg {...base} {...p}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+);
+export const IconFileText = (p: P) => (
+  <svg {...base} {...p}><path d="M14 3H6v18h12V7z" /><path d="M14 3v4h4M9 12h6M9 16h6" /></svg>
+);
+export const IconImage = (p: P) => (
+  <svg {...base} {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></svg>
+);
+export const IconRetry = (p: P) => (
+  <svg {...base} {...p}><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" /><path d="M4 4v4.5h4.5" /></svg>
+);
+export const IconChevronLeft = (p: P) => (
+  <svg {...base} {...p}><path d="m15 6-6 6 6 6" /></svg>
+);

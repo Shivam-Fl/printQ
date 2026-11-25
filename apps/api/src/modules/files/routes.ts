@@ -3,17 +3,19 @@ import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { fileTypeFromBuffer } from 'file-type';
+import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
+import { composedName, readParts } from '../../lib/fileParts.js';
 import { param } from '../../lib/http.js';
 import { requireStudent, requireStudentOrPreviewToken } from '../../middleware/auth.js';
 import { PREVIEW_TOKEN_TTL_SECONDS, signPreviewToken } from '../../lib/tokens.js';
-import { uploadLimiter } from '../../middleware/rateLimit.js';
+import { composeLimiter, uploadLimiter } from '../../middleware/rateLimit.js';
 import { storage } from '../../providers/storage/index.js';
 import { fileRetentionDeadline } from '../../lib/fileRetention.js';
 import { convertQueue } from '../../lib/queues.js';
 import { env } from '../../config/env.js';
-import { publicFileError } from '../../workers/conversionErrors.js';
+import { MAX_DOCUMENT_PAGES, publicFileError } from '../../workers/conversionErrors.js';
 
 export const filesRouter = Router();
 
@@ -152,10 +154,7 @@ filesRouter.post(
     const files = [...(fields?.files ?? []), ...(fields?.file ?? [])];
     if (files.length === 0) throw badRequest('No file uploaded');
 
-    const shopSlug = typeof req.body?.shopSlug === 'string' ? req.body.shopSlug : '';
-    const shop = await prisma.shop.findUnique({ where: { slug: shopSlug } });
-    if (!shop) throw badRequest('Unknown shop');
-    if (shop.feeBlockedAt) throw conflict('This shop is temporarily unavailable. Please try again later.');
+    const shop = await uploadShop(req.body?.shopSlug);
 
     // validate + store each source; keep order for the merge
     const sources: { key: string; mime: string; name: string }[] = [];
@@ -171,8 +170,7 @@ filesRouter.post(
       totalBytes += f.buffer.length;
     }
 
-    const first = files[0]!.originalname.slice(0, 120);
-    const displayName = files.length === 1 ? first : `${first} +${files.length - 1} more`;
+    const displayName = composedName(files.map((f) => f.originalname));
 
     const record = await prisma.uploadedFile.create({
       data: {
@@ -195,6 +193,136 @@ filesRouter.post(
   }),
 );
 
+/** The shop a student may upload to, or a clear 400/409. */
+async function uploadShop(slug: unknown) {
+  const shop = await prisma.shop.findUnique({ where: { slug: typeof slug === 'string' ? slug : '' } });
+  if (!shop) throw badRequest('Unknown shop');
+  if (shop.feeBlockedAt) throw conflict('This shop is temporarily unavailable. Please try again later.');
+  return shop;
+}
+
+/**
+ * Upload one or more documents as SEPARATE files (one record and one
+ * conversion each), so the student sees every file's own pages and problems
+ * and can add, remove or reorder files before ordering. The checkout joins
+ * them with POST /compose. One request holds one batch, so the per-student
+ * upload limit counts batches, not files. A file whose content does not match
+ * an allowed type is reported in `rejected`; the rest are still accepted.
+ */
+filesRouter.post(
+  '/parts',
+  requireStudent,
+  uploadLimiter,
+  upload.array('files', MAX_FILES),
+  asyncHandler(async (req, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) throw badRequest('No file uploaded');
+    const shop = await uploadShop(req.body?.shopSlug);
+
+    // `index` is the file's position in the request, so the client can match results to its rows
+    const accepted: { index: number; id: string; name: string; status: string; sizeBytes: number }[] = [];
+    const rejected: { index: number; name: string; error: string }[] = [];
+    for (const [index, f] of files.entries()) {
+      const name = f.originalname.slice(0, 120);
+      const kind = await validateUploadFileType(f.buffer, f.originalname, f.mimetype);
+      if (!kind) {
+        rejected.push({ index, name, error: 'This is not a PDF, Word (DOCX), JPG or PNG file.' });
+        continue;
+      }
+      const key = `orig/${randomUUID()}.${kind.ext}`;
+      await storage.put(key, f.buffer, kind.mime);
+      const record = await prisma.uploadedFile.create({
+        data: {
+          studentId: req.student!.id,
+          shopId: shop.id,
+          originalName: name,
+          originalKey: key,
+          mimeType: kind.mime,
+          sizeBytes: f.buffer.length,
+          status: 'uploaded',
+          deleteAfter: fileRetentionDeadline(),
+        },
+      });
+      await convertQueue.add('convert', { fileId: record.id });
+      accepted.push({ index, id: record.id, name, status: record.status, sizeBytes: record.sizeBytes });
+    }
+    if (accepted.length === 0) throw badRequest(rejected[0]?.error ?? 'No file uploaded');
+    res.status(201).json({ files: accepted, rejected });
+  }),
+);
+
+const composeBody = z.object({
+  fileIds: z
+    .array(z.string().uuid())
+    .min(2, 'Choose at least two files')
+    .max(MAX_FILES, `One order can have up to ${MAX_FILES} files`)
+    .refine((ids) => new Set(ids).size === ids.length, 'Each file can be added once'),
+});
+
+/**
+ * Join two or more of the student's own READY uploads, in the order given,
+ * into one order document (one preview, one price, one counter code). Nothing
+ * is re-uploaded or re-converted: the worker merges the parts' print-ready
+ * PDFs. Ownership is in the WHERE clause; any missing or foreign id is a 404.
+ */
+filesRouter.post(
+  '/compose',
+  requireStudent,
+  composeLimiter,
+  asyncHandler(async (req, res) => {
+    const parsed = composeBody.safeParse(req.body);
+    if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? 'Choose at least two files');
+    const { fileIds } = parsed.data;
+
+    const rows = await prisma.uploadedFile.findMany({
+      where: { id: { in: fileIds }, studentId: req.student!.id },
+      select: {
+        id: true, shopId: true, status: true, pages: true, originalName: true, sizeBytes: true,
+        convertedKey: true, deletionScheduledAt: true, contentDeletedAt: true, parts: true,
+      },
+    });
+    if (rows.length !== fileIds.length) throw notFound();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const ordered = fileIds.map((id) => byId.get(id)!);
+
+    const shopId = ordered[0]!.shopId;
+    if (ordered.some((f) => f.shopId !== shopId)) throw badRequest('These files were uploaded for different shops');
+    if (ordered.some((f) => f.deletionScheduledAt || f.contentDeletedAt || f.status === 'deleted')) {
+      throw conflict('One of these files is no longer available. Remove it and add it again.');
+    }
+    if (ordered.some((f) => f.status !== 'ready' || !f.convertedKey || !f.pages)) {
+      throw conflict('Some files are still being prepared. Try again in a moment.');
+    }
+    // parts are plain uploads: an order document is never nested in another
+    if (ordered.some((f) => readParts(f.parts))) throw badRequest('Add the original files, not an order');
+    const totalPages = ordered.reduce((sum, f) => sum + f.pages!, 0);
+    if (totalPages > MAX_DOCUMENT_PAGES) {
+      throw badRequest(`Together these files have ${totalPages} pages. One order can have up to ${MAX_DOCUMENT_PAGES}.`);
+    }
+    const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { feeBlockedAt: true } });
+    if (!shop || shop.feeBlockedAt) throw conflict('This shop is temporarily unavailable. Please try again later.');
+
+    const parts = ordered.map((f) => ({ fileId: f.id, name: f.originalName, pages: f.pages! }));
+    const name = composedName(parts.map((p) => p.name));
+    const record = await prisma.uploadedFile.create({
+      data: {
+        studentId: req.student!.id,
+        shopId,
+        originalName: name,
+        // placeholder only (nothing is stored there); the merged PDF is convertedKey
+        originalKey: `composed/${randomUUID()}`,
+        parts,
+        mimeType: 'application/pdf',
+        sizeBytes: ordered.reduce((sum, f) => sum + f.sizeBytes, 0),
+        status: 'uploaded',
+        deleteAfter: fileRetentionDeadline(),
+      },
+    });
+    await convertQueue.add('convert', { fileId: record.id });
+    res.status(201).json({ file: { id: record.id, status: record.status, name } });
+  }),
+);
+
 /** Poll conversion status (also pushed via socket 'file:ready'). */
 filesRouter.get(
   '/:id',
@@ -203,12 +331,19 @@ filesRouter.get(
     const file = await prisma.uploadedFile.findFirst({
       // ownership in the WHERE clause — students can only see their own files
       where: { id: param(req, 'id'), studentId: req.student!.id },
-      select: { id: true, status: true, pages: true, error: true, originalName: true },
+      select: { id: true, status: true, pages: true, error: true, originalName: true, sizeBytes: true, parts: true },
     });
     if (!file) throw notFound();
     // Never return the stored value verbatim: map it to a friendly, safe message.
-    const { error, ...rest } = file;
-    res.json({ file: { ...rest, ...(publicFileError(error) ?? { error: null, errorCode: null }) } });
+    const { error, parts, ...rest } = file;
+    res.json({
+      file: {
+        ...rest,
+        // the files an order document was joined from, in print order (null for a single upload)
+        parts: readParts(parts),
+        ...(publicFileError(error) ?? { error: null, errorCode: null }),
+      },
+    });
   }),
 );
 

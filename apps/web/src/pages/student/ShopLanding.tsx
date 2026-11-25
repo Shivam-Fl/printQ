@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, getToken, rememberShop } from '../../api.js';
 import { ErrorState, LoadingState } from '../../components/ResourceStates.js';
 import { useResource } from '../../lib/useResource.js';
-import { getStudentSocket } from '../../socket.js';
 import Topbar from '../../components/Topbar.js';
 import PhoneLogin from './PhoneLogin.js';
-import { IconUpload } from '../../components/Icons.js';
+import { IconCamera, IconChevron, IconPlus, IconUpload } from '../../components/Icons.js';
+import { useFileDrop, useFilePickers } from '../../components/OrderFiles.js';
+import { addFiles, useOrderDraft } from '../../lib/orderDraft.js';
+import { MAX_ORDER_FILES } from '../../lib/fileChoice.js';
 import { hideFromSearch } from '../../lib/searchVisibility.js';
 
 interface Paper {
@@ -28,53 +30,6 @@ interface PublicShop {
 function isShopResponse(value: unknown): value is { shop: PublicShop } {
   const shop = (value as { shop?: Partial<PublicShop> } | null)?.shop;
   return Boolean(shop && typeof shop.name === 'string' && typeof shop.slug === 'string' && shop.options && Array.isArray(shop.options.papers) && Array.isArray(shop.options.bindings) && shop.rating);
-}
-
-const FILE_FAILED_FALLBACK = "We couldn't prepare that file. Please try again.";
-
-/** Redirects to the specs page once `fileId` finishes converting (socket, with a polling fallback). */
-function useFileConversionRedirect(
-  slug: string,
-  loggedIn: boolean,
-  fileId: string | null,
-  onDone: () => void,
-  onError: (msg: string) => void,
-) {
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!loggedIn || !fileId) return;
-    const socket = getStudentSocket();
-    const onReady = (p: { fileId: string }) => {
-      if (p.fileId === fileId) navigate(`/s/${slug}/file/${p.fileId}`);
-    };
-    const onFailed = (p: { fileId: string; error: string }) => {
-      if (p.fileId === fileId) {
-        onDone();
-        onError(p.error || FILE_FAILED_FALLBACK);
-      }
-    };
-    socket?.on('file:ready', onReady);
-    socket?.on('file:failed', onFailed);
-    const poll = setInterval(async () => {
-      try {
-        const { file } = await api<{ file: { status: string; error?: string } }>(`/api/files/${fileId}`, {
-          role: 'student',
-        });
-        if (file.status === 'ready') navigate(`/s/${slug}/file/${fileId}`);
-        if (file.status === 'failed') {
-          onDone();
-          onError(file.error || FILE_FAILED_FALLBACK);
-        }
-      } catch {
-        /* keep polling */
-      }
-    }, 2500);
-    return () => {
-      socket?.off('file:ready', onReady);
-      socket?.off('file:failed', onFailed);
-      clearInterval(poll);
-    };
-  }, [loggedIn, fileId, navigate, slug, onDone, onError]);
 }
 
 /** Self-contained: manages its own "requested" state so the parent doesn't need to. Signed-in students only. */
@@ -101,12 +56,9 @@ export default function ShopLanding() {
   const { slug = '' } = useParams();
   const validSlug = /^[a-z0-9][a-z0-9-]{0,79}$/i.test(slug);
   const [loggedIn, setLoggedIn] = useState(Boolean(getToken('student')));
-  const [uploading, setUploading] = useState(false);
-  const [converting, setConverting] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const [dragging, setDragging] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const cameraInput = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const draft = useOrderDraft(slug);
+  const inOrder = draft?.items.length ?? 0;
 
   const shopResource = useResource<{ shop: PublicShop }>(
     (signal) => api<{ shop: PublicShop }>(`/api/public/shops/${encodeURIComponent(slug)}`, { signal }),
@@ -119,38 +71,14 @@ export default function ShopLanding() {
     if (shop && getToken('student')) rememberShop(slug);
   }, [shop, slug]);
 
-  useFileConversionRedirect(slug, loggedIn, converting, () => setConverting(null), setError);
-
-  function onDropFiles(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragging(false);
-    if (shop?.open && e.dataTransfer.files.length > 0) void onFilesChosen(e.dataTransfer.files);
-  }
-
-  function onDragOverFiles(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    if (shop?.open) setDragging(true);
-  }
-
-  async function onFilesChosen(files: FileList) {
-    setUploading(true);
-    setError('');
-    try {
-      const formData = new FormData();
-      formData.append('shopSlug', slug);
-      for (const f of Array.from(files)) formData.append('files', f);
-      const res = await api<{ file: { id: string } }>('/api/files', {
-        method: 'POST',
-        role: 'student',
-        formData,
-      });
-      setConverting(res.file.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed — try again.');
-    } finally {
-      setUploading(false);
-    }
-  }
+  // Chosen files start uploading at once and the student goes straight to the
+  // order page, where each file shows its own progress and more can be added.
+  const startOrder = (files: File[]) => {
+    addFiles(slug, files);
+    navigate(`/s/${slug}/order`);
+  };
+  const { inputs, chooseFiles, takePhoto } = useFilePickers(startOrder);
+  const drop = useFileDrop(Boolean(shop?.open && loggedIn), startOrder);
 
   const notFound = !validSlug || (shopResource.status === 'error' && shopResource.error instanceof ApiError && shopResource.error.status === 404);
   // an unknown or unpublished shop link is a 404 for search engines too (no index, no self canonical)
@@ -212,72 +140,55 @@ export default function ShopLanding() {
 
       {!loggedIn ? (
         <PhoneLogin onDone={() => setLoggedIn(true)} />
-      ) : converting ? (
-        <div className="ticket">
-          <div className="eyebrow">preparing preview</div>
-          <div className="ticket-num" aria-hidden>…</div>
-          <div className="sub">Converting to a print-ready PDF. What you'll see is exactly what prints.</div>
-        </div>
       ) : (
-        <div
-          className={`upload-panel${dragging ? ' dragging' : ''}${!shop.open ? ' closed' : ''}`}
-          onDragOver={onDragOverFiles}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDropFiles}
-        >
-          <div>
-            <div className="upload-mark" aria-hidden><IconUpload /></div>
-            <h2>{shop.open ? 'Choose your files' : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Not taking orders right now'}</h2>
-            <p>
-              {shop.open
-                ? 'PDF, Word or photos. Pick one or several; they print as one order. You pay at the counter.'
-                : shop.temporarilyUnavailable
-                  ? 'New orders are not available here right now. Please try again later or choose another shop.'
-                  : 'This shop’s printer is not online. Try another shop nearby, or ask us to tell you when it opens.'}
-            </p>
-          </div>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) void onFilesChosen(e.target.files);
-            }}
-          />
-          <input
-            ref={cameraInput}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              if (e.target.files && e.target.files.length > 0) void onFilesChosen(e.target.files);
-            }}
-          />
-          {shop.open && (
-            <>
-              <div className="upload-actions">
-                <button disabled={uploading} onClick={() => fileInput.current?.click()}>
-                  {uploading ? 'Uploading safely…' : 'Choose files'}
-                </button>
-                <button className="ghost" disabled={uploading} onClick={() => cameraInput.current?.click()}>
-                  Take a photo
-                </button>
-              </div>
-              <div className="upload-meta">Your files are private and deleted soon after printing. On a computer you can also drop them here.</div>
-            </>
+        <>
+          {shop.open && inOrder > 0 && (
+            <Link to={`/s/${slug}/order`} className="resume-order">
+              <span>
+                <strong>Your order here has {inOrder} file{inOrder === 1 ? '' : 's'}</strong>
+                <span>Continue to pages and print settings</span>
+              </span>
+              <IconChevron />
+            </Link>
           )}
-          {!shop.open && (
-            // never a dead end: another shop is one tap away
-            <div className="upload-actions">
-              <Link to="/shops" className="button-link">Find another shop</Link>
-              {!shop.temporarilyUnavailable && getToken('student') && <NotifyWhenOpen slug={slug} />}
+          <div
+            className={`upload-panel${drop.dragging ? ' dragging' : ''}${!shop.open ? ' closed' : ''}`}
+            {...drop.handlers}
+          >
+            <div>
+              <div className="upload-mark" aria-hidden><IconUpload /></div>
+              <h2>{shop.open ? (inOrder > 0 ? 'Add more files' : 'Choose your files') : shop.temporarilyUnavailable ? 'This shop is temporarily unavailable' : 'Not taking orders right now'}</h2>
+              <p>
+                {shop.open
+                  ? `PDF, Word or photos, up to ${MAX_ORDER_FILES} files. Next you can add more, set the order, pick pages and see every page before you order. You pay at the counter.`
+                  : shop.temporarilyUnavailable
+                    ? 'New orders are not available here right now. Please try again later or choose another shop.'
+                    : 'This shop’s printer is not online. Try another shop nearby, or ask us to tell you when it opens.'}
+              </p>
             </div>
-          )}
-          {error && <div className="error-box" role="alert">{error}</div>}
-        </div>
+            {shop.open && (
+              <>
+                {inputs}
+                <div className="upload-actions">
+                  <button type="button" onClick={chooseFiles}>
+                    <IconPlus /> Choose files
+                  </button>
+                  <button type="button" className="ghost" onClick={takePhoto}>
+                    <IconCamera /> Take a photo
+                  </button>
+                </div>
+                <div className="upload-meta">Your files are private and deleted soon after printing. On a computer you can also drop them here.</div>
+              </>
+            )}
+            {!shop.open && (
+              // never a dead end: another shop is one tap away
+              <div className="upload-actions">
+                <Link to="/shops" className="button-link">Find another shop</Link>
+                {!shop.temporarilyUnavailable && getToken('student') && <NotifyWhenOpen slug={slug} />}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

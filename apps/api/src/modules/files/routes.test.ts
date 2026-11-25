@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 vi.mock('../../lib/queues.js', () => ({ convertQueue: { add: vi.fn() } }));
 vi.mock('../../middleware/rateLimit.js', () => ({
   uploadLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+  composeLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 process.env.DATABASE_URL ??= 'postgresql://test:test@localhost:5432/test';

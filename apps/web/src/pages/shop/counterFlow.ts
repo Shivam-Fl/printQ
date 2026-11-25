@@ -5,6 +5,7 @@
  */
 import type { QueueBand } from '@printq/shared';
 import { jobActions } from './queueActions.js';
+import { pagesPhrase } from '../../jobStatus.js';
 
 export interface QueueJob {
   id: string;
@@ -82,7 +83,7 @@ export function specsSummary(job: Pick<QueueJob, 'specs' | 'pagesPerCopy'>): str
   if (specs.duplex) parts.push('both sides');
   const binding = bindingLabel(specs.binding);
   if (binding) parts.push(binding);
-  if (specs.pageRange) parts.push(`pages ${specs.pageRange}`);
+  if (specs.pageRange) parts.push(pagesPhrase(specs.pageRange));
   return parts.join(' · ');
 }
 
