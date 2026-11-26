@@ -7,7 +7,7 @@ import { requireStudent } from '../../middleware/auth.js';
 import { validateBody } from '../../middleware/validate.js';
 import { shopOptions } from '../../lib/shopOptions.js';
 import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
-import { isShopOperational, reachablePrinterIds } from '../shops/availability.js';
+import { isShopOperational, supportsPrintParts } from '../shops/availability.js';
 import { nearbyBoundingBox, nearbyShops, publishedShopWhere } from './discovery.js';
 import { publicCampusesCache, publicShopsCache, setPublicListCacheHeaders } from './cache.js';
 
@@ -190,7 +190,11 @@ publicRouter.get(
     });
     if (!shop) throw notFound();
 
-    const reachable = await reachablePrinterIds(shop.id);
+    const agents = await prisma.agent.findMany({
+      where: { shopId: shop.id, status: 'online' },
+      select: { connectedPrinterIds: true, features: true },
+    });
+    const reachable = new Set(agents.flatMap((agent) => agent.connectedPrinterIds));
     // in production the simulator never opens a shop or offers options (PSO-1)
     const online = shop.printers.filter((p) => p.status === 'online' && reachable.has(p.id) && canPrintForStudents(p));
     const options = shopOptions(shop);
@@ -230,6 +234,8 @@ publicRouter.get(
             .filter((b) => loadedBindings.size === 0 || loadedBindings.has(b.id))
             .map((b) => ({ id: b.id, label: b.label })),
           duplexEnabled: options.duplexEnabled,
+          // copies / ink / sides chosen per file (every online shop PC runs an app that can)
+          perFileSettings: supportsPrintParts(agents),
         },
       },
     });

@@ -10,7 +10,7 @@ import { publishEvent } from '../../realtime/events.js';
 import { applyTransition } from '../jobs/transitions.js';
 import { logger } from '../../lib/logger.js';
 import { advanceShopQueues, emitQueueUpdate } from '../queue/engine.js';
-import { notifyShopReopened, restorePrintersReachedAgain } from '../shops/availability.js';
+import { PRINT_PARTS_FEATURE, notifyShopReopened, restorePrintersReachedAgain } from '../shops/availability.js';
 import { publishIfReady } from '../shops/autoLive.js';
 import type { JobSpecs } from '@printq/shared';
 import { preparePrintPdf } from '../../lib/preparePrintPdf.js';
@@ -59,6 +59,7 @@ agentRouter.post(
       data: {
         lastHeartbeatAt: new Date(),
         status: 'online',
+        features: agent.features,
         ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
       },
     });
@@ -108,6 +109,7 @@ agentRouter.post(
         detectedPrinters: printers,
         detectedAt: new Date(),
         connectedPrinterIds,
+        features: agent.features,
         ...(agent.sessionId ? { sessionId: agent.sessionId } : {}),
       },
     });
@@ -166,6 +168,17 @@ agentRouter.post(
   '/jobs/:id/claim',
   asyncHandler(async (req, res) => {
     const agent = req.agent!;
+    // An order with different settings per file needs an app that prints its
+    // parts; an older one would print everything with one setting.
+    if (!agent.features.includes(PRINT_PARTS_FEATURE)) {
+      const pending = await prisma.job.findFirst({
+        where: { id: param(req, 'id'), shopId: agent.shopId },
+        select: { specs: true },
+      });
+      if ((pending?.specs as unknown as JobSpecs | null)?.parts?.length) {
+        throw conflict('Update PrintQs Shop on this computer to print orders with different settings per file');
+      }
+    }
     const claimed = await prisma.job.updateMany({
       where: {
         id: param(req, 'id'),
@@ -222,9 +235,17 @@ agentRouter.get(
     });
     if (!job || !job.file.convertedKey || otherSessionHolds(job, agent.sessionId)) throw notFound();
 
-    const source = await storage.get(job.file.convertedKey);
     const specs = job.specs as unknown as JobSpecs;
-    const bytes = await preparePrintPdf(source, specs.pageRange);
+    // ?part=N: one run of an order with different settings per file
+    let pages = specs.pageRange;
+    if (req.query.part !== undefined) {
+      const index = Number(req.query.part);
+      const part = Number.isInteger(index) ? specs.parts?.[index] : undefined;
+      if (!part) throw notFound();
+      pages = part.pages;
+    }
+    const source = await storage.get(job.file.convertedKey);
+    const bytes = await preparePrintPdf(source, pages);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${job.id}.pdf"`);
     res.send(bytes);

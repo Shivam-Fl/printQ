@@ -1319,6 +1319,8 @@ shopRouter.get(
         createdAt: true,
         detectedPrinters: true,
         detectedAt: true,
+        // what this PC's app can do; an older app (no "print-parts") needs an update
+        features: true,
       },
     });
     res.json({ agents });

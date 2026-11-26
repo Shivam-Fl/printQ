@@ -62,6 +62,30 @@ export interface JobSpecs {
   binding: string | null;
   /** e.g. "1-5,8,11-12"; null = all pages */
   pageRange: string | null;
+  /**
+   * Different settings per file of a multi-file order: each part prints as
+   * its own run with its own copies/ink/sides. When present the server sets
+   * the order-level copies (1), color/duplex (any part) and pageRange (all
+   * parts' pages) as summaries; paper and binding stay order-wide.
+   */
+  parts?: PrintPart[] | null;
+}
+
+export interface PrintPart {
+  /** the pages of the order document this part prints, e.g. "1-6" */
+  pages: string;
+  copies: number;
+  color: boolean;
+  duplex: boolean;
+}
+
+/** One priced run of a multi-part order. */
+export interface PriceLine {
+  pages: number;
+  copies: number;
+  color: boolean;
+  perPagePaise: number;
+  totalPaise: number;
 }
 
 export interface PriceBreakdown {
@@ -75,6 +99,12 @@ export interface PriceBreakdown {
   /** amount taken off by a coupon, already folded into totalPaise */
   discountPaise: number;
   totalPaise: number;
+  /**
+   * Per-part runs of an order with different settings per file. Then
+   * pagesPerCopy is every printed page (pages x copies of each part), copies
+   * is 1, and perPagePaise is the shared rate (0 when the parts differ).
+   */
+  lines?: PriceLine[];
 }
 
 /** A resolved, still-valid coupon — expiry/redemption/shop-scope already checked. */

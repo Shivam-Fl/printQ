@@ -107,6 +107,12 @@ This file records the decisions so future sessions (human or AI) don't undo them
   and never shares storage keys with its parts; when its deletion deadline is set (print or
   terminal job), the same deadline is passed to each part unless that part backs an active job of
   its own. Unused parts still fall under the 24-hour hard maximum.
+- **Different settings per file**: `JobSpecs.parts` is validated and normalized server-side
+  (`normalizeJobSpecs`: pages inside the document, no page in two parts; order-level copies/colour/
+  sides/pageRange become summaries) and priced per part by `computePrice`. The shop PC app declares
+  `x-agent-features: print-parts`; students are offered per-file settings only when every online PC
+  of the shop declares it, and the claim endpoint refuses a per-part order to an app that does not
+  (it would print everything with one setting). Each part is served separately (`file?part=N`).
 
 ## Arrival and queue integrity
 

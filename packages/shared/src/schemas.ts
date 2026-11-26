@@ -26,6 +26,16 @@ export const pageRangeSchema = z
 /** Paper/binding are shop-defined ids — validated against the shop at request time. */
 const optionId = z.string().trim().min(1).max(40);
 
+/** Most parts one order can have (one per file today; room for page-level runs later). */
+export const MAX_PRINT_PARTS = 30;
+
+export const printPartSchema = z.object({
+  pages: pageRangeSchema,
+  copies: z.number().int().min(1).max(100),
+  color: z.boolean(),
+  duplex: z.boolean(),
+});
+
 export const jobSpecsSchema = z.object({
   copies: z.number().int().min(1).max(100),
   paperSize: optionId,
@@ -33,6 +43,7 @@ export const jobSpecsSchema = z.object({
   duplex: z.boolean(),
   binding: optionId.nullable().default(null),
   pageRange: pageRangeSchema.nullable().default(null),
+  parts: z.array(printPartSchema).min(1).max(MAX_PRINT_PARTS).nullable().optional(),
 });
 export type JobSpecsInput = z.infer<typeof jobSpecsSchema>;
 

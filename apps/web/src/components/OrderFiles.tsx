@@ -104,7 +104,13 @@ function statusLine(item: DraftItem, excluded: Excluded): ReactNode {
  * or drop), remove, or move a file up or down. Each row shows its own progress
  * and, if something is wrong with that file, why.
  */
-export default function OrderFiles({ slug, draft, dragging = false }: { slug: string; draft: Draft; dragging?: boolean }) {
+export default function OrderFiles({ slug, draft, dragging = false, notes }: {
+  slug: string;
+  draft: Draft;
+  dragging?: boolean;
+  /** each file's own print settings in a few words (different settings per file) */
+  notes?: Readonly<Record<string, string>>;
+}) {
   const items = draft.items;
   const full = items.length >= MAX_ORDER_FILES;
   const { inputs, chooseFiles, takePhoto } = useFilePickers((files) => addFiles(slug, files));
@@ -139,6 +145,9 @@ export default function OrderFiles({ slug, draft, dragging = false }: { slug: st
               <div className="file-body">
                 <strong className="file-name" title={item.name}>{item.name}</strong>
                 <span className="file-meta">{statusLine(item, draft.excluded)}</span>
+                {item.status === 'ready' && item.fileId && notes?.[item.fileId] && (
+                  <span className="file-note">{notes[item.fileId]}</span>
+                )}
               </div>
               <div className="file-actions">
                 {item.status === 'failed' && item.retryFile && (

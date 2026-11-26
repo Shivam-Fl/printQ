@@ -109,3 +109,27 @@ function withPart(excluded: Excluded, fileId: string, pages: readonly number[]):
   const { [fileId]: _drop, ...rest } = excluded;
   return pages.length > 0 ? { ...rest, [fileId]: [...pages].sort((a, b) => a - b) } : rest;
 }
+
+/**
+ * Each file's chosen pages as a range over the joined document, in print
+ * order; files with no page chosen are left out. One entry per file = one
+ * print run with that file's own settings.
+ */
+export function fileRanges(parts: readonly DocPart[], excluded: Excluded): { fileId: string; pages: string }[] {
+  const out: { fileId: string; pages: string }[] = [];
+  for (const ref of groupByFile(orderPages(parts))) {
+    const chosen = ref.pages.filter((p) => !isExcluded(excluded, ref.fileId, p.page)).map((p) => p.docPage);
+    if (chosen.length > 0) out.push({ fileId: ref.fileId, pages: formatPageList(chosen) });
+  }
+  return out;
+}
+
+function groupByFile(pages: PageRef[]): { fileId: string; pages: PageRef[] }[] {
+  const groups: { fileId: string; pages: PageRef[] }[] = [];
+  for (const ref of pages) {
+    const last = groups.at(-1);
+    if (last && last.fileId === ref.fileId) last.pages.push(ref);
+    else groups.push({ fileId: ref.fileId, pages: [ref] });
+  }
+  return groups;
+}

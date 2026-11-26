@@ -5,7 +5,7 @@
  */
 import type { QueueBand } from '@printq/shared';
 import { jobActions } from './queueActions.js';
-import { pagesPhrase } from '../../jobStatus.js';
+import { compactRange, pagesPhrase, partPhrase, type PartLite } from '../../jobStatus.js';
 
 export interface QueueJob {
   id: string;
@@ -19,6 +19,8 @@ export interface QueueJob {
     duplex: boolean;
     binding: string | null;
     pageRange: string | null;
+    /** different settings per file: one run each, printed one after another */
+    parts?: PartLite[] | null;
   };
   pagesPerCopy: number;
   totalPaise: number;
@@ -75,6 +77,12 @@ export function bindingLabel(binding: string | null): string | null {
 /** "12 pages × 3 copies · A4 · B/W · both sides · Spiral binding · pages 1-4" */
 export function specsSummary(job: Pick<QueueJob, 'specs' | 'pagesPerCopy'>): string {
   const { specs } = job;
+  if (specs.parts?.length) {
+    // "9 pages printed · A4 · pages 1-4: B/W ×2, both sides; page 5: Colour ×1 · Stapling"
+    const runs = specs.parts.map((part) => `${/^\d+$/.test(part.pages) ? 'page' : 'pages'} ${compactRange(part.pages)}: ${partPhrase(part)}`);
+    const binding = bindingLabel(specs.binding);
+    return [`${plural(job.pagesPerCopy, 'page')} printed`, specs.paperSize, runs.join('; '), ...(binding ? [binding] : [])].join(' · ');
+  }
   const parts = [
     `${plural(job.pagesPerCopy, 'page')}${specs.copies > 1 ? ` × ${specs.copies} copies` : ''}`,
     specs.paperSize,

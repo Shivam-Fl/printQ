@@ -56,6 +56,14 @@ describe('order summary', () => {
     expect(specsSummary(job({ pagesPerCopy: 1, specs: { copies: 3, paperSize: 'A3', color: true, duplex: true, binding: 'spiral_binding', pageRange: '1-4' } })))
       .toBe('1 page × 3 copies · A3 · Colour · both sides · Spiral binding · pages 1-4');
   });
+  it('lists each file’s own settings for an order with different settings per file', () => {
+    const parts = [
+      { pages: '1-4', copies: 2, color: false, duplex: true },
+      { pages: '5', copies: 1, color: true, duplex: false },
+    ];
+    expect(specsSummary(job({ pagesPerCopy: 9, specs: { copies: 1, paperSize: 'A4', color: true, duplex: true, binding: 'stapling', pageRange: null, parts } })))
+      .toBe('9 pages printed · A4 · pages 1-4: B/W ×2, both sides; page 5: Colour ×1 · Stapling');
+  });
   it('falls back to the masked phone when the student has no name', () => {
     expect(studentLabel(job({ student: { name: null, phoneMasked: '•••0009' } }))).toBe('•••0009');
     expect(studentLabel(job({ student: { name: '  ', phoneMasked: '•••0009' } }))).toBe('•••0009');
