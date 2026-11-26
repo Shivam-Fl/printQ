@@ -271,16 +271,30 @@ function buildOps(data: ReceiptData, files: FontFiles, fonts: { regular: FontSet
   space(4);
   rule();
 
-  text(`Copies: ${data.specs.copies}`);
-  text(`Paper: ${data.specs.paperSize}${data.specs.color ? ' (colour)' : ' (B/W)'}`);
-  text(`Sides: ${data.specs.duplex ? 'Both' : 'One'}`);
-  text(`Binding: ${data.specs.binding ?? 'None'}`);
-  text(`Pages: ${receiptPages(data.specs.pageRange, data.totalPages ?? null)}`, { maxLines: 2 });
+  if (data.specs.parts?.length) {
+    // different settings per file: one line per run, named by its pages (never the file name)
+    text(`Paper: ${data.specs.paperSize}`);
+    data.specs.parts.forEach((part, index) => {
+      const pages = receiptPages(part.pages, data.totalPages ?? null);
+      text(
+        `Part ${index + 1}, ${/^[0-9]+$/.test(pages) ? 'page' : 'pages'} ${pages}: `
+          + `${part.copies} ${part.copies === 1 ? 'copy' : 'copies'}, ${part.color ? 'colour' : 'B/W'}, ${part.duplex ? 'both sides' : 'one side'}`,
+        { maxLines: 2 },
+      );
+    });
+    text(`Binding: ${data.specs.binding ?? 'None'}`);
+  } else {
+    text(`Copies: ${data.specs.copies}`);
+    text(`Paper: ${data.specs.paperSize}${data.specs.color ? ' (colour)' : ' (B/W)'}`);
+    text(`Sides: ${data.specs.duplex ? 'Both' : 'One'}`);
+    text(`Binding: ${data.specs.binding ?? 'None'}`);
+    text(`Pages: ${receiptPages(data.specs.pageRange, data.totalPages ?? null)}`, { maxLines: 2 });
+  }
   space(4);
   rule();
 
   if (data.showPriceBreakdown !== false) {
-    text(`Pages x copies: ${rupees(data.breakdown.pagesTotalPaise)}`);
+    text(`${data.breakdown.lines ? 'Printing' : 'Pages x copies'}: ${rupees(data.breakdown.pagesTotalPaise)}`);
     if (data.breakdown.bindingPaise > 0) text(`Binding: ${rupees(data.breakdown.bindingPaise)}`);
   }
   text(`Total: ${rupees(data.totalPaise)}`, { size: 12, bold: true, gap: 20 });

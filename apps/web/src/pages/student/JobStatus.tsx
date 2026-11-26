@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile, getToken, rememberShop, rupees } from '../../api.js';
 import { getStudentSocket } from '../../socket.js';
 import { enablePush, pushPermission } from '../../push.js';
-import { compactRange, jobBadge, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
+import { compactRange, jobBadge, partPhrase, runFiles, stampClass, statusMeta, type SpecsLite } from '../../jobStatus.js';
 import StudentShell from '../../components/StudentShell.js';
 import Topbar from '../../components/Topbar.js';
 import { StudentBandPanel, codeHalves, useNow } from '../../components/QueueBand.js';
@@ -45,7 +45,7 @@ export interface JobDetail {
     slug: string;
     counterUpi: { vpa: string; payeeName: string } | null;
   };
-  file: { originalName: string; pages: number | null };
+  file: { originalName: string; pages: number | null; parts?: { name: string; pages: number }[] | null };
 }
 
 /** Shape of POST /api/jobs/:id/check-in (live queue metrics included). */
@@ -422,6 +422,28 @@ export default function JobStatus() {
         <section className="job-section" aria-labelledby="order-details">
           <h2 id="order-details">Your order</h2>
           <div className="card">
+            {job.specs.parts?.length ? (
+              <>
+                <ol className="part-list" aria-label="Settings for each file">
+                  {job.specs.parts.map((part, index) => {
+                    const file = runFiles(job.specs.parts!, job.file.parts)[index];
+                    return (
+                      <li key={part.pages}>
+                        <span className="file-order" aria-hidden>{index + 1}</span>
+                        <span className="part-text">
+                          <strong title={file?.name}>{file?.name ?? `${/^\d+$/.test(part.pages) ? 'Page' : 'Pages'} ${compactRange(part.pages)}`}</strong>
+                          <span className="dim">{file ? `${file.pages} · ` : ''}{partPhrase(part)}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <div className="spec-grid">
+                  <div><div className="k">Paper</div><div className="v">{job.specs.paperSize}</div></div>
+                  <div><div className="k">Binding</div><div className="v">{binding ?? 'None'}</div></div>
+                </div>
+              </>
+            ) : (
             <div className="spec-grid">
               <div><div className="k">Copies</div><div className="v">{job.specs.copies}</div></div>
               <div><div className="k">Paper</div><div className="v">{job.specs.paperSize}</div></div>
@@ -430,6 +452,7 @@ export default function JobStatus() {
               <div><div className="k">Binding</div><div className="v">{binding ?? 'None'}</div></div>
               <div><div className="k">Pages</div><div className="v">{job.specs.pageRange ? compactRange(job.specs.pageRange) : 'All'}{job.file.pages ? ` of ${job.file.pages}` : ''}</div></div>
             </div>
+            )}
             <div className="receipt job-total">
               <div className="line total">
                 <span>{payment.label}</span>

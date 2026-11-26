@@ -32,6 +32,23 @@ describe('receipt content', () => {
     expect(out).not.toContain('1-3,3,5');
   });
 
+  it('lists each file’s own settings, by pages, for an order with different settings per file', async () => {
+    const out = await text({
+      ...base,
+      totalPages: 5,
+      specs: {
+        ...base.specs,
+        parts: [
+          { pages: '1-4', copies: 2, color: false, duplex: true },
+          { pages: '5', copies: 1, color: true, duplex: false },
+        ],
+      },
+    });
+    expect(out).toContain('Part 1, pages 1-4: 2 copies, B/W, both sides');
+    expect(out).toContain('Part 2, page 5: 1 copy, colour, one side');
+    expect(out).not.toContain('Copies:');
+  });
+
   it('shows the completion date (not creation) and the payment method', async () => {
     const out = await text({
       ...base,

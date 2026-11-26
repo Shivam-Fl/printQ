@@ -29,6 +29,7 @@ import { io, type Socket } from 'socket.io-client';
 import { detectPrinters, isSimulationMode, sendToPrinter } from './printerRuntime.js';
 import { createPrinterTestPage } from './printerTestPage.js';
 import { loadEphemeralAgentToken } from './cliToken.js';
+import { AGENT_FEATURES, printRuns, type ClaimedSpecs } from './printRuns.js';
 
 const API_URL = process.env.PRINTQ_API_URL ?? 'http://localhost:4000';
 const HEARTBEAT_MS = 30_000;
@@ -47,6 +48,7 @@ interface DispatchPayload {
   printerId: string;
   specs: { copies: number; duplex: boolean; color: boolean; paperSize: string };
 }
+
 
 interface DriverMedia {
   paperSize: string;
@@ -84,6 +86,7 @@ async function api(pathname: string, init: RequestInit = {}): Promise<Response> 
     headers: {
       'x-agent-token': TOKEN,
       'x-agent-session': SESSION_ID,
+      'x-agent-features': AGENT_FEATURES,
       'content-type': 'application/json',
       ...init.headers,
     },
@@ -126,10 +129,12 @@ async function printJobInner(job: DispatchPayload): Promise<void> {
     return;
   }
   const { job: claimed } = (await claim.json()) as {
-    job: { osPrinterName: string | null; mediaConfig: Record<string, DriverMedia> | null };
+    job: { osPrinterName: string | null; mediaConfig: Record<string, DriverMedia> | null; specs?: ClaimedSpecs };
   };
+  // the claimed job's own specs are the truth (they carry the per-file parts)
+  const specs: ClaimedSpecs = claimed.specs ?? job.specs;
   const osPrinter = claimed.osPrinterName;
-  const media = claimed.mediaConfig?.[job.specs.paperSize] ?? { paperSize: job.specs.paperSize };
+  const media = claimed.mediaConfig?.[specs.paperSize] ?? { paperSize: specs.paperSize };
 
   if (!osPrinter) {
     console.warn(
@@ -144,21 +149,33 @@ async function printJobInner(job: DispatchPayload): Promise<void> {
 
   const dir = await mkdtemp(path.join(tmpdir(), 'printq-agent-'));
   try {
-    const fileRes = await api(`/api/agent/jobs/${job.jobId}/file`);
-    if (!fileRes.ok) throw new Error(`file download failed: ${fileRes.status}`);
-    const pdfPath = path.join(dir, `${job.jobId}.pdf`);
-    await writeFile(pdfPath, Buffer.from(await fileRes.arrayBuffer()));
-
-    console.log(`Printing job ${job.jobId} on "${osPrinter}" (${job.specs.copies} copies)`);
-    await sendToPrinter(pdfPath, {
-      printer: osPrinter,
-      copies: job.specs.copies,
-      duplex: job.specs.duplex,
-      color: job.specs.color,
-      paperSize: media.paperSize,
-      bin: media.bin ?? null,
-      jobId: job.jobId,
-    });
+    // every run is downloaded first, so a missing part never leaves half an order printed
+    const runs = printRuns(job.jobId, specs);
+    const files: string[] = [];
+    for (const [index, run] of runs.entries()) {
+      const fileRes = await api(run.file);
+      if (!fileRes.ok) throw new Error(`file download failed: ${fileRes.status}`);
+      const pdfPath = path.join(dir, `${run.spoolId}.pdf`);
+      await writeFile(pdfPath, Buffer.from(await fileRes.arrayBuffer()));
+      files[index] = pdfPath;
+    }
+    for (const [index, run] of runs.entries()) {
+      const label = runs.length > 1 ? ` part ${index + 1} of ${runs.length}` : '';
+      console.log(`Printing job ${job.jobId}${label} on "${osPrinter}" (${run.copies} copies, ${run.color ? 'colour' : 'B/W'}, ${run.duplex ? 'both sides' : 'one side'})`);
+      try {
+        await sendToPrinter(files[index]!, {
+          printer: osPrinter,
+          copies: run.copies,
+          duplex: run.duplex,
+          color: run.color,
+          paperSize: media.paperSize,
+          bin: media.bin ?? null,
+          jobId: run.spoolId,
+        });
+      } catch (err) {
+        throw new Error(`${label ? `${label.trim()}: ` : ''}${err instanceof Error ? err.message : 'unknown'}`);
+      }
+    }
 
     const completion = await api(`/api/agent/jobs/${job.jobId}/complete`, {
       method: 'POST',

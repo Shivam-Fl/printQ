@@ -22,6 +22,8 @@ interface AgentRow {
   status: 'online' | 'offline';
   detectedPrinters: DetectedPrinter[] | null;
   detectedAt: string | null;
+  /** what the PC's app can do; "print-parts" = students may choose settings per file */
+  features?: string[];
 }
 
 export default function Agents() {
@@ -265,6 +267,12 @@ export default function Agents() {
                   </div>
                   <span className={`status-dot${agent.status === 'online' ? ' done' : ''}`}>{agent.status === 'online' ? 'Online' : 'Offline'}</span>
                 </div>
+                {agent.status === 'online' && !agent.features?.includes('print-parts') && (
+                  <p className="device-update" role="note">
+                    Update PrintQs Shop on this computer so students can choose different settings for each file.{' '}
+                    <Link to="/pc">Get the latest version</Link>
+                  </p>
+                )}
                 <div className="device-printers">
                   <span>Detected printers</span>
                   <strong>{agent.detectedPrinters?.map((printer) => printer.name).join(', ') || 'None reported'}</strong>

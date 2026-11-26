@@ -3,6 +3,18 @@ import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { notifyStudent } from '../../providers/notification/index.js';
 
 /** Printer profiles are sellable only while an online agent can reach them. */
+/** An agent app that prints each part of an order with its own copies/ink/sides. */
+export const PRINT_PARTS_FEATURE = 'print-parts';
+
+/**
+ * Different settings per file are offered only when the shop has an online
+ * PC and EVERY online PC runs an app that prints parts; an older app would
+ * print the whole order with one setting.
+ */
+export function supportsPrintParts(onlineAgents: readonly { features: readonly string[] }[]): boolean {
+  return onlineAgents.length > 0 && onlineAgents.every((agent) => agent.features.includes(PRINT_PARTS_FEATURE));
+}
+
 export async function reachablePrinterIds(shopId: string): Promise<Set<string>> {
   const agents = await prisma.agent.findMany({
     where: { shopId, status: 'online' },

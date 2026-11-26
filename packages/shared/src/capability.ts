@@ -1,6 +1,6 @@
 import type { JobSpecs, PrinterProfile } from './types.js';
 
-export type UnsupportedCode = 'color' | 'paper_size' | 'binding' | 'combination';
+export type UnsupportedCode = 'color' | 'paper_size' | 'binding' | 'combination' | 'per_file';
 
 export interface UnsupportedSpec {
   code: UnsupportedCode;
