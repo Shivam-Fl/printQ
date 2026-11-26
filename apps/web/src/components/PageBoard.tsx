@@ -231,8 +231,8 @@ interface BoardProps {
   pending: PendingFile[];
   excluded: Excluded;
   onChange: (excluded: Excluded) => void;
-  /** black & white chosen: show the pages that way too */
-  grayscale: boolean;
+  /** files that print in black & white: their pages are shown that way too */
+  grayFiles: ReadonlySet<string>;
   /** the joined, print-ready document (for "Open full PDF"), once ready */
   docFileId: string | null;
 }
@@ -242,7 +242,8 @@ interface BoardProps {
  * skip it (or print it again); the expand button opens it large. A typed
  * range ("1-5, 8") is the fast path for long documents.
  */
-export default function PageBoard({ parts, pending, excluded, onChange, grayscale, docFileId }: BoardProps) {
+export default function PageBoard({ parts, pending, excluded, onChange, grayFiles, docFileId }: BoardProps) {
+  const grayCount = parts.filter((part) => grayFiles.has(part.fileId)).length;
   const scroller = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState<number | null>(null); // index into `pages`
   const [typing, setTyping] = useState(false);
@@ -332,7 +333,7 @@ export default function PageBoard({ parts, pending, excluded, onChange, grayscal
         )}
       </header>
 
-      <div ref={scroller} className={`pages-scroller${grayscale ? ' bw' : ''}`} tabIndex={-1}>
+      <div ref={scroller} className="pages-scroller" tabIndex={-1}>
         {parts.length === 0 && waiting.length === 0 && (
           <div className="pages-empty">Add a file to see its pages here.</div>
         )}
@@ -348,6 +349,7 @@ export default function PageBoard({ parts, pending, excluded, onChange, grayscal
               multi={parts.length + waiting.length > 1}
               selected={selected}
               excluded={excluded}
+              gray={grayFiles.has(part.fileId)}
               onToggle={(page) => onChange(togglePage(excluded, part.fileId, page))}
               onWhole={(include) => onChange(setPartPages(excluded, part, include))}
               onView={(page) => setViewing(start + page - 1)}
@@ -368,9 +370,15 @@ export default function PageBoard({ parts, pending, excluded, onChange, grayscal
         ))}
       </div>
 
-      {(grayscale || docFileId) && total > 0 && (
+      {total > 0 && (
         <footer className="pages-foot">
-          {grayscale ? <span>Shown in black &amp; white, as it will print.</span> : <span>Shown as it will print.</span>}
+          <span>
+            {grayCount === 0
+              ? 'Shown as it will print.'
+              : grayCount === parts.length
+                ? 'Shown in black & white, as it will print.'
+                : 'Shown as it will print: black & white files in grey.'}
+          </span>
           {docFileId && (
             <button type="button" className="text-button" onClick={() => void open()} disabled={opening}>
               {opening ? 'Opening…' : 'Open full PDF'}
@@ -385,7 +393,7 @@ export default function PageBoard({ parts, pending, excluded, onChange, grayscal
           parts={parts}
           index={viewing}
           excluded={excluded}
-          grayscale={grayscale}
+          grayscale={grayFiles.has(pages[viewing]!.fileId)}
           onIndex={setViewing}
           onToggle={(ref) => onChange(togglePage(excluded, ref.fileId, ref.page))}
           onClose={() => setViewing(null)}
@@ -395,12 +403,13 @@ export default function PageBoard({ parts, pending, excluded, onChange, grayscal
   );
 }
 
-function PartGroup({ part, index, multi, selected, excluded, onToggle, onWhole, onView }: {
+function PartGroup({ part, index, multi, selected, excluded, gray, onToggle, onWhole, onView }: {
   part: DocPart;
   index: number;
   multi: boolean;
   selected: number;
   excluded: Excluded;
+  gray: boolean;
   onToggle: (page: number) => void;
   onWhole: (include: boolean) => void;
   onView: (page: number) => void;
@@ -408,7 +417,7 @@ function PartGroup({ part, index, multi, selected, excluded, onToggle, onWhole, 
   const { doc, failed } = usePdf(part.fileId);
   const all = selected === part.pages;
   return (
-    <div className="pages-group">
+    <div className={`pages-group${gray ? ' bw' : ''}`}>
       <div className="pages-group-head">
         {multi && <span className="file-order" aria-hidden>{index + 1}</span>}
         <span className="pages-file" title={part.name}>{part.name}</span>

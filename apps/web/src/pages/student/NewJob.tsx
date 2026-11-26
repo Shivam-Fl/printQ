@@ -5,7 +5,8 @@ import { createLatestRequest, isAbortError } from '../../lib/latestRequest.js';
 import { loadRemembered, saveRemembered, startingSpecs } from '../../lib/printSettings.js';
 import { addFiles, clearDraft, docMatches, getDraft, openDoc, readyParts, retryJoin, setExcluded, useOrderDraft, type Draft } from '../../lib/orderDraft.js';
 import { MAX_ORDER_FILES } from '../../lib/fileChoice.js';
-import { compileRange, rangeProblem, totalPages, type Excluded } from '../../lib/pageSelection.js';
+import { compileRange, partSelectedCount, rangeProblem, totalPages, type Excluded } from '../../lib/pageSelection.js';
+import { buildParts, seedPerFile, settingsFor, settingsSummary, sheetsFor, type FileSettings, type PerFile } from '../../lib/fileSettings.js';
 import { studentLoginPath } from '../../lib/studentReturn.js';
 import { enablePush, pushPermission } from '../../push.js';
 import Topbar from '../../components/Topbar.js';
@@ -25,6 +26,8 @@ interface ShopOptions {
   papers: Paper[];
   bindings: Binding[];
   duplexEnabled: boolean;
+  /** every online PC of the shop can print files with their own settings */
+  perFileSettings?: boolean;
 }
 interface Specs {
   copies: number;
@@ -33,6 +36,7 @@ interface Specs {
   duplex: boolean;
   binding: string | null;
   pageRange: string | null;
+  parts?: { pages: string; copies: number; color: boolean; duplex: boolean }[];
 }
 interface Quote {
   pagesPerCopy: number;
@@ -76,17 +80,28 @@ function toLocalInput(d: Date): string {
 }
 
 /** A row of one-tap choices (radio semantics). */
-function Choice<T extends string>({ label, value, options, onChange, describedBy }: {
+function Choice<T extends string>({ label, value, options, onChange, describedBy, id, groupLabel, className }: {
   label: string;
   value: T;
   options: { value: T; label: string; disabled?: boolean }[];
   onChange: (value: T) => void;
   describedBy?: string;
+  /** unique id base when the same label repeats (one control per file) */
+  id?: string;
+  /** a fuller name for screen readers, e.g. "Ink for notes.pdf" */
+  groupLabel?: string;
+  className?: string;
 }) {
+  const labelId = `${id ?? `choice-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}-label`;
   return (
-    <div className="choice">
-      <span className="field-label" id={`${label}-label`}>{label}</span>
-      <div className="seg" role="radiogroup" aria-labelledby={`${label}-label`} aria-describedby={describedBy}>
+    <div className={`choice${className ? ` ${className}` : ''}`}>
+      <span className="field-label" id={labelId}>{label}</span>
+      <div
+        className="seg"
+        role="radiogroup"
+        {...(groupLabel ? { 'aria-label': groupLabel } : { 'aria-labelledby': labelId })}
+        aria-describedby={describedBy}
+      >
         {options.map((o) => (
           <button
             key={o.value}
@@ -125,6 +140,10 @@ export default function NewJob() {
   const [error, setError] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // different copies / ink / sides per file (only when the shop's PC app can print them)
+  const [perFileMode, setPerFileMode] = useState(false);
+  const [perFile, setPerFile] = useState<PerFile>({});
 
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
@@ -179,7 +198,17 @@ export default function NewJob() {
   const rangeIssue = rangeProblem(range);
   const blocker = orderBlocker(draft, rangeIssue);
   const blockerText = blocker?.text ?? null;
-  const orderSpecs = useMemo(() => (specs ? { ...specs, pageRange: range } : null), [specs, range]);
+  const perFileOffered = parts.length > 1 && Boolean(opts?.perFileSettings);
+  const perFileOn = perFileMode && perFileOffered;
+  const defaults: FileSettings | null = useMemo(
+    () => (specs ? { copies: specs.copies, color: specs.color, duplex: specs.duplex } : null),
+    [specs],
+  );
+  const orderSpecs = useMemo((): Specs | null => {
+    if (!specs || !defaults) return null;
+    if (!perFileOn) return { ...specs, pageRange: range };
+    return { ...specs, pageRange: range, parts: buildParts(parts, excluded, perFile, defaults) };
+  }, [specs, defaults, range, perFileOn, parts, excluded, perFile]);
 
   const quoteKey = docFileId && orderSpecs ? JSON.stringify([docFileId, orderSpecs, appliedCoupon]) : '';
   // The quote is only trusted while it answers EXACTLY the order on screen.
@@ -247,10 +276,24 @@ export default function NewJob() {
   const colorAvailable = Boolean(paper?.colorAvailable);
   const inkNote = opts && specs ? inkUnavailableNote(opts.papers, specs.paperSize) : null;
 
-  // if the chosen paper can't do colour, force B/W
+  // if the chosen paper can't do colour, force B/W (for every file too)
   useEffect(() => {
-    if (specs?.color && !colorAvailable) set('color', false);
+    if (colorAvailable) return;
+    if (specs?.color) set('color', false);
+    setPerFile((prev) => (Object.values(prev).some((f) => f.color)
+      ? Object.fromEntries(Object.entries(prev).map(([id, f]) => [id, { ...f, color: false }]))
+      : prev));
   }, [specs?.paperSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function choosePerFile(on: boolean) {
+    if (on && defaults) setPerFile((prev) => seedPerFile(parts, prev, defaults));
+    setPerFileMode(on);
+  }
+
+  function setFile(fileId: string, change: Partial<FileSettings>) {
+    if (!defaults) return;
+    setPerFile((prev) => ({ ...prev, [fileId]: { ...settingsFor(fileId, prev, defaults), ...change } }));
+  }
 
   async function placeOrder() {
     if (!orderSpecs || !docFileId || blocker || busy || submitting.current) return; // double-tap guard (state is async)
@@ -319,8 +362,14 @@ export default function NewJob() {
   const maxSlot = toLocalInput(new Date(Date.now() + 72 * 3_600_000));
   const blocked = Boolean(blocker) || !quote || busy || unsupported.length > 0;
   const bindingOptions = [{ value: 'none', label: 'None' }, ...opts.bindings.map((b) => ({ value: b.id, label: b.label }))];
-  const printedPages = quote ? quote.pagesPerCopy * specs.copies : null;
-  const sheets = quote && specs.duplex ? Math.ceil(quote.pagesPerCopy / 2) * specs.copies : null;
+  // a per-file quote already counts every printed page (pages x copies of each file)
+  const printedPages = quote ? quote.pagesPerCopy * (orderSpecs?.parts ? 1 : specs.copies) : null;
+  const runs = orderSpecs?.parts ?? [{ pages: orderSpecs?.pageRange ?? null, copies: specs.copies, duplex: specs.duplex }];
+  const sheets = quote && runs.some((run) => run.duplex) ? sheetsFor(runs, totalPages(parts)) : null;
+  const grayFiles = new Set(parts.filter((part) => !(perFileOn && defaults ? settingsFor(part.fileId, perFile, defaults).color : specs.color)).map((part) => part.fileId));
+  const fileNotes = perFileOn && defaults
+    ? Object.fromEntries(parts.map((part) => [part.fileId, settingsSummary(settingsFor(part.fileId, perFile, defaults), opts.duplexEnabled)]))
+    : undefined;
   const pending: PendingFile[] = draft.items
     .filter((it) => it.status !== 'ready')
     .map((it) => ({ key: it.key, name: it.name, status: it.status as PendingFile['status'] }));
@@ -342,18 +391,39 @@ export default function NewJob() {
             </p>
           </header>
 
-          <OrderFiles slug={slug} draft={draft} dragging={drop.dragging} />
+          <OrderFiles slug={slug} draft={draft} dragging={drop.dragging} notes={fileNotes} />
 
           <section className="checkout-card settings-card" aria-labelledby="settings-title">
             <h2 id="settings-title" className="card-title">Print settings</h2>
-            <div className="field copies-field">
-              <label htmlFor="copies">Copies</label>
-              <div className="stepper">
-                <button type="button" className="secondary" aria-label="One copy less" disabled={specs.copies <= 1} onClick={() => set('copies', Math.max(1, specs.copies - 1))}>−</button>
-                <input id="copies" type="number" inputMode="numeric" min={1} max={100} value={specs.copies} onChange={(e) => set('copies', Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
-                <button type="button" className="secondary" aria-label="One copy more" disabled={specs.copies >= 100} onClick={() => set('copies', Math.min(100, specs.copies + 1))}>+</button>
+
+            {perFileOffered && (
+              <Choice
+                label="Settings for"
+                value={perFileOn ? 'each' : 'all'}
+                options={[{ value: 'all', label: 'All files' }, { value: 'each', label: 'Each file' }]}
+                onChange={(v) => choosePerFile(v === 'each')}
+                describedBy="per-file-help"
+              />
+            )}
+            {perFileOffered && (
+              <p id="per-file-help" className="field-help choice-help">
+                {perFileOn ? 'Choose copies, ink and sides for every file. Paper and binding are for the whole order.' : 'Want a colour cover or extra copies of one file? Choose “Each file”.'}
+              </p>
+            )}
+            {parts.length > 1 && !opts.perFileSettings && (
+              <p className="field-help">This shop prints every file with the same settings.</p>
+            )}
+
+            {!perFileOn && (
+              <div className="field copies-field">
+                <label htmlFor="copies">Copies</label>
+                <div className="stepper">
+                  <button type="button" className="secondary" aria-label="One copy less" disabled={specs.copies <= 1} onClick={() => set('copies', Math.max(1, specs.copies - 1))}>−</button>
+                  <input id="copies" type="number" inputMode="numeric" min={1} max={100} value={specs.copies} onChange={(e) => set('copies', Math.max(1, Math.min(100, Number(e.target.value) || 1)))} />
+                  <button type="button" className="secondary" aria-label="One copy more" disabled={specs.copies >= 100} onClick={() => set('copies', Math.min(100, specs.copies + 1))}>+</button>
+                </div>
               </div>
-            </div>
+            )}
 
             {opts.papers.length <= 3 ? (
               <Choice label="Paper" value={specs.paperSize} options={opts.papers.map((p) => ({ value: p.id, label: p.label }))} onChange={(v) => set('paperSize', v)} />
@@ -366,23 +436,73 @@ export default function NewJob() {
               </div>
             )}
 
-            <Choice
-              label="Ink"
-              value={specs.color ? 'color' : 'bw'}
-              options={[{ value: 'bw', label: 'Black & white' }, { value: 'color', label: 'Colour', disabled: !colorAvailable }]}
-              onChange={(v) => set('color', v === 'color')}
-              describedBy={inkNote ? 'color-hint' : undefined}
-            />
-            {inkNote && <p id="color-hint" className="field-help choice-help">{inkNote}</p>}
-
-            {opts.duplexEnabled && (
-              <Choice
-                label="Sides"
-                value={specs.duplex ? 'duplex' : 'single'}
-                options={[{ value: 'single', label: 'One side' }, { value: 'duplex', label: 'Both sides' }]}
-                onChange={(v) => set('duplex', v === 'duplex')}
-              />
+            {perFileOn && defaults ? (
+              <ol className="file-settings" aria-label="Settings for each file">
+                {parts.map((part, index) => {
+                  const own = settingsFor(part.fileId, perFile, defaults);
+                  const chosen = partSelectedCount(part, excluded);
+                  return (
+                    <li key={part.fileId} className={`file-setting${chosen === 0 ? ' unused' : ''}`}>
+                      <div className="file-setting-head">
+                        <span className="file-order" aria-hidden>{index + 1}</span>
+                        <strong title={part.name}>{part.name}</strong>
+                        <span className="dim">{chosen === 0 ? 'no pages chosen' : `${chosen} page${chosen === 1 ? '' : 's'}`}</span>
+                      </div>
+                      <div className="file-setting-controls">
+                        <div className="mini-field">
+                          <span className="field-label" aria-hidden>Copies</span>
+                          <div className="stepper small">
+                            <button type="button" className="secondary" aria-label={`One copy less of ${part.name}`} disabled={own.copies <= 1} onClick={() => setFile(part.fileId, { copies: Math.max(1, own.copies - 1) })}>−</button>
+                            <input type="number" inputMode="numeric" min={1} max={100} aria-label={`Copies of ${part.name}`} value={own.copies} onChange={(e) => setFile(part.fileId, { copies: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })} />
+                            <button type="button" className="secondary" aria-label={`One copy more of ${part.name}`} disabled={own.copies >= 100} onClick={() => setFile(part.fileId, { copies: Math.min(100, own.copies + 1) })}>+</button>
+                          </div>
+                        </div>
+                        <Choice
+                          id={`ink-${index}`}
+                          className="mini"
+                          label="Ink"
+                          groupLabel={`Ink for ${part.name}`}
+                          value={own.color ? 'color' : 'bw'}
+                          options={[{ value: 'bw', label: 'B/W' }, { value: 'color', label: 'Colour', disabled: !colorAvailable }]}
+                          onChange={(v) => setFile(part.fileId, { color: v === 'color' })}
+                        />
+                        {opts.duplexEnabled && (
+                          <Choice
+                            id={`sides-${index}`}
+                            className="mini"
+                            label="Sides"
+                            groupLabel={`Sides for ${part.name}`}
+                            value={own.duplex ? 'duplex' : 'single'}
+                            options={[{ value: 'single', label: 'One' }, { value: 'duplex', label: 'Both' }]}
+                            onChange={(v) => setFile(part.fileId, { duplex: v === 'duplex' })}
+                          />
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <>
+                <Choice
+                  label="Ink"
+                  value={specs.color ? 'color' : 'bw'}
+                  options={[{ value: 'bw', label: 'Black & white' }, { value: 'color', label: 'Colour', disabled: !colorAvailable }]}
+                  onChange={(v) => set('color', v === 'color')}
+                  describedBy={inkNote ? 'color-hint' : undefined}
+                />
+                {inkNote && <p id="color-hint" className="field-help choice-help">{inkNote}</p>}
+                {opts.duplexEnabled && (
+                  <Choice
+                    label="Sides"
+                    value={specs.duplex ? 'duplex' : 'single'}
+                    options={[{ value: 'single', label: 'One side' }, { value: 'duplex', label: 'Both sides' }]}
+                    onChange={(v) => set('duplex', v === 'duplex')}
+                  />
+                )}
+              </>
             )}
+            {perFileOn && inkNote && <p className="field-help">{inkNote}</p>}
 
             {opts.bindings.length > 0 && (bindingOptions.length <= 3 ? (
               <Choice label="Binding" value={specs.binding ?? 'none'} options={bindingOptions} onChange={(v) => set('binding', v === 'none' ? null : v)} />
@@ -430,7 +550,7 @@ export default function NewJob() {
               pending={pending}
               excluded={excluded}
               onChange={(next) => setExcluded(slug, next)}
-              grayscale={!specs.color}
+              grayFiles={grayFiles}
               docFileId={docFileId}
             />
           </Suspense>

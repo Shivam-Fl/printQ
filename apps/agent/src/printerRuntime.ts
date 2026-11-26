@@ -84,8 +84,10 @@ export async function sendToPrinter(pdfPath: string, options: PrintOptions): Pro
   const delayMs = Math.max(0, Math.min(30_000, Number(process.env.PRINTQ_SIM_DELAY_MS ?? 800)));
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-  if (process.env.PRINTQ_SIM_FAIL_FIRST === 'true' && !failedOnce.has(options.jobId)) {
-    failedOnce.add(options.jobId);
+  // one simulated jam per ORDER: the parts of a per-file order share its job id
+  const orderId = options.jobId.replace(/-part\d+$/, '');
+  if (process.env.PRINTQ_SIM_FAIL_FIRST === 'true' && !failedOnce.has(orderId)) {
+    failedOnce.add(orderId);
     throw new Error('simulated printer jam on first attempt');
   }
 }

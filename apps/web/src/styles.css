@@ -1082,6 +1082,32 @@ div.role-card:hover { border-color: var(--rule); box-shadow: var(--shadow-1); }
 .files-add { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
 .files-hint { flex-basis: 100%; color: var(--pencil); font-size: .8rem; }
 
+.device-update { margin: 0; padding: 10px 12px; border: 1px solid var(--warn-line); border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn-ink); font-size: .85rem; line-height: 1.45; }
+.device-update a { color: var(--warn-ink); font-weight: 700; text-decoration: underline; }
+
+/* different settings per file */
+.file-note { display: block; margin-top: 2px; color: var(--stamp-dark); font-size: .78rem; font-weight: 600; }
+.file-settings { display: grid; gap: var(--sp-2); margin: calc(-1 * var(--sp-2)) 0 0; padding: 0; list-style: none; }
+.file-setting { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--paper-sunk); }
+.file-setting.unused { opacity: .6; }
+.file-setting-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.file-setting-head strong { flex: 1; min-width: 0; overflow: hidden; font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
+.file-setting-head .dim { flex: none; font-size: .8rem; }
+.file-setting-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
+.file-setting-controls > * { flex: 1 1 130px; min-width: 0; }
+.file-setting-controls > .mini-field { flex: 0 0 auto; }
+.mini-field .field-label, .choice.mini .field-label { margin-bottom: 4px; color: var(--pencil); font-size: .75rem; }
+.stepper.small { gap: 4px; }
+.stepper.small button { width: 38px; min-height: 46px; font-size: 1.05rem; }
+.stepper.small input { width: 52px; min-height: 46px; padding: 6px 4px; }
+.choice.mini .seg { padding: 3px; gap: 3px; }
+.choice.mini .seg button { min-height: 38px; padding: 6px 8px; font-size: .86rem; }
+.part-list { display: grid; gap: 8px; margin: 0 0 var(--sp-3); padding: 0; list-style: none; }
+.part-list li { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: .92rem; }
+.part-text { display: grid; min-width: 0; }
+.part-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-text .dim { font-size: .82rem; }
+
 /* the pages of the order: tap to skip / print */
 .checkout-side { position: sticky; top: var(--sp-4); display: grid; gap: var(--sp-4); min-width: 0; }
 .pages-card { display: grid; min-width: 0; overflow: hidden; overflow: clip; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--paper); box-shadow: var(--shadow-1); }

@@ -1,4 +1,4 @@
-import { parsePageRange, type QueueBand } from '@printq/shared';
+import { formatPageList, parsePageRange, type QueueBand } from '@printq/shared';
 
 /**
  * A page range short enough to read ("1-4, 9"), or the count of chosen pages
@@ -11,6 +11,50 @@ export function compactRange(range: string): string {
   } catch {
     return 'chosen';
   }
+}
+
+export interface PartLite {
+  pages: string;
+  copies: number;
+  color: boolean;
+  duplex: boolean;
+}
+
+/** One file's run in a few words: "Colour ×2, both sides". */
+export function partPhrase(part: PartLite): string {
+  return `${part.color ? 'Colour' : 'B/W'} ×${part.copies}${part.duplex ? ', both sides' : ''}`;
+}
+
+/**
+ * The file each print run comes from (by where its first page sits in the
+ * joined document; files with no chosen page have no run), with the run's
+ * pages counted inside that file: "All 6 pages", "Pages 1-3", "Page 2".
+ * Null when the file names are gone (deleted after printing).
+ */
+export function runFiles(
+  runs: readonly PartLite[],
+  files: readonly { name: string; pages: number }[] | null | undefined,
+): ({ name: string; pages: string } | null)[] {
+  return runs.map((run) => {
+    let doc: number[];
+    try {
+      doc = parsePageRange(run.pages, Number.MAX_SAFE_INTEGER);
+    } catch {
+      return null;
+    }
+    let offset = 0;
+    for (const file of files ?? []) {
+      if (doc[0]! > offset && doc[0]! <= offset + file.pages) {
+        const own = doc.map((page) => page - offset);
+        const pages = own.length === file.pages
+          ? `All ${file.pages} page${file.pages === 1 ? '' : 's'}`
+          : `${own.length === 1 ? 'Page' : 'Pages'} ${compactRange(formatPageList(own))}`;
+        return { name: file.name, pages };
+      }
+      offset += file.pages;
+    }
+    return null;
+  });
 }
 
 /** "pages 1-4" or "23 chosen pages", for one-line order summaries. */
@@ -86,9 +130,19 @@ export interface SpecsLite {
   duplex: boolean;
   binding: string | null;
   pageRange: string | null;
+  /** different settings per file */
+  parts?: PartLite[] | null;
 }
 
 export function specsText(s: SpecsLite, pagesPerCopy?: number): string {
+  if (s.parts?.length) {
+    // a per-file order: pagesPerCopy already counts every printed page
+    return (
+      `${s.paperSize} · ${s.parts.length} files: ${s.parts.map(partPhrase).join(' + ')}` +
+      `${s.binding ? ` · ${s.binding.replace('_', ' ')}` : ''}` +
+      `${pagesPerCopy ? ` · ${pagesPerCopy}pp` : ''}`
+    );
+  }
   return (
     `${s.copies}× ${s.paperSize} · ${s.color ? 'Colour' : 'B/W'}` +
     `${s.duplex ? ' · both sides' : ''}` +

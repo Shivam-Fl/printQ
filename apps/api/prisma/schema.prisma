@@ -525,6 +525,9 @@ model Agent {
   /// Random id of the agent PROCESS currently running (regenerated on every
   /// start). Null = a legacy agent that does not send one.
   sessionId           String?
+  /// What this PC's app can do, from its x-agent-features header (e.g.
+  /// "print-parts" = different settings per file). Empty = an older app.
+  features            String[]    @default([])
   createdAt           DateTime    @default(now())
 
   @@index([shopId])

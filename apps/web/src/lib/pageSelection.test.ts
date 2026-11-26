@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compileRange,
+  fileRanges,
   excludedFromRange,
   orderPages,
   partSelectedCount,
@@ -62,5 +63,20 @@ describe('page-by-page selection over a multi-file order', () => {
     const range = compileRange([big], excluded)!;
     expect(range.startsWith('1,3,5')).toBe(true);
     expect(rangeProblem(range)).toBeNull(); // every other page of 500 still fits
+  });
+});
+
+describe('per-file print runs', () => {
+  it('gives each file its chosen pages over the joined document, skipping empty files', () => {
+    expect(fileRanges([notes, cover, lab], {})).toEqual([
+      { fileId: 'a', pages: '1-4' },
+      { fileId: 'b', pages: '5' },
+      { fileId: 'c', pages: '6-8' },
+    ]);
+    const choice = setPartPages(togglePage({}, 'a', 2), cover, false);
+    expect(fileRanges([notes, cover, lab], choice)).toEqual([
+      { fileId: 'a', pages: '1,3-4' },
+      { fileId: 'c', pages: '6-8' },
+    ]);
   });
 });

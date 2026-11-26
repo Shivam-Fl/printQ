@@ -6,11 +6,14 @@ import {
   couponCodeSchema,
   createJobSchema,
   jobSpecsSchema,
+  normalizeJobSpecs,
   unsupportedSpecs,
   type JobSpecs,
   type PriceBreakdown,
+  type UnsupportedSpec,
 } from '@printq/shared';
 import { shopOptions } from '../../lib/shopOptions.js';
+import { readParts } from '../../lib/fileParts.js';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../../lib/errors.js';
 import { param } from '../../lib/http.js';
@@ -51,7 +54,7 @@ const DUPLICATE_ORDER_MESSAGE =
 import { z } from 'zod';
 import { decryptReleaseCode } from '../../lib/otp.js';
 import { env } from '../../config/env.js';
-import { isShopOperationalFrom } from '../shops/availability.js';
+import { isShopOperationalFrom, supportsPrintParts } from '../shops/availability.js';
 import { canPrintForStudents } from '../../lib/simulatorPrinters.js';
 import { isCounterCodeAvailable } from '../queue/visibility.js';
 import { STUDENT_PRINT_PROBLEM_MESSAGE } from '../../lib/printProblem.js';
@@ -78,7 +81,7 @@ function loadFileForOrder(fileId: string, studentId: string) {
     include: {
       shop: {
         include: {
-          agents: { where: { status: 'online' }, select: { connectedPrinterIds: true } },
+          agents: { where: { status: 'online' }, select: { connectedPrinterIds: true, features: true } },
           printers: {
             select: { id: true, status: true, osPrinterName: true, paperSizesLoaded: true, colorSupport: true, finishingOptions: true },
           },
@@ -90,16 +93,31 @@ function loadFileForOrder(fileId: string, studentId: string) {
 
 const SHOP_PAUSED_MESSAGE = 'This shop has paused new orders or has no connected printer. Try again when it reopens.';
 
+type OrderFile = NonNullable<Awaited<ReturnType<typeof loadFileForOrder>>>;
+
+/** What the shop cannot produce for these (normalized) specs, told to the student before ordering. */
+function orderProblems(file: OrderFile, specs: JobSpecs): UnsupportedSpec[] {
+  const problems = unsupportedSpecs(file.shop.printers.filter((printer) => canPrintForStudents(printer)), specs);
+  if (specs.parts?.length && !supportsPrintParts(file.shop.agents)) {
+    problems.push({
+      code: 'per_file',
+      message: 'This shop prints every file with the same settings right now. Choose “Same for all files”.',
+    });
+  }
+  return problems;
+}
+
 /** Live price quote — server-computed from the shop's rate card, never client math. */
 jobsRouter.post(
   '/quote',
   requireStudent,
   validateBody(z.object({ fileId: z.uuid(), specs: jobSpecsSchema, couponCode: couponCodeSchema.optional() })),
   asyncHandler(async (req, res) => {
-    const { fileId, specs, couponCode } = req.body as { fileId: string; specs: JobSpecs; couponCode?: string };
+    const { fileId, couponCode } = req.body as { fileId: string; specs: JobSpecs; couponCode?: string };
     const file = await loadFileForOrder(fileId, req.student!.id);
     if (!file || file.pages == null) throw notFound('File not ready');
     if (!isShopOperationalFrom(file.shop)) throw conflict(SHOP_PAUSED_MESSAGE);
+    const specs = normalizeJobSpecs((req.body as { specs: JobSpecs }).specs, file.pages);
 
     let breakdown = applyPlatformMarkup(
       computePrice(specs, file.pages, shopOptions(file.shop)),
@@ -109,7 +127,7 @@ jobsRouter.post(
     // Student-facing pricing is intentionally one final amount. The shop base,
     // platform markup and line-item split remain private server-side data.
     // Hardware capability is checked here, not first at the counter: the student is told now.
-    const unsupported = unsupportedSpecs(file.shop.printers.filter((printer) => canPrintForStudents(printer)), specs);
+    const unsupported = orderProblems(file, specs);
     res.json({
       quote: { pagesPerCopy: breakdown.pagesPerCopy, totalPaise: breakdown.totalPaise },
       pages: file.pages,
@@ -128,7 +146,7 @@ jobsRouter.post(
   requireStudent,
   validateBody(createJobSchema),
   asyncHandler(async (req, res) => {
-    const { fileId, specs, mode, scheduledTime, couponCode } = req.body as {
+    const { fileId, specs: requestedSpecs, mode, scheduledTime, couponCode } = req.body as {
       fileId: string;
       specs: JobSpecs;
       mode: 'instant' | 'scheduled';
@@ -199,7 +217,9 @@ jobsRouter.post(
     assertFileCanBackNewJobFrom(file, fileJobs.some(isPrintedFileJob));
 
     if (!isShopOperationalFrom(file.shop)) throw conflict(SHOP_PAUSED_MESSAGE);
-    const unsupported = unsupportedSpecs(file.shop.printers.filter((printer) => canPrintForStudents(printer)), specs);
+    // the stored specs are the server's normalized plan, never the client's summaries
+    const specs = normalizeJobSpecs(requestedSpecs, file.pages);
+    const unsupported = orderProblems(file, specs);
     if (unsupported.length > 0) throw conflict(unsupported.map((u) => u.message).join(' '));
     const shopBase = computePrice(specs, file.pages, shopOptions(file.shop));
     let breakdown = applyPlatformMarkup(shopBase, env.PLATFORM_MARKUP_BPS);
@@ -335,12 +355,12 @@ jobsRouter.get(
             counterUpiVerifiedAt: true,
           },
         },
-        file: { select: { originalName: true, pages: true } },
+        file: { select: { originalName: true, pages: true, parts: true } },
       },
     });
     if (!job) throw notFound();
     const live = await getJobLiveMetrics(job.id);
-    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, printError, ...safeJob } = job;
+    const { releaseCodeEncrypted, shopId, revealedAt, absentAt, shop, printError, file, ...safeJob } = job;
     const safeShop = {
       name: shop.name,
       slug: shop.slug,
@@ -359,6 +379,12 @@ jobsRouter.get(
     res.json({
       job: {
         ...safeJob,
+        // the student's own file names, in print order, for an order made of several files
+        file: {
+          originalName: file.originalName,
+          pages: file.pages,
+          parts: readParts(file.parts)?.map((part) => ({ name: part.name, pages: part.pages })) ?? null,
+        },
         // Raw agent/driver text is never exposed: a fixed, friendly student message only.
         printError: printError ? STUDENT_PRINT_PROBLEM_MESSAGE : null,
         shop: safeShop,

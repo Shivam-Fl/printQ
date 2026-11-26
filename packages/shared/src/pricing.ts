@@ -1,5 +1,5 @@
-import type { JobSpecs, PriceBreakdown, PrintOptions, ResolvedCoupon } from './types.js';
-import { countSelectedPages } from './pageRange.js';
+import type { JobSpecs, PriceBreakdown, PriceLine, PrintOptions, PrintPart, ResolvedCoupon } from './types.js';
+import { countSelectedPages, formatPageList, parsePageRange } from './pageRange.js';
 
 /** Sensible starting options for a new shop (owner edits these in Settings). */
 export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
@@ -17,6 +17,54 @@ export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 export class PricingError extends Error {}
 
 /**
+ * The validated per-part plan of an order, or null for one-setting orders.
+ * Every part must name pages inside the document, and no page may be in two
+ * parts. Throws PricingError otherwise.
+ */
+export function printPlan(specs: Pick<JobSpecs, 'parts'>, totalPages: number): PrintPart[] | null {
+  const parts = specs.parts;
+  if (!parts || parts.length === 0) return null;
+  const seen = new Set<number>();
+  for (const part of parts) {
+    let pages: number[];
+    try {
+      pages = parsePageRange(part.pages, totalPages);
+    } catch {
+      throw new PricingError('Some selected pages are not in this order');
+    }
+    for (const page of pages) {
+      if (seen.has(page)) throw new PricingError('A page can only be printed with one set of settings');
+      seen.add(page);
+    }
+  }
+  return parts;
+}
+
+/**
+ * The specs the server stores for a job. For a per-part order the order-level
+ * fields become summaries (any colour, any two-sided, every chosen page,
+ * copies 1), so hardware checks, queue estimates and older readers stay right.
+ */
+export function normalizeJobSpecs(specs: JobSpecs, totalPages: number): JobSpecs {
+  const plan = printPlan(specs, totalPages);
+  const { parts: _parts, ...rest } = specs;
+  if (!plan) return rest;
+  const pages = new Set(plan.flatMap((part) => parsePageRange(part.pages, totalPages)));
+  return {
+    ...rest,
+    copies: 1,
+    color: plan.some((part) => part.color),
+    duplex: plan.some((part) => part.duplex),
+    pageRange: pages.size === totalPages ? null : formatPageList(pages),
+    parts: plan.map((part) => ({ pages: formatPageList(parsePageRange(part.pages, totalPages)), copies: part.copies, color: part.color, duplex: part.duplex })),
+  };
+}
+
+/** The shared per-page rate of some lines, or 0 when they differ. */
+const sharedRate = (lines: PriceLine[]): number =>
+  lines.every((line) => line.perPagePaise === lines[0]?.perPagePaise) ? (lines[0]?.perPagePaise ?? 0) : 0;
+
+/**
  * Server-side price computation. The client only sends specs (paper/binding
  * ids); this function, with the shop's PrintOptions, is the single authority
  * for what a job costs. Throws PricingError if the specs reference an option
@@ -30,11 +78,34 @@ export function computePrice(
   const paper = options.papers.find((p) => p.id === specs.paperSize);
   if (!paper) throw new PricingError(`This shop doesn't offer "${specs.paperSize}" paper`);
 
-  const perPagePaise = specs.color ? paper.colorPaise : paper.bwPaise;
-  if (perPagePaise == null) throw new PricingError(`${paper.label} is available in black & white only`);
+  const rate = (color: boolean): number => {
+    const paise = color ? paper.colorPaise : paper.bwPaise;
+    if (paise == null) throw new PricingError(`${paper.label} is available in black & white only`);
+    return paise;
+  };
 
-  const pagesPerCopy = countSelectedPages(specs.pageRange, totalPages);
-  const pagesTotalPaise = perPagePaise * pagesPerCopy * specs.copies;
+  const plan = printPlan(specs, totalPages);
+  let lines: PriceLine[] | undefined;
+  let perPagePaise: number;
+  let pagesPerCopy: number;
+  let copies: number;
+  let pagesTotalPaise: number;
+  if (plan) {
+    lines = plan.map((part) => {
+      const pages = countSelectedPages(part.pages, totalPages);
+      const perPage = rate(part.color);
+      return { pages, copies: part.copies, color: part.color, perPagePaise: perPage, totalPaise: perPage * pages * part.copies };
+    });
+    perPagePaise = sharedRate(lines);
+    pagesPerCopy = lines.reduce((sum, line) => sum + line.pages * line.copies, 0);
+    copies = 1;
+    pagesTotalPaise = lines.reduce((sum, line) => sum + line.totalPaise, 0);
+  } else {
+    perPagePaise = rate(specs.color);
+    pagesPerCopy = countSelectedPages(specs.pageRange, totalPages);
+    copies = specs.copies;
+    pagesTotalPaise = perPagePaise * pagesPerCopy * copies;
+  }
 
   let bindingPaise = 0;
   let bindingLabel: string | null = null;
@@ -48,13 +119,14 @@ export function computePrice(
   return {
     paperLabel: paper.label,
     pagesPerCopy,
-    copies: specs.copies,
+    copies,
     perPagePaise,
     pagesTotalPaise,
     bindingLabel,
     bindingPaise,
     discountPaise: 0,
     totalPaise: pagesTotalPaise + bindingPaise,
+    ...(lines ? { lines } : {}),
   };
 }
 
@@ -68,9 +140,26 @@ export function applyPlatformMarkup(base: PriceBreakdown, markupBps: number): Pr
     throw new PricingError('Platform markup must be between 0% and 100%');
   }
   const multiplier = (10_000 + markupBps) / 10_000;
+  const bindingPaise = Math.round(base.bindingPaise * multiplier);
+  if (base.lines) {
+    // each run is marked up per page, so every line still multiplies exactly
+    const lines = base.lines.map((line) => {
+      const perPage = Math.round(line.perPagePaise * multiplier);
+      return { ...line, perPagePaise: perPage, totalPaise: perPage * line.pages * line.copies };
+    });
+    const pagesTotalPaise = lines.reduce((sum, line) => sum + line.totalPaise, 0);
+    return {
+      ...base,
+      lines,
+      perPagePaise: sharedRate(lines),
+      pagesTotalPaise,
+      bindingPaise,
+      discountPaise: 0,
+      totalPaise: pagesTotalPaise + bindingPaise,
+    };
+  }
   const perPagePaise = Math.round(base.perPagePaise * multiplier);
   const pagesTotalPaise = perPagePaise * base.pagesPerCopy * base.copies;
-  const bindingPaise = Math.round(base.bindingPaise * multiplier);
   return {
     ...base,
     perPagePaise,

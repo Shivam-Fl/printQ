@@ -767,6 +767,72 @@ async function main() {
   const openStorefrontAgain = await request(`/api/public/shops/${shopSlug}`);
   assert(openStorefrontAgain.data.shop?.open === true, 'reopened storefront is visible to students again');
 
+  console.log('\nDifferent settings per file');
+  assert(openStorefrontAgain.data.shop?.options?.perFileSettings === true, 'a shop whose PC app prints parts offers settings per file');
+  const perFileId = await uploadOrder(studentToken, shopSlug, [
+    { pages: 2, name: 'per-file-notes.pdf' },
+    { pages: 1, name: 'per-file-cover.pdf' },
+  ]);
+  const perFileSpecs = {
+    copies: 1, paperSize: 'A4', color: false, duplex: false, binding: null, pageRange: null,
+    parts: [
+      { pages: '1-2', copies: 2, color: false, duplex: true },
+      { pages: '3', copies: 1, color: true, duplex: false },
+    ],
+  };
+  const perFileQuote = await request('/api/jobs/quote', { method: 'POST', token: studentToken, body: { fileId: perFileId, specs: perFileSpecs } });
+  assert(perFileQuote.status === 200 && perFileQuote.data.quote.pagesPerCopy === 5 && !perFileQuote.data.unsupported, 'per-file quote counts every printed page (2 x 2 + 1)');
+  const perFileJobId = await createPayAtShop(studentToken, perFileId, perFileSpecs);
+  await waitFor('prepared per-file order', async () => {
+    const result = await request(`/api/jobs/${perFileJobId}`, { token: studentToken });
+    return result.data.job?.status === 'awaiting_arrival' ? result.data.job : null;
+  });
+  const perFileCheckIn = await request(`/api/jobs/${perFileJobId}/check-in`, { method: 'POST', token: studentToken, body: arrivalProof() });
+  assert(perFileCheckIn.status === 200, 'per-file order checks in like any other');
+  const perFileLive = await request(`/api/jobs/${perFileJobId}`, { token: studentToken });
+  assert(perFileLive.data.job.file?.parts?.map((part) => part.name).join(',') === 'per-file-notes.pdf,per-file-cover.pdf', 'student order shows its own file names in print order');
+  const perFileRelease = { otp: perFileLive.data.job.otpCode };
+  let perFilePrompt = await request('/api/shop/release', { method: 'POST', token: shopToken, body: perFileRelease });
+  if (perFilePrompt.data.requiresQueueOverride) {
+    perFileRelease.overrideQueue = true;
+    perFilePrompt = await request('/api/shop/release', { method: 'POST', token: shopToken, body: perFileRelease });
+  }
+  if (perFilePrompt.data.requiresManualAssignment) {
+    perFileRelease.printerId = perFilePrompt.data.eligiblePrinters?.[0]?.printerId;
+    perFilePrompt = await request('/api/shop/release', { method: 'POST', token: shopToken, body: perFileRelease });
+  }
+  const perFileReleased = await request('/api/shop/release', {
+    method: 'POST', token: shopToken,
+    body: {
+      ...perFileRelease,
+      paymentConfirmation: { method: 'cash' },
+      ...(perFilePrompt.data.selectedPrinterId ? { printerId: perFilePrompt.data.selectedPrinterId } : {}),
+    },
+  });
+  assert(perFileReleased.status === 200 && perFileReleased.data.ok, 'staff releases a per-file order after cash confirmation');
+  await waitFor('per-file simulated jam', async () => {
+    const result = await request(`/api/jobs/${perFileJobId}`, { token: studentToken });
+    return result.data.job?.status === 'otp_verified' && result.data.job?.printError;
+  });
+  assert((await request(`/api/shop/jobs/${perFileJobId}/retry-print`, { method: 'POST', token: shopToken, body: {} })).status === 200, 'a per-file order recovers from a jam as one order');
+  await waitFor('per-file print completion', async () => {
+    const result = await request(`/api/jobs/${perFileJobId}`, { token: studentToken });
+    return result.data.job?.status === 'ready_for_pickup';
+  });
+  const runs = await Promise.all([1, 2].map(async (n) => ({
+    pdf: await PDFDocument.load(await readFile(path.join(outputDir, `${perFileJobId}-part${n}.pdf`))),
+    options: JSON.parse(await readFile(path.join(outputDir, `${perFileJobId}-part${n}.print-options.json`), 'utf8')),
+  })));
+  assert(
+    runs[0].pdf.getPageCount() === 2 && runs[0].options.copies === 2 && runs[0].options.duplex === true && runs[0].options.color === false,
+    'the PC app prints file 1 on its own: 2 pages, 2 copies, both sides, black & white',
+  );
+  assert(
+    runs[1].pdf.getPageCount() === 1 && runs[1].options.copies === 1 && runs[1].options.duplex === false && runs[1].options.color === true,
+    'then file 2 with its own settings: 1 page in colour',
+  );
+  await request(`/api/shop/jobs/${perFileJobId}/handover`, { method: 'POST', token: shopToken });
+
   console.log(`\nE2E SIMULATOR PASSED — ${assertions} assertions ✓`);
 }
 
